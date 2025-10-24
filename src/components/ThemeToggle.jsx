@@ -34,9 +34,9 @@ const ThemeToggle = () => {
       title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
     >
       {theme === 'light' ? (
-        <span className="icon">🌙</span>
-      ) : (
         <span className="icon">☀️</span>
+      ) : (
+        <span className="icon">🌙</span>
       )}
     </button>
   )
