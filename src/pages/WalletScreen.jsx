@@ -158,9 +158,24 @@ const WalletScreen = () => {
     ))}
   </div>
 </section>
+ <footer className="app-footer">
+  <a
+    href="https://hfvprotocol.org/"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="footer-content"
+  >
+    <img
+      src="/logo/hfv-logo.png"
+      alt="HFV Logo"
+      className="footer-logo"
+    />
+    <p>© 2022–2025 HFV Protocol Technologies Limited · Transparent by Design</p>
+  </a>
+</footer>
             </div>
           </div>
-        </div>
+        </div>   
   )
 }
 
