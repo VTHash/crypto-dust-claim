@@ -1,0 +1,32 @@
+.theme-toggle {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: all 0.3s ease;
+}
+
+.theme-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 15px color-mix(in oklab, var(--accent) 40%, transparent);
+}
+
+.theme-toggle .icon {
+  font-size: 1.2rem;
+  transition: transform 0.3s ease;
+}
+
+.theme-toggle.light .icon {
+  transform: rotate(0deg);
+}
+
+.theme-toggle.dark .icon {
+  transform: rotate(180deg);
+}
