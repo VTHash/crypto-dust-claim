@@ -200,3 +200,47 @@ button:focus-visible {
   flex-wrap: wrap;
   gap: .75rem;
 }
+
+.app-footer {
+  text-align: center;
+  padding: 1rem 0;
+  margin-top: 2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(4px);
+}
+
+.footer-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.85rem;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.3px;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+.footer-logo {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 5px rgba(0, 255, 150, 0.6));
+  animation: footer-glow 4s ease-in-out infinite alternate;
+}
+
+.footer-content:hover {
+  color: #00ff9a;
+  text-shadow: 0 0 8px rgba(0, 255, 150, 0.9);
+  transform: translateY(-1px);
+}
+
+.footer-content:hover .footer-logo {
+  filter: drop-shadow(0 0 10px rgba(0, 255, 150, 1));
+}
+
+@keyframes footer-glow {
+  from { filter: drop-shadow(0 0 3px rgba(0, 255, 150, 0.4)); }
+  to { filter: drop-shadow(0 0 8px rgba(0, 255, 150, 0.9)); }
+}
