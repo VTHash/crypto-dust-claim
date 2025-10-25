@@ -129,17 +129,51 @@ const WalletScreen = () => {
       </section>
 
       {/* FOOTER */}
-      <footer className="app-footer">
-        <a
-          href="https://hfvprotocol.org/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="footer-content"
-        >
-          <img src="/logo/hfv-logo.png" alt="HFV Logo" className="footer-logo" />
-          <p>© 2022–2025 HFV Protocol Technologies Limited · Transparent by Design</p>
-        </a>
-      </footer>
+     <footer className="app-footer">
+  <div className="footer-content">
+    <a
+      href="https://hfvprotocol.org/"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="footer-brand"
+    >
+      <img
+        src="/logo/hfv-logo.png"
+        alt="HFV Logo"
+        className="footer-logo"
+      />
+      <p>© 2022–2025 HFV Protocol Technologies Limited • Transparent by Design</p>
+    </a>
+
+    <div className="footer-links">
+      <a
+        href="https://github.com/VTHash/crypto-dust-claim"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="View Source on GitHub"
+      >
+        <img
+          src="/logo/github-mark.png"
+          alt="GitHub"
+          className="footer-icon"
+        />
+      </a>
+
+      <a
+        href="https://x.com/HFVProtocol"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Follow us on X (Twitter)"
+      >
+        <img
+          src="/logo/X.png"
+          alt="Twitter"
+          className="footer-icon"
+        />
+      </a>
+    </div>
+  </div>
+</footer>
     </main>
   )
 }
