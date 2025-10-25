@@ -8,71 +8,77 @@ const toHexChainId = (id) => '0x' + Number(id).toString(16)
 // --- AppKit (single instance) ---
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
-  networks: reownNetworks, // array from @reown/appkit/networks
+  networks: reownNetworks,
   metadata,
   projectId
 })
 
-// Internal state
-let eip1193 = null // AppKit gives an EIP-1193 provider after connect
-let browserProvider = null
-let signer = null
-let accounts = []
-let chainId = null
+// ---- internal state ----
+let eip1193 = null // EIP-1193 provider from AppKit
+let browserProvider = null // ethers.BrowserProvider
+let signer = null // ethers.Signer
+let accounts = [] // string[]
+let chainId = null // hex string like "0x1"
 
-// Event callbacks (wired by WalletContext)
+// callbacks wired from context/UI
 let onAccChanged = null
 let onChainChanged = null
-let onDisconnect = null
+let onDisconnected = null
+
+function handleAccounts(accs = []) {
+  accounts = Array.isArray(accs) ? accs : []
+  if (onAccChanged) onAccChanged(accounts)
+}
+
+function handleChain(hexId) {
+  chainId = hexId
+  if (onChainChanged) onChainChanged(hexId)
+}
+
+function handleDisconnect(err) {
+  accounts = []
+  chainId = null
+  signer = null
+  browserProvider = null
+  if (onDisconnected) onDisconnected(err)
+}
 
 function attachListeners() {
   if (!eip1193) return
   eip1193.removeListener?.('accountsChanged', handleAccounts)
   eip1193.removeListener?.('chainChanged', handleChain)
-  eip1193.removeListener?.('disconnect', handleDisc)
+  eip1193.removeListener?.('disconnect', handleDisconnect)
+
   eip1193.on?.('accountsChanged', handleAccounts)
   eip1193.on?.('chainChanged', handleChain)
-  eip1193.on?.('disconnect', handleDisc)
+  eip1193.on?.('disconnect', handleDisconnect)
 }
 
-function handleAccounts(accs) {
-  accounts = Array.isArray(accs) ? accs : []
-  onAccChanged && onAccChanged(accounts)
-}
-function handleChain(hexId) {
-  chainId = hexId
-  onChainChanged && onChainChanged(hexId)
-}
-function handleDisc(err) {
-  accounts = []
-  chainId = null
-  signer = null
-  browserProvider = null
-  onDisconnect && onDisconnect(err)
-}
-
-// Public API used by WalletContext
 const walletService = {
-  // expose AppKit if you need to open the modal yourself elsewhere
+  // -------- getters / helpers --------
   getAppKit: () => appKit,
+  async getProvider() { return eip1193 },
+  async getBrowserProvider() { return browserProvider },
+  async getSigner() { return signer },
+  async getAddress() { return accounts?.[0] ?? null },
+  async getChainId() { return chainId },
+  async isConnected() { return !!(accounts?.length && signer) },
+  openModal() { return appKit.open?.() },
+  closeModal() { return appKit.close?.() },
 
+  // -------- lifecycle --------
   async init() {
-    // Nothing heavy to do here; AppKit instance is already created.
+    // nothing heavy; instance is created above
     return
   },
 
   async connect() {
     try {
-      // Open the modal – user picks a wallet/chain
-      await appKit.open()
+      await appKit.open() // user picks wallet/chain
 
-      // Once connected, get the EIP-1193 provider
-      eip1193 = await appKit.getProvider() // provided by EthersAdapter
-      if (!eip1193) {
-        return { success: false, error: 'No provider from AppKit' }
-      }
+      eip1193 = await appKit.getProvider()
+      if (!eip1193) return { success: false, error: 'No provider from AppKit' }
 
-      // Wrap with ethers
       browserProvider = new ethers.BrowserProvider(eip1193)
       signer = await browserProvider.getSigner()
 
@@ -81,12 +87,7 @@ const walletService = {
 
       attachListeners()
 
-      return {
-        success: true,
-        accounts,
-        chainId,
-        address: accounts[0] ?? null
-      }
+      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
     } catch (err) {
       return { success: false, error: err?.message || 'Connect failed' }
     }
@@ -94,17 +95,17 @@ const walletService = {
 
   async disconnect() {
     try {
-      // Close session (AppKit handles supported connectors)
       await appKit.disconnect?.()
     } finally {
-      handleDisc()
+      handleDisconnect()
     }
     return { success: true }
   },
 
+  // -------- actions --------
   async getAccounts() {
+    if (!eip1193) return []
     try {
-      if (!eip1193) return []
       return await eip1193.request({ method: 'eth_accounts' })
     } catch {
       return []
@@ -130,8 +131,8 @@ const walletService = {
         const res = await this.connect()
         if (!res.success) return { success: false, error: res.error }
       }
-      const sig = await signer.signMessage(message)
-      return { success: true, signature: sig }
+      const signature = await signer.signMessage(message)
+      return { success: true, signature }
     } catch (err) {
       return { success: false, error: err?.message || 'Sign failed' }
     }
@@ -140,6 +141,7 @@ const walletService = {
   async switchChain(targetId) {
     if (!eip1193) return { success: false, error: 'Wallet not connected' }
     const hex = toHexChainId(targetId)
+
     try {
       await eip1193.request({
         method: 'wallet_switchEthereumChain',
@@ -150,6 +152,7 @@ const walletService = {
       if (err?.code === 4902) {
         const chain = SUPPORTED_CHAINS[targetId]
         if (!chain) return { success: false, error: 'Unsupported chain' }
+
         try {
           await eip1193.request({
             method: 'wallet_addEthereumChain',
@@ -170,15 +173,17 @@ const walletService = {
     }
   },
 
+  // -------- subscriptions --------
   onAccountsChanged(cb) { onAccChanged = cb },
   onChainChanged(cb) { onChainChanged = cb },
-  onDisconnect(cb) { onDisconnect = cb },
+  onDisconnect(cb) { onDisconnected = cb },
 
+  // -------- cleanup --------
   destroy() {
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)
       eip1193.removeListener?.('chainChanged', handleChain)
-      eip1193.removeListener?.('disconnect', handleDisc)
+      eip1193.removeListener?.('disconnect', handleDisconnect)
     }
     eip1193 = null
     browserProvider = null
