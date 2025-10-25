@@ -6,6 +6,10 @@ import batchService from '../services/batchService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './DustScanner.css'
 
+// Optional aggregator (1inch/Uni). If you don't have it yet, this import is fine;
+// calls are guarded so the app won’t crash.
+import * as dexAggregatorService from '../services/dexAggregatorService'
+
 const DustScanner = () => {
   const { address } = useWallet()
   const navigate = useNavigate()
@@ -14,6 +18,10 @@ const DustScanner = () => {
   const [dustResults, setDustResults] = useState([])
   const [totalDustValue, setTotalDustValue] = useState(0)
   const [batchSavings, setBatchSavings] = useState(null)
+  const [quickOneInchSingle, setQuickOneInchSingle] = useState(null)
+  const [quickOneInchBatch, setQuickOneInchBatch] = useState(null)
+  const [quickUniswapSingle, setQuickUniswapSingle] = useState(null)
+
   const [selectedChains, setSelectedChains] = useState(
     Object.keys(SUPPORTED_CHAINS).reduce((acc, chainId) => {
       acc[chainId] = true
@@ -25,6 +33,99 @@ const DustScanner = () => {
     if (address) scanForDust()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
+
+  const buildQuickActions = async (enriched) => {
+    // Reset first
+    setQuickOneInchSingle(null)
+    setQuickOneInchBatch(null)
+    setQuickUniswapSingle(null)
+
+    // If no aggregator service available, stop quietly
+    if (!dexAggregatorService || typeof dexAggregatorService !== 'object') return
+
+    // Find a “best candidate” token for single-swap helpers (highest USD value, if you computed it; else first)
+    const withAnyToken = enriched
+      .map(r => ({
+        ...r,
+        tokenDust: (r.tokenDust || []).map(t => ({
+          ...t,
+          // attempt a value estimate if not present
+          _usd: typeof t.usd === 'number' ? t.usd : 0
+        }))
+      }))
+      .filter(r => r.tokenDust && r.tokenDust.length > 0)
+
+    const top =
+      withAnyToken
+        .map(r => {
+          const best = [...r.tokenDust].sort((a, b) => (b._usd ?? 0) - (a._usd ?? 0))[0]
+          return best ? { chainId: r.chainId, token: best } : null
+        })
+        .filter(Boolean)[0] || null
+
+    // 1) Single token via 1inch
+    try {
+      if (top && typeof dexAggregatorService.quoteOneInchSingle === 'function') {
+        // You may change target to WETH / ETH as your service expects
+        const single = await dexAggregatorService.quoteOneInchSingle({
+          chainId: Number(top.chainId),
+          tokenIn: top.token.address,
+          amount: top.token.balance // string/decimal; service should handle decimals
+        })
+        // Expecting: { calldata, quotedMinOutWei }
+        if (single?.calldata && single?.quotedMinOutWei) {
+          setQuickOneInchSingle({
+            token: top.token.address,
+            quotedMinOutWei: single.quotedMinOutWei,
+            calldata: single.calldata
+          })
+        }
+      }
+    } catch (_) {}
+
+    // 2) Batch via 1inch
+    try {
+      if (withAnyToken.length && typeof dexAggregatorService.quoteOneInchBatch === 'function') {
+        const flat = withAnyToken.flatMap(r =>
+          r.tokenDust.map(t => ({
+            chainId: Number(r.chainId),
+            token: t.address,
+            amount: t.balance
+          }))
+        )
+
+        const batch = await dexAggregatorService.quoteOneInchBatch(flat)
+        // Expecting: { tokens, minOutsWei, datas }
+        if (batch?.tokens?.length && batch?.minOutsWei?.length && batch?.datas?.length) {
+          setQuickOneInchBatch({
+            tokens: batch.tokens,
+            minOutsWei: batch.minOutsWei,
+            datas: batch.datas
+          })
+        }
+      }
+    } catch (_) {}
+
+    // 3) Single token via Uniswap V3
+    try {
+      if (top && typeof dexAggregatorService.quoteUniswapSingle === 'function') {
+        const uni = await dexAggregatorService.quoteUniswapSingle({
+          chainId: Number(top.chainId),
+          tokenIn: top.token.address,
+          amount: top.token.balance
+        })
+        // Expecting: { fee, minOutWei, ttlSec }
+        if (uni?.minOutWei) {
+          setQuickUniswapSingle({
+            token: top.token.address,
+            fee: uni.fee ?? 3000,
+            minOutWei: uni.minOutWei,
+            ttlSec: uni.ttlSec ?? 900
+          })
+        }
+      }
+    } catch (_) {}
+  }
 
   const scanForDust = async () => {
     if (!address) return
@@ -63,7 +164,7 @@ const DustScanner = () => {
       setDustResults(enriched)
       setTotalDustValue(enriched.reduce((sum, r) => sum + (r.usdValue || 0), 0))
 
-      // try to estimate savings (optional in your service)
+      // estimate savings (optional)
       try {
         const allTokenDust = enriched.flatMap((r) => r.tokenDust)
         const savings =
@@ -74,6 +175,9 @@ const DustScanner = () => {
       } catch {
         setBatchSavings(null)
       }
+
+      // prepare quick-action payloads for ClaimScreen (optional)
+      await buildQuickActions(enriched)
     } catch (err) {
       console.error('Error scanning for dust:', err)
     } finally {
@@ -110,7 +214,6 @@ const DustScanner = () => {
         if (typeof batchService.createBatchDustClaim === 'function') {
           batchTransactions = await batchService.createBatchDustClaim(claims)
         } else {
-          // final minimal fallback: keep the route working without service
           batchTransactions = []
         }
       }
@@ -125,11 +228,15 @@ const DustScanner = () => {
           dustResults,
           totalDustValue,
           batchSavings,
+
+          // NEW: quick-action payloads (ClaimScreen shows buttons only if these exist)
+          oneInchSingle: quickOneInchSingle,
+          oneInchBatch: quickOneInchBatch,
+          uniswapSingle: quickUniswapSingle
         },
       })
     } catch (err) {
       console.error('Claim preparation error:', err)
-      // keep UX responsive; you could surface a toast here
     }
   }
 
