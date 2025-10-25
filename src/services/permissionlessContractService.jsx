@@ -1,70 +1,101 @@
 import { ethers } from 'ethers'
-import { DUSTCLAIM_ABI, DUSTCLAIM_ADDRESS } from '../config/contracts'
+import { DUSTCLAIM_ABI, getAddressForChain } from '../config/contracts'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
-import walletService from './walletService'
-import { getContractConfig } from '../config/contracts'
+import walletService from './walletService' // <— IMPORTANT: correct relative path
 
-function getAddressForChain(chainId) {
-  const addr = DUSTCLAIM_ADDRESS[Number(chainId)]
-  if (!addr) throw new Error(`DustClaim not deployed on chain ${chainId}`)
-  return addr
-}
+// --- internal helpers ---
 
-async function getSignerAndChain() {
-  // Prefer the signer you already created via AppKit + EthersAdapter
-  if (walletService?.getSigner) {
-    const signer = await walletService.getSigner()
-    if (!signer) throw new Error('No signer: connect wallet first')
-    const network = await signer.provider.getNetwork()
-    return { signer, chainId: Number(network.chainId) }
+async function requireSignerAndChain() {
+  // Signer must already exist (WalletContext handled connect)
+  const signer = await walletService.getSigner?.()
+  if (!signer) {
+    throw new Error('Wallet not connected. Please connect your wallet first.')
   }
-
-  // Fallback (shouldn’t be hit if walletService is wired)
-  const res = await walletService.connect()
-  if (!res?.success || !walletService.getSigner) {
-    throw new Error('No signer: connect wallet first')
-  }
-  const signer = await walletService.getSigner()
   const network = await signer.provider.getNetwork()
   return { signer, chainId: Number(network.chainId) }
 }
 
+function getReadonlyProvider(chainId) {
+  const rpc = SUPPORTED_CHAINS[Number(chainId)]?.rpcUrl
+  if (!rpc) throw new Error(`No RPC endpoint configured for chain ${chainId}`)
+  return new ethers.JsonRpcProvider(rpc)
+}
+
+function getDustClaimContract(chainId, signerOrProvider) {
+  const addr = getAddressForChain(chainId)
+  return new ethers.Contract(addr, DUSTCLAIM_ABI, signerOrProvider)
+}
+
+// --- service ---
+
 class PermissionlessContractService {
-  // 1) Single token via 1inch
+  /**
+   * Single token -> ETH via 1inch router calldata
+   * @param {string} token ERC20 token address
+   * @param {bigint|string|number} minReturnWei minimum ETH out (wei)
+   * @param {string} swapDataBytes 1inch API tx.data (0x…)
+   */
   async claimDust1inch(token, minReturnWei, swapDataBytes) {
-    const { signer, chainId } = await getSignerAndChain()
-    const contract = new ethers.Contract(getAddressForChain(chainId), DUSTCLAIM_ABI, signer)
-    const tx = await contract.claimDustToETH(token, minReturnWei, swapDataBytes)
+    const { signer, chainId } = await requireSignerAndChain()
+    const contract = getDustClaimContract(chainId, signer)
+
+    const tx = await contract.claimDustToETH(
+      token,
+      ethers.toBigInt(minReturnWei),
+      swapDataBytes
+    )
     const receipt = await tx.wait()
     return { success: true, txHash: tx.hash, receipt }
   }
 
-  // 2) Batch via 1inch
+  /**
+   * Batch tokens -> ETH via 1inch router calldata (up to your contract limit)
+   * @param {string[]} tokens
+   * @param {(bigint|string|number)[]} minReturnsWei
+   * @param {string[]} swapDatasBytes
+   */
   async claimDustBatch1inch(tokens, minReturnsWei, swapDatasBytes) {
-    if (tokens.length !== minReturnsWei.length || tokens.length !== swapDatasBytes.length) {
+    if (
+      tokens.length !== minReturnsWei.length ||
+      tokens.length !== swapDatasBytes.length
+    ) {
       throw new Error('Array length mismatch')
     }
-    const { signer, chainId } = await getSignerAndChain()
-    const contract = new ethers.Contract(getAddressForChain(chainId), DUSTCLAIM_ABI, signer)
-    const tx = await contract.claimDustBatchToETH(tokens, minReturnsWei, swapDatasBytes)
+    const { signer, chainId } = await requireSignerAndChain()
+    const contract = getDustClaimContract(chainId, signer)
+
+    const minOuts = minReturnsWei.map(ethers.toBigInt)
+    const tx = await contract.claimDustBatchToETH(tokens, minOuts, swapDatasBytes)
     const receipt = await tx.wait()
     return { success: true, txHash: tx.hash, receipt }
   }
 
-  // 3) Uniswap V3 path
+  /**
+   * Single token -> ETH via Uniswap V3
+   * @param {string} token
+   * @param {number} fee 500 | 3000 | 10000, etc.
+   * @param {bigint|string|number} minReturnWei
+   * @param {number} deadlineSec unix seconds
+   */
   async claimDustUniswap(token, fee, minReturnWei, deadlineSec) {
-    const { signer, chainId } = await getSignerAndChain()
-    const contract = new ethers.Contract(getAddressForChain(chainId), DUSTCLAIM_ABI, signer)
-    const tx = await contract.claimDustViaUniswap(token, fee, minReturnWei, deadlineSec)
+    const { signer, chainId } = await requireSignerAndChain()
+    const contract = getDustClaimContract(chainId, signer)
+
+    const tx = await contract.claimDustViaUniswap(
+      token,
+      Number(fee),
+      ethers.toBigInt(minReturnWei),
+      Number(deadlineSec)
+    )
     const receipt = await tx.wait()
     return { success: true, txHash: tx.hash, receipt }
   }
 
-  // Readonly provider if you need off-chain reads
+  /**
+   * Optional readonly access (off-chain reads)
+   */
   getReadonlyProvider(chainId) {
-    const rpc = SUPPORTED_CHAINS[Number(chainId)]?.rpcUrl
-    if (!rpc) throw new Error(`No RPC for chain ${chainId}`)
-    return new ethers.JsonRpcProvider(rpc)
+    return getReadonlyProvider(chainId)
   }
 }
 

@@ -40,14 +40,6 @@ export const WalletProvider = ({ children }) => {
     })
 
     // hydrate prior session
-    ;(async () => {
-      const s = await walletService.restoreSession()
-      if (!mounted || !s) return
-      setAccounts(s.accounts)
-      setAccount(s.account)
-      setChainId(s.chainId)
-      setIsConnected(true)
-    })()
 
     return () => {
       mounted = false

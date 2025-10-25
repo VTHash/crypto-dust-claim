@@ -1,9 +1,9 @@
 export const appKitConfig = {
-  projectId: process.env.EXPO_PUBLIC_PROJECT_ID, // set in .env or app.json
+  projectId: process.env.VITE_PROJECT_ID, // set in .env or app.json
   metadata: {
     name: 'DustClaim',
     description: 'Claim your crypto dust across chains',
-    url: 'https://dustclaim.xyz',
+    url: 'https://dustclaim.xyz/',
     icons: ['https://dustclaim.xyz/icon.png']
   },
   methods: [
@@ -129,4 +129,3 @@ export const SUPPORTED_CHAINS = {
   }
 };
 
-export const appkit = createAppKit(appkitConfig);
