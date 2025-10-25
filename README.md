@@ -116,3 +116,20 @@ No admin control over user funds or swaps.
 | Wallet Support | MetaMask, WalletConnect, Coinbase Wallet, Rainbow |
 | Styling | Custom CSS + Reown modal theme |
 | Deployment | Multi-Chain Ready (Ethereum mainnet + EVMs) |
+---
+
+## 🧰 Local Setup (Developers)
+
+```bash
+# Clone the repo
+git clone https://github.com/<your-org>/dustclaim.git
+cd dustclaim
+
+# Install dependencies
+npm install
+
+# Run local development
+npm run dev
+
+# Build for production
+npm run build
