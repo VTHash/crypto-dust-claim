@@ -115,18 +115,45 @@ const walletService = {
   // Open modal and connect
   async connect() {
     try {
-      await appKit.open() // user picks wallet/chain
+      // 1) Open the modal (doesn't guarantee user has finished connecting yet)
+      await appKit.open();
 
-      eip1193 = await appKit.getProvider()
-      if (!eip1193) return { success: false, error: 'No provider from AppKit' }
+      // 2) Wait for provider & accounts to become available (up to 30s)
+      const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
+        const start = Date.now();
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const val = await fn();
+          if (predicate(val)) return val;
+          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out');
+          await new Promise(r => setTimeout(r, intervalMs));
+        }
+      };
 
-      browserProvider = new ethers.BrowserProvider(eip1193)
-      signer = await browserProvider.getSigner()
+      // Wait until AppKit actually has an EIP-1193 provider
+      eip1193 = await waitFor(
+        () => appKit.getProvider(),
+        (p) => !!p
+      );
 
-      accounts = await eip1193.request({ method: 'eth_accounts' })
-      chainId = await eip1193.request({ method: 'eth_chainId' })
+      // Build ethers objects
+      browserProvider = new ethers.BrowserProvider(eip1193);
+      signer = await browserProvider.getSigner();
 
-      attachListeners()
+      // Wait until the wallet returns at least one account
+      accounts = await waitFor(
+        () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),
+        (arr) => Array.isArray(arr) && arr.length > 0
+      );
+
+      // Get chainId (hex string like "0x1")
+      chainId = await eip1193.request({ method: 'eth_chainId' });
+
+      // Hook up listeners once we’re sure we have the provider
+      attachListeners();
+
+      // Optional: small debug
+      console.debug('[walletService] connected', { accounts, chainId });
 
       return {
         success: true,
@@ -134,9 +161,11 @@ const walletService = {
         chainId,
         address: accounts[0] ?? null,
         signer
-      }
+      };
     } catch (err) {
-      return { success: false, error: err?.message || 'Connect failed' }
+      // Optional: small debug
+      console.warn('[walletService] connect error:', err?.message || err);
+      return { success: false, error: err?.message || 'Connect failed' };
     }
   },
 
