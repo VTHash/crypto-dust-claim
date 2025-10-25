@@ -24,7 +24,7 @@ const Navbar = () => {
     if (loading) return
     await disconnect()
   }
-
+const short = (a) => (a ? `${a.slice(0, 6)}...${a.slice(-4)}` : '')
   return (
     <nav className="navbar">
       {/* Brand centered */}
@@ -77,5 +77,16 @@ const Navbar = () => {
     </nav>
   )
 }
-
+function ConnDebug() {
+  const w = useWallet();
+  return (
+    <pre style={{fontSize:10, opacity:.6, marginLeft: 8}}>
+      {JSON.stringify({
+        connected: w.isConnected,
+        address: w.address,
+        chainId: w.chainId
+      }, null, 2)}
+    </pre>
+  );
+}
 export default Navbar
