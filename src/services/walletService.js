@@ -1,10 +1,16 @@
 import { createAppKit } from '@reown/appkit'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { ethers } from 'ethers'
-import { projectId, metadata, reownNetworks, SUPPORTED_CHAINS } from '../config/walletConnectConfig'
+import {
+  projectId,
+  metadata,
+  reownNetworks,
+  SUPPORTED_CHAINS
+} from '../config/walletConnectConfig'
 
-const toHexChainId = (id) => '0x' + Number(id).toString(16)
+const toHex = (id) => '0x' + Number(id).toString(16)
 
+// --- Single AppKit instance ---
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
   networks: reownNetworks,
@@ -12,24 +18,29 @@ const appKit = createAppKit({
   projectId
 })
 
-let eip1193 = null
-let browserProvider = null
-let signer = null
-let accounts = []
-let chainId = null
+// ---- internal state ----
+let eip1193 = null // EIP-1193 provider from AppKit (or window.ethereum fallback)
+let browserProvider = null // ethers.BrowserProvider
+let signer = null // ethers.Signer
+let accounts = [] // string[]
+let chainId = null // hex string like "0x1"
 
+// callbacks wired by WalletContext
 let onAccChanged = null
 let onChainChanged = null
 let onDisconnected = null
 
+// ---------- listeners ----------
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
   onAccChanged && onAccChanged(accounts)
 }
-function handleChain(cid) {
-  chainId = cid
-  onChainChanged && onChainChanged(cid)
+
+function handleChain(hexId) {
+  chainId = hexId
+  onChainChanged && onChainChanged(hexId)
 }
+
 function handleDisconnect(err) {
   accounts = []
   chainId = null
@@ -48,79 +59,168 @@ function attachListeners() {
   eip1193.on?.('disconnect', handleDisconnect)
 }
 
-async function waitForProvider() {
-  for (let i = 0; i < 20; i++) {
-    const p = await appKit.getProvider?.()
-    if (p) return p
-    await new Promise((r) => setTimeout(r, 150))
-  }
-  if (typeof window !== 'undefined' && window.ethereum) return window.ethereum
-  return null
+// ---------- core helpers ----------
+async function setProvidersFrom(provider) {
+  eip1193 = provider
+  browserProvider = new ethers.BrowserProvider(eip1193)
+  signer = await browserProvider.getSigner().catch(() => null)
+
+  // populate accounts/chain
+  accounts = await eip1193.request({ method: 'eth_accounts' }).catch(() => [])
+  chainId = await eip1193.request({ method: 'eth_chainId' }).catch(() => null)
+
+  attachListeners()
 }
 
 const walletService = {
+  // getters / utils
   getAppKit: () => appKit,
-  async getSigner() { return signer },
   async getProvider() { return eip1193 },
+  async getBrowserProvider() { return browserProvider },
+  async getSigner() { return signer },
+  async getAddress() { return accounts?.[0] ?? null },
+  async getChainId() { return chainId },
+  async isConnected() { return !!(accounts?.length && signer) },
+  openModal() { return appKit.open?.() },
+  closeModal() { return appKit.close?.() },
+
+  // lifecycle
+  async init() { return },
+
+  // Try to rebuild state if the wallet is already authorized
+  async restoreSession() {
+    try {
+      // Prefer AppKit’s provider if present
+      const kitProvider = await appKit.getProvider()
+      if (kitProvider) {
+        await setProvidersFrom(kitProvider)
+        if (accounts?.length) {
+          const addr = accounts[0]
+          return { accounts, address: addr, account: addr, chainId, signer }
+        }
+      }
+
+      // Fallback to injected provider if user connected previously
+      const injected = typeof window !== 'undefined' ? window.ethereum : null
+      if (injected) {
+        const accs = await injected.request({ method: 'eth_accounts' })
+        if (accs && accs.length) {
+          await setProvidersFrom(injected)
+          const addr = accs[0]
+          return { accounts, address: addr, account: addr, chainId, signer }
+        }
+      }
+      return null
+    } catch {
+      return null
+    }
+  },
 
   async connect() {
     try {
+      // open modal; user selects wallet/chain
       await appKit.open()
-      eip1193 = await waitForProvider()
-      if (!eip1193) return { success: false, error: 'No provider from AppKit' }
 
-      browserProvider = new ethers.BrowserProvider(eip1193)
-      signer = await browserProvider.getSigner()
+      // get provider from AppKit
+      let provider = await appKit.getProvider()
 
-      try {
-        accounts = await eip1193.request({ method: 'eth_requestAccounts' })
-      } catch {
-        accounts = await eip1193.request?.({ method: 'eth_accounts' }) ?? []
+      // mobile/injected fallback (extra safety)
+      if (!provider && typeof window !== 'undefined' && window.ethereum) {
+        provider = window.ethereum
       }
-      chainId = await eip1193.request?.({ method: 'eth_chainId' })
-      attachListeners()
+      if (!provider) return { success: false, error: 'No provider from AppKit' }
 
-      return { success: true, accounts, account: accounts[0] ?? null, chainId, signer }
+      await setProvidersFrom(provider)
+
+      const addr = accounts?.[0] ?? null
+      return {
+        success: true,
+        accounts,
+        address: addr, // important: include both keys
+        account: addr, // <- WalletContext reads this too
+        chainId,
+        signer
+      }
     } catch (err) {
       return { success: false, error: err?.message || 'Connect failed' }
     }
   },
 
   async disconnect() {
-    try { await appKit.disconnect?.() } finally { handleDisconnect() }
+    try {
+      await appKit.disconnect?.()
+    } finally {
+      handleDisconnect()
+    }
     return { success: true }
+  },
+
+  // actions
+  async sendTransaction(tx) {
+    try {
+      if (!signer) {
+        const res = await this.connect()
+        if (!res.success) return { success: false, error: res.error }
+      }
+      const resp = await signer.sendTransaction(tx)
+      return { success: true, txHash: resp.hash }
+    } catch (err) {
+      return { success: false, error: err?.message || 'Transaction failed' }
+    }
+  },
+
+  async signMessage(message) {
+    try {
+      if (!signer) {
+        const res = await this.connect()
+        if (!res.success) return { success: false, error: res.error }
+      }
+      const signature = await signer.signMessage(message)
+      return { success: true, signature }
+    } catch (err) {
+      return { success: false, error: err?.message || 'Sign failed' }
+    }
   },
 
   async switchChain(targetId) {
     if (!eip1193) return { success: false, error: 'Wallet not connected' }
-    const hex = toHexChainId(targetId)
+    const hex = toHex(targetId)
     try {
-      await eip1193.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: hex }] })
+      await eip1193.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: hex }]
+      })
       return { success: true }
     } catch (err) {
-      if (err.code === 4902) {
-        const c = SUPPORTED_CHAINS[targetId]
-        if (!c) return { success: false, error: 'Unsupported chain' }
-        await eip1193.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: hex,
-            chainName: c.name,
-            nativeCurrency: { name: c.symbol, symbol: c.symbol, decimals: 18 },
-            rpcUrls: [c.rpcUrl],
-            blockExplorerUrls: [c.explorer]
-          }]
-        })
-        return { success: true, added: true }
+      if (err?.code === 4902) {
+        const chain = SUPPORTED_CHAINS[targetId]
+        if (!chain) return { success: false, error: 'Unsupported chain' }
+        try {
+          await eip1193.request({
+            method: 'wallet_addEthereumChain',
+            params: [{
+              chainId: hex,
+              chainName: chain.name,
+              nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
+              rpcUrls: [chain.rpcUrl],
+              blockExplorerUrls: [chain.explorer]
+            }]
+          })
+          return { success: true, added: true }
+        } catch (addErr) {
+          return { success: false, error: addErr?.message || 'Failed to add chain' }
+        }
       }
-      return { success: false, error: err.message }
+      return { success: false, error: err?.message || 'Failed to switch chain' }
     }
   },
 
+  // subscriptions
   onAccountsChanged(cb) { onAccChanged = cb },
   onChainChanged(cb) { onChainChanged = cb },
   onDisconnect(cb) { onDisconnected = cb },
 
+  // cleanup
   destroy() {
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)
