@@ -1,19 +1,12 @@
-export const DUSTCLAIM_ABI = [
-  // 1inch paths
-  "function claimDustToETH(address tokenAddress, uint256 minReturnAmount, bytes swapData) external returns (uint256 ethReceived)",
-  "function claimDustBatchToETH(address[] tokens, uint256[] minReturns, bytes[] swapDatas) external returns (uint256 totalEth)",
-  // Uniswap V3 path
-  "function claimDustViaUniswap(address tokenAddress, uint24 fee, uint256 minReturnAmount, uint256 deadline) external returns (uint256 ethReceived)",
-  // view
-  "function chainId() view returns (uint256)",
-  // admin (owner-only on your contract)
-  "function withdrawCollectedToken(address token, uint256 amount) external",
-  // events
-  "event DustClaimed(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 ethOut)",
-  "event DustBatchClaimed(address indexed user, uint256 totalEthOut)"
-]
+// ---- Load ABIs (JSON) ----
+// Keep these files in: src/config/contracts/
+import commonAbi from './contracts/dustclaim.common.json'
+import ethAbi from './contracts/dustclaim.eth.json'
 
-// One contract address per chain (fill these after deploy)
+// ---- Back-compat: expose the default ABI the rest of the app expects ----
+export const DUSTCLAIM_ABI = commonAbi
+
+// ---- Addresses per chain (public – fine to keep in repo) ----
 export const DUSTCLAIM_ADDRESS = {
   1: "0x73f2Ef769b3Dc5c84390347b05cc1D89dD9644f", // Ethereum ✅
   10: "", // OP Mainnet
@@ -28,11 +21,25 @@ export const DUSTCLAIM_ADDRESS = {
   42161: "", // Arbitrum One
   43114: "", // Avalanche C
   59144: "", // Linea
-  80094: "", // Berachain (note: your SUPPORTED_CHAINS used 80094)
+  80094: "", // Berachain (matches your SUPPORTED_CHAINS)
   7777777: "" // Zora
-};
+}
 
-// Helper
+// ---- Optional: per-chain ABI overrides (only add if different from common) ----
+export const DUSTCLAIM_ABI_BY_CHAIN = {
+  1: ethAbi
+  // e.g. 137: polygonAbi, 42161: arbitrumAbi, ... later if needed
+}
+
+// ---- Helpers ----
 export function getAddressForChain(chainId) {
-  return DUSTCLAIM_ADDRESS[Number(chainId)] || null;
+  return DUSTCLAIM_ADDRESS[Number(chainId)] || null
+}
+
+export function getContractConfig(chainId) {
+  const id = Number(chainId)
+  return {
+    address: DUSTCLAIM_ADDRESS[id] || null,
+    abi: DUSTCLAIM_ABI_BY_CHAIN[id] || commonAbi
+  }
 }

@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import { DUSTCLAIM_ABI, DUSTCLAIM_ADDRESS } from '../config/contracts'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import walletService from './walletService'
+import { getContractConfig } from '../config/contracts'
 
 function getAddressForChain(chainId) {
   const addr = DUSTCLAIM_ADDRESS[Number(chainId)]
