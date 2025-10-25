@@ -1,143 +1,59 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
-import walletService from '../services/walletService.js'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import walletService from '../services/walletService'
 
 const WalletContext = createContext(null)
-
-export const useWallet = () => {
-  const ctx = useContext(WalletContext)
-  if (!ctx) throw new Error('useWallet must be used within a WalletProvider')
-  return ctx
-}
+export const useWallet = () => useContext(WalletContext)
 
 export const WalletProvider = ({ children }) => {
   const [account, setAccount] = useState(null)
-  const [accounts, setAccounts] = useState([])
   const [chainId, setChainId] = useState(null)
   const [isConnected, setIsConnected] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  // init + event subscriptions
   useEffect(() => {
-    let mounted = true
-
-    walletService.init()
-
     walletService.onAccountsChanged((accs) => {
-      if (!mounted) return
-      setAccounts(accs || [])
-      setAccount(accs?.[0] ?? null)
-      setIsConnected(!!(accs && accs.length))
+      const addr = accs?.[0] ?? null
+      setAccount(addr)
+      setIsConnected(!!addr)
     })
-
-    walletService.onChainChanged((cid) => {
-      if (!mounted) return
-      setChainId(cid)
-    })
-
+    walletService.onChainChanged((cid) => setChainId(cid))
     walletService.onDisconnect(() => {
-      if (!mounted) return
-      setAccounts([])
       setAccount(null)
-      setChainId(null)
       setIsConnected(false)
+      setChainId(null)
     })
-
-    // Try restore a prior session
-    ;(async () => {
-      const s = await walletService.restoreSession()
-      if (!mounted || !s) return
-      setAccounts(s.accounts)
-      setAccount(s.account)
-      setChainId(s.chainId)
-      setIsConnected(true)
-    })()
-
-    return () => {
-      mounted = false
-      walletService.destroy()
-    }
   }, [])
 
-  // actions
   const connect = async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     const res = await walletService.connect()
-    if (res.success) {
-      setAccounts(res.accounts)
-      setAccount(res.account)
-      setChainId(res.chainId)
-      setIsConnected(true)
-    } else {
-      setError(res.error)
-    }
     setLoading(false)
+    if (!res.success) { setError(res.error); return res }
+    setAccount(res.account)
+    setChainId(res.chainId)
+    setIsConnected(true)
     return res
   }
 
   const disconnect = async () => {
     setLoading(true)
-    setError(null)
-    const res = await walletService.disconnect()
-    if (res.success) {
-      setAccounts([])
-      setAccount(null)
-      setChainId(null)
-      setIsConnected(false)
-    }
+    await walletService.disconnect()
+    setAccount(null); setIsConnected(false); setChainId(null)
     setLoading(false)
-    return res
   }
 
-  const switchChain = async (targetId) => {
-    setError(null)
-    const res = await walletService.switchChain(targetId)
-    if (!res.success) setError(res.error)
-    return res
-  }
-
-  const signMessage = async (msg) => {
-    const res = await walletService.signMessage(msg)
-    if (!res.success) setError(res.error)
-    return res
-  }
-
-  const sendTransaction = async (tx) => {
-    const res = await walletService.sendTransaction(tx)
-    if (!res.success) setError(res.error)
-    return res
-  }
-
-  const value = useMemo(
-    () => ({
-      // state
-      isConnected,
-      account,
-      accounts,
-      address: account,
-      chainId,
-      loading,
-      error,
-
-      // actions
-      connect,
-      disconnect,
-      switchChain,
-      signMessage,
-      sendTransaction,
-
-      // helpers
-      clearError: () => setError(null),
-    }),
-    [isConnected, account, accounts, chainId, loading, error]
-  )
+  const value = useMemo(() => ({
+    address: account,
+    account,
+    chainId,
+    isConnected,
+    loading,
+    error,
+    connect,
+    disconnect,
+    switchChain: walletService.switchChain
+  }), [account, chainId, isConnected, loading, error])
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
 }
