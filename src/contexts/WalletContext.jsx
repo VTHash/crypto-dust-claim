@@ -57,15 +57,15 @@ export const WalletProvider = ({ children }) => {
 
   const connect = async () => {
     setLoading(true); setError(null)
-    const res = await walletService.connect()
-    if (res.success) {
-      setAccounts(res.accounts)
-      setAccount(res.account) // <- use signer-derived account
-      setChainId(res.chainId)
-      setIsConnected(true)
-    } else {
-      setError(res.error)
-    }
+   const res = await walletService.connect()
+if (res.success) {
+  setAccounts(res.accounts)
+  setAccount(res.account || res.address) // <— keep this
+  setChainId(res.chainId)
+  setIsConnected(true)
+} else {
+  setError(res.error)
+}
     setLoading(false)
     return res
   }

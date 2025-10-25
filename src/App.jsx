@@ -23,6 +23,7 @@ const App = () => {
        <Navbar />
 
       <main className="main-content">
+        {/* <DebugStatus /> */}
         <Routes>
           {/* Default route */}
           <Route

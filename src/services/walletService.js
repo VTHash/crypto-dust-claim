@@ -70,39 +70,40 @@ const walletService = {
   async init() { /* nothing heavy here */ },
 
   // >>> The critical connect path
-  async connect() {
-    try {
-      // Open modal
-      await appKit.open()
+ async connect() {
+  try {
+    // Open the AppKit modal
+    await appKit.open();
 
-      // Provider from AppKit
-      eip1193 = await appKit.getProvider()
-      if (!eip1193) return { success: false, error: 'No provider from AppKit' }
+    // 1) Try AppKit provider
+    eip1193 = await appKit.getProvider();
 
-      // Make sure wallet actually exposes accounts (some wallets need this call)
-      try {
-        await eip1193.request({ method: 'eth_requestAccounts' })
-      } catch {
-        // ignore; some wallets already granted
-      }
-
-      // Always derive address from signer (reliable)
-      const { addr, hex } = await buildSignerFrom(eip1193)
-
-      attachListeners()
-
-      return {
-        success: true,
-        accounts: [addr],
-        account: addr,
-        address: addr,
-        chainId: hex,
-        signer
-      }
-    } catch (err) {
-      return { success: false, error: err?.message || 'Connect failed' }
+    // 2) Fallback to window.ethereum if AppKit didn’t hand back a provider
+    if (!eip1193 && typeof window !== 'undefined' && window.ethereum) {
+      eip1193 = window.ethereum;
     }
-  },
+    if (!eip1193) {
+      return { success: false, error: 'No provider from AppKit or window.ethereum' };
+    }
+
+    // Some wallets need this to actually expose accounts
+    try { await eip1193.request({ method: 'eth_requestAccounts' }); } catch {}
+
+    // Build signer → always get the address from signer
+    browserProvider = new ethers.BrowserProvider(eip1193);
+    signer = await browserProvider.getSigner();
+    const addr = await signer.getAddress();
+    const hex = await eip1193.request({ method: 'eth_chainId' });
+
+    accounts = [addr];
+    chainId = hex;
+    attachListeners();
+
+    return { success: true, accounts: [addr], account: addr, address: addr, chainId: hex, signer };
+  } catch (err) {
+    return { success: false, error: err?.message || 'Connect failed' };
+  }
+},
 
   async disconnect() {
     try {
@@ -115,18 +116,34 @@ const walletService = {
 
   // Rebuild signer/address after refresh if wallet is still authorized
   async restoreSession() {
-    try {
-      const prov = await appKit.getProvider()
-      if (!prov) return null
+  try {
+    // Try AppKit first
+    let prov = await appKit.getProvider();
 
-      eip1193 = prov
-      const { addr, hex } = await buildSignerFrom(eip1193)
-      attachListeners()
-      return { accounts: [addr], account: addr, chainId: hex }
-    } catch {
-      return null
+    // Fallback to window.ethereum if AppKit gives nothing
+    if (!prov && typeof window !== 'undefined' && window.ethereum) {
+      prov = window.ethereum;
     }
-  },
+    if (!prov) return null;
+
+    eip1193 = prov;
+
+    // Build signer → derive address reliably
+    browserProvider = new ethers.BrowserProvider(eip1193);
+    signer = await browserProvider.getSigner();
+    const addr = await signer.getAddress();
+    const hex = await eip1193.request({ method: 'eth_chainId' });
+
+    accounts = [addr];
+    chainId = hex;
+    attachListeners();
+
+    return { accounts: [addr], account: addr, chainId: hex };
+  } catch {
+    return null;
+  }
+},
+
 
   async getAccounts() {
     if (!eip1193) return []
