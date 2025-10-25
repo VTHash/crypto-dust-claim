@@ -253,3 +253,122 @@
   .navbar-links { gap: .75rem; }
   .wallet-address { font-size: .78rem; }
 }
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1rem;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Brand */
+.navbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.25rem;
+}
+
+.brand-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: #00ffa3;
+  font-weight: 700;
+  font-size: 1.3rem;
+  text-shadow: 0 0 8px rgba(0, 255, 163, 0.5);
+}
+
+/* Middle group */
+.navbar-middle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* Nav links */
+.nav-link {
+  color: #b0b0b0;
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+.nav-link:hover,
+.nav-link.active {
+  color: #00ffa3;
+}
+
+/* Connect button */
+.btn-connect {
+  padding: 0.4rem 0.9rem;
+  border-radius: 10px;
+  border: none;
+  font-weight: 600;
+  background: linear-gradient(90deg, #00ffa3, #007bff);
+  color: #0b1220;
+  box-shadow: 0 0 10px rgba(0, 255, 163, 0.35);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.btn-connect:hover {
+  transform: scale(1.05);
+}
+
+/* Connected wallet */
+.wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 255, 163, 0.3);
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.wallet-address {
+  font-size: 0.82rem;
+  color: #00ffa3;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.btn-disconnect {
+  background: transparent;
+  border: none;
+  color: #ff7070;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+/* Theme toggle */
+.theme-toggle-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Mobile */
+@media (max-width: 640px) {
+  .navbar {
+    padding: 0.5rem;
+  }
+  .brand-text {
+    font-size: 1.1rem;
+  }
+  .nav-link {
+    font-size: 0.85rem;
+  }
+  .btn-connect {
+    font-size: 0.85rem;
+    padding: 0.3rem 0.8rem;
+  }
+}

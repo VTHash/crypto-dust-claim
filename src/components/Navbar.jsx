@@ -27,47 +27,33 @@ const Navbar = () => {
 
   return (
     <nav className="navbar">
-      {/* Brand */}
-      <div className="navbar-brand">
+      {/* Brand centered */}
+      <div className="navbar-center">
         <Link to="/" className="brand-link">
           <span className="brand-icon">🧹</span>
           <span className="brand-text">DustClaim</span>
         </Link>
       </div>
 
-      {/* Nav links */}
-      <div className="navbar-links">
-        <Link
-          to="/dashboard"
-          className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
-        >
+      {/* Center group (links + connect + theme) */}
+      <div className="navbar-middle">
+        <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
           Dashboard
         </Link>
-        <Link
-          to="/scanner"
-          className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}
-        >
+        <Link to="/scanner" className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}>
           Dust Scanner
         </Link>
-        <Link
-          to="/claim"
-          className={`nav-link ${isActive('/claim') ? 'active' : ''}`}
-        >
+        <Link to="/claim" className={`nav-link ${isActive('/claim') ? 'active' : ''}`}>
           Claim
         </Link>
-      </div>
 
-      {/* Actions: Theme + Wallet */}
-      <div className="navbar-actions">
         <div className="theme-toggle-wrapper">
           <ThemeToggle />
         </div>
 
         {isConnected ? (
           <div className="wallet-chip">
-            <span className="wallet-address" title={address}>
-              {shorten(address)}
-            </span>
+            <span className="wallet-address">{shorten(address)}</span>
             <button
               onClick={handleDisconnect}
               className="btn-disconnect"
