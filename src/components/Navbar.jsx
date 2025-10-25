@@ -8,15 +8,14 @@ const Navbar = () => {
   const { address, isConnected, connect, disconnect, loading } = useWallet()
   const location = useLocation()
 
-  const formatAddress = (addr) => (addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '')
+  const shorten = (addr) => (addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '')
   const isActive = (path) => location.pathname === path
 
   const handleConnect = async () => {
     if (loading) return
     try {
-      await connect() // this opens the Reown/AppKit modal
+      await connect()
     } catch (e) {
-      // swallow – WalletContext already handles/setError
       console.error('Connect error:', e)
     }
   }
@@ -65,21 +64,23 @@ const Navbar = () => {
         </div>
 
         {isConnected ? (
-          <>
-            <span className="wallet-address">{formatAddress(address)}</span>
+          <div className="wallet-chip">
+            <span className="wallet-address" title={address}>
+              {shorten(address)}
+            </span>
             <button
               onClick={handleDisconnect}
-              className="btn btn-danger btn-sm"
+              className="btn-disconnect"
               disabled={loading}
               aria-label="Disconnect wallet"
             >
               {loading ? '...' : 'Disconnect'}
             </button>
-          </>
+          </div>
         ) : (
           <button
             onClick={handleConnect}
-            className="btn btn-primary btn-sm"
+            className="btn-connect"
             disabled={loading}
             aria-label="Connect wallet"
           >

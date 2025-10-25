@@ -17,7 +17,8 @@ const appKit = createAppKit({
   adapters: [new EthersAdapter()], // typo fix: EthersAdapter
   networks: reownNetworks,
   metadata: getReownMetadata(),
-  projectId
+  projectId,
+  enableInjectedProvider: true,
 })
 
 // ---- internal state ----

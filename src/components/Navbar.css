@@ -172,3 +172,84 @@
     font-size: 1rem;
   }
 }
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .75rem 1rem;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+/* brand */
+.brand-link { display: inline-flex; align-items: center; gap: .5rem; text-decoration: none; }
+.brand-icon { font-size: 1.2rem; }
+.brand-text { font-weight: 700; letter-spacing: .2px; }
+
+/* nav links */
+.navbar-links { display: flex; gap: 1rem; }
+.nav-link { opacity: .85; text-decoration: none; }
+.nav-link:hover { opacity: 1; }
+.nav-link.active { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+
+/* actions */
+.navbar-actions { display: flex; align-items: center; gap: .75rem; }
+.theme-toggle-wrapper { display: flex; }
+
+/* connect button */
+.btn-connect {
+  padding: .45rem .9rem;
+  border-radius: 10px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(90deg,#00ffa3,#2d7cff);
+  color: #0b1220;
+  box-shadow: 0 0 10px rgba(0,255,163,.35);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.btn-connect:hover { transform: translateY(-1px); box-shadow: 0 0 14px rgba(0,255,163,.5); }
+.btn-connect:disabled { opacity: .6; cursor: not-allowed; }
+
+/* connected chip */
+.wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem .5rem .35rem .6rem;
+  border-radius: 12px;
+  border: 1px solid rgba(0,255,163,.35);
+  background: rgba(0,0,0,.35);
+}
+
+/* small, shortened address */
+.wallet-address {
+  font-size: .82rem;
+  font-weight: 600;
+  color: #00ffa3;
+  letter-spacing: .3px;
+  white-space: nowrap;
+}
+
+/* disconnect button (small, subtle) */
+.btn-disconnect {
+  border: none;
+  background: transparent;
+  color: #ff6b6b;
+  font-size: .78rem;
+  padding: .15rem .25rem;
+  cursor: pointer;
+  opacity: .85;
+}
+.btn-disconnect:hover { opacity: 1; text-decoration: underline; }
+.btn-disconnect:disabled { opacity: .6; cursor: not-allowed; }
+
+/* responsive tweaks */
+@media (max-width: 640px) {
+  .navbar-links { gap: .75rem; }
+  .wallet-address { font-size: .78rem; }
+}
