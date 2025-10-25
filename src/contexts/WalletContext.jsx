@@ -1,10 +1,4 @@
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import walletService from '../services/walletService'
 
 const WalletContext = createContext(null)
@@ -26,19 +20,17 @@ export const WalletProvider = ({ children }) => {
     let mounted = true
     walletService.init()
 
+    // subscribe events
     walletService.onAccountsChanged((accs) => {
       if (!mounted) return
       setAccounts(accs || [])
-      const addr = accs?.[0] ?? null
-      setAccount(addr)
-      setIsConnected(!!addr)
+      setAccount(accs?.[0] ?? null)
+      setIsConnected(!!(accs && accs.length))
     })
-
     walletService.onChainChanged((cid) => {
       if (!mounted) return
       setChainId(cid)
     })
-
     walletService.onDisconnect(() => {
       if (!mounted) return
       setAccounts([])
@@ -47,14 +39,14 @@ export const WalletProvider = ({ children }) => {
       setIsConnected(false)
     })
 
-    // Restore previous session if wallet already authorized
+    // hydrate prior session
     ;(async () => {
       const s = await walletService.restoreSession()
       if (!mounted || !s) return
-      setAccounts(s.accounts || [])
-      setAccount(s.address || s.account || null)
-      setChainId(s.chainId || null)
-      setIsConnected(!!(s.accounts && s.accounts.length))
+      setAccounts(s.accounts)
+      setAccount(s.account)
+      setChainId(s.chainId)
+      setIsConnected(true)
     })()
 
     return () => {
@@ -63,15 +55,13 @@ export const WalletProvider = ({ children }) => {
     }
   }, [])
 
-  // actions
   const connect = async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     const res = await walletService.connect()
     if (res.success) {
-      setAccounts(res.accounts || [])
-      setAccount(res.address || res.account || null) // <- important
-      setChainId(res.chainId || null)
+      setAccounts(res.accounts)
+      setAccount(res.account) // <- use signer-derived account
+      setChainId(res.chainId)
       setIsConnected(true)
     } else {
       setError(res.error)
@@ -81,14 +71,15 @@ export const WalletProvider = ({ children }) => {
   }
 
   const disconnect = async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true); setError(null)
     const res = await walletService.disconnect()
     if (res.success) {
       setAccounts([])
       setAccount(null)
       setChainId(null)
       setIsConnected(false)
+    } else {
+      setError(res.error)
     }
     setLoading(false)
     return res
@@ -115,7 +106,6 @@ export const WalletProvider = ({ children }) => {
 
   const value = useMemo(
     () => ({
-      // state
       isConnected,
       account,
       accounts,
@@ -123,15 +113,11 @@ export const WalletProvider = ({ children }) => {
       chainId,
       loading,
       error,
-
-      // actions
       connect,
       disconnect,
       switchChain,
       signMessage,
       sendTransaction,
-
-      // helpers
       clearError: () => setError(null),
     }),
     [isConnected, account, accounts, chainId, loading, error]

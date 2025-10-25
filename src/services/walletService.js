@@ -1,16 +1,11 @@
 import { createAppKit } from '@reown/appkit'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { ethers } from 'ethers'
-import {
-  projectId,
-  metadata,
-  reownNetworks,
-  SUPPORTED_CHAINS
-} from '../config/walletConnectConfig'
+import { projectId, metadata, reownNetworks, SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 
-const toHex = (id) => '0x' + Number(id).toString(16)
+const toHexChainId = (id) => '0x' + Number(id).toString(16)
 
-// --- Single AppKit instance ---
+// Single AppKit instance
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
   networks: reownNetworks,
@@ -19,26 +14,25 @@ const appKit = createAppKit({
 })
 
 // ---- internal state ----
-let eip1193 = null // EIP-1193 provider from AppKit (or window.ethereum fallback)
-let browserProvider = null // ethers.BrowserProvider
-let signer = null // ethers.Signer
-let accounts = [] // string[]
-let chainId = null // hex string like "0x1"
+let eip1193 = null
+let browserProvider = null
+let signer = null
+let accounts = []
+let chainId = null
 
-// callbacks wired by WalletContext
+// callbacks set by WalletContext
 let onAccChanged = null
 let onChainChanged = null
 let onDisconnected = null
 
-// ---------- listeners ----------
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
-  onAccChanged && onAccChanged(accounts)
+  onAccChanged?.(accounts)
 }
 
 function handleChain(hexId) {
   chainId = hexId
-  onChainChanged && onChainChanged(hexId)
+  onChainChanged?.(hexId)
 }
 
 function handleDisconnect(err) {
@@ -46,7 +40,7 @@ function handleDisconnect(err) {
   chainId = null
   signer = null
   browserProvider = null
-  onDisconnected && onDisconnected(err)
+  onDisconnected?.(err)
 }
 
 function attachListeners() {
@@ -59,86 +53,50 @@ function attachListeners() {
   eip1193.on?.('disconnect', handleDisconnect)
 }
 
-// ---------- core helpers ----------
-async function setProvidersFrom(provider) {
-  eip1193 = provider
-  browserProvider = new ethers.BrowserProvider(eip1193)
-  signer = await browserProvider.getSigner().catch(() => null)
-
-  // populate accounts/chain
-  accounts = await eip1193.request({ method: 'eth_accounts' }).catch(() => [])
-  chainId = await eip1193.request({ method: 'eth_chainId' }).catch(() => null)
-
-  attachListeners()
+async function buildSignerFrom(eipProvider) {
+  browserProvider = new ethers.BrowserProvider(eipProvider)
+  signer = await browserProvider.getSigner()
+  const addr = await signer.getAddress()
+  const hex = await eipProvider.request({ method: 'eth_chainId' })
+  accounts = [addr]
+  chainId = hex
+  return { addr, hex }
 }
 
 const walletService = {
-  // getters / utils
+  // Expose for debugging if needed
   getAppKit: () => appKit,
-  async getProvider() { return eip1193 },
-  async getBrowserProvider() { return browserProvider },
-  async getSigner() { return signer },
-  async getAddress() { return accounts?.[0] ?? null },
-  async getChainId() { return chainId },
-  async isConnected() { return !!(accounts?.length && signer) },
-  openModal() { return appKit.open?.() },
-  closeModal() { return appKit.close?.() },
 
-  // lifecycle
-  async init() { return },
+  async init() { /* nothing heavy here */ },
 
-  // Try to rebuild state if the wallet is already authorized
-  async restoreSession() {
-    try {
-      // Prefer AppKit’s provider if present
-      const kitProvider = await appKit.getProvider()
-      if (kitProvider) {
-        await setProvidersFrom(kitProvider)
-        if (accounts?.length) {
-          const addr = accounts[0]
-          return { accounts, address: addr, account: addr, chainId, signer }
-        }
-      }
-
-      // Fallback to injected provider if user connected previously
-      const injected = typeof window !== 'undefined' ? window.ethereum : null
-      if (injected) {
-        const accs = await injected.request({ method: 'eth_accounts' })
-        if (accs && accs.length) {
-          await setProvidersFrom(injected)
-          const addr = accs[0]
-          return { accounts, address: addr, account: addr, chainId, signer }
-        }
-      }
-      return null
-    } catch {
-      return null
-    }
-  },
-
+  // >>> The critical connect path
   async connect() {
     try {
-      // open modal; user selects wallet/chain
+      // Open modal
       await appKit.open()
 
-      // get provider from AppKit
-      let provider = await appKit.getProvider()
+      // Provider from AppKit
+      eip1193 = await appKit.getProvider()
+      if (!eip1193) return { success: false, error: 'No provider from AppKit' }
 
-      // mobile/injected fallback (extra safety)
-      if (!provider && typeof window !== 'undefined' && window.ethereum) {
-        provider = window.ethereum
+      // Make sure wallet actually exposes accounts (some wallets need this call)
+      try {
+        await eip1193.request({ method: 'eth_requestAccounts' })
+      } catch {
+        // ignore; some wallets already granted
       }
-      if (!provider) return { success: false, error: 'No provider from AppKit' }
 
-      await setProvidersFrom(provider)
+      // Always derive address from signer (reliable)
+      const { addr, hex } = await buildSignerFrom(eip1193)
 
-      const addr = accounts?.[0] ?? null
+      attachListeners()
+
       return {
         success: true,
-        accounts,
-        address: addr, // important: include both keys
-        account: addr, // <- WalletContext reads this too
-        chainId,
+        accounts: [addr],
+        account: addr,
+        address: addr,
+        chainId: hex,
         signer
       }
     } catch (err) {
@@ -155,7 +113,31 @@ const walletService = {
     return { success: true }
   },
 
-  // actions
+  // Rebuild signer/address after refresh if wallet is still authorized
+  async restoreSession() {
+    try {
+      const prov = await appKit.getProvider()
+      if (!prov) return null
+
+      eip1193 = prov
+      const { addr, hex } = await buildSignerFrom(eip1193)
+      attachListeners()
+      return { accounts: [addr], account: addr, chainId: hex }
+    } catch {
+      return null
+    }
+  },
+
+  async getAccounts() {
+    if (!eip1193) return []
+    try {
+      const addr = accounts?.[0]
+      return addr ? [addr] : []
+    } catch {
+      return []
+    }
+  },
+
   async sendTransaction(tx) {
     try {
       if (!signer) {
@@ -184,7 +166,8 @@ const walletService = {
 
   async switchChain(targetId) {
     if (!eip1193) return { success: false, error: 'Wallet not connected' }
-    const hex = toHex(targetId)
+    const hex = toHexChainId(targetId)
+
     try {
       await eip1193.request({
         method: 'wallet_switchEthereumChain',
@@ -215,12 +198,11 @@ const walletService = {
     }
   },
 
-  // subscriptions
+  // event subscriptions from WalletContext
   onAccountsChanged(cb) { onAccChanged = cb },
   onChainChanged(cb) { onChainChanged = cb },
   onDisconnect(cb) { onDisconnected = cb },
 
-  // cleanup
   destroy() {
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)
