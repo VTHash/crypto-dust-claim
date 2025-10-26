@@ -6,8 +6,8 @@ import batchService from '../services/batchService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './DustScanner.css'
 import ChainLogo from '../components/ChainLogo'
-// Optional aggregator (1inch/Uni). If you don't have it yet, this import is fine;
-// calls are guarded so the app won’t crash.
+
+// Optional aggregator helpers (safe to import even if not implemented)
 import * as dexAggregatorService from '../services/dexAggregatorService'
 
 const DustScanner = () => {
@@ -35,23 +35,16 @@ const DustScanner = () => {
   }, [address])
 
   const buildQuickActions = async (enriched) => {
-    // Reset first
     setQuickOneInchSingle(null)
     setQuickOneInchBatch(null)
     setQuickUniswapSingle(null)
 
-    // If no aggregator service available, stop quietly
     if (!dexAggregatorService || typeof dexAggregatorService !== 'object') return
 
-    // Find a “best candidate” token for single-swap helpers (highest USD value, if you computed it; else first)
     const withAnyToken = enriched
       .map(r => ({
         ...r,
-        tokenDust: (r.tokenDust || []).map(t => ({
-          ...t,
-          // attempt a value estimate if not present
-          _usd: typeof t.usd === 'number' ? t.usd : 0
-        }))
+        tokenDust: (r.tokenDust || []).map(t => ({ ...t, _usd: typeof t.usd === 'number' ? t.usd : 0 }))
       }))
       .filter(r => r.tokenDust && r.tokenDust.length > 0)
 
@@ -63,16 +56,13 @@ const DustScanner = () => {
         })
         .filter(Boolean)[0] || null
 
-    // 1) Single token via 1inch
     try {
       if (top && typeof dexAggregatorService.quoteOneInchSingle === 'function') {
-        // You may change target to WETH / ETH as your service expects
         const single = await dexAggregatorService.quoteOneInchSingle({
           chainId: Number(top.chainId),
           tokenIn: top.token.address,
-          amount: top.token.balance // string/decimal; service should handle decimals
+          amount: top.token.balance
         })
-        // Expecting: { calldata, quotedMinOutWei }
         if (single?.calldata && single?.quotedMinOutWei) {
           setQuickOneInchSingle({
             token: top.token.address,
@@ -81,21 +71,14 @@ const DustScanner = () => {
           })
         }
       }
-    } catch (_) {}
+    } catch {}
 
-    // 2) Batch via 1inch
     try {
       if (withAnyToken.length && typeof dexAggregatorService.quoteOneInchBatch === 'function') {
         const flat = withAnyToken.flatMap(r =>
-          r.tokenDust.map(t => ({
-            chainId: Number(r.chainId),
-            token: t.address,
-            amount: t.balance
-          }))
+          r.tokenDust.map(t => ({ chainId: Number(r.chainId), token: t.address, amount: t.balance }))
         )
-
         const batch = await dexAggregatorService.quoteOneInchBatch(flat)
-        // Expecting: { tokens, minOutsWei, datas }
         if (batch?.tokens?.length && batch?.minOutsWei?.length && batch?.datas?.length) {
           setQuickOneInchBatch({
             tokens: batch.tokens,
@@ -104,9 +87,8 @@ const DustScanner = () => {
           })
         }
       }
-    } catch (_) {}
+    } catch {}
 
-    // 3) Single token via Uniswap V3
     try {
       if (top && typeof dexAggregatorService.quoteUniswapSingle === 'function') {
         const uni = await dexAggregatorService.quoteUniswapSingle({
@@ -114,7 +96,6 @@ const DustScanner = () => {
           tokenIn: top.token.address,
           amount: top.token.balance
         })
-        // Expecting: { fee, minOutWei, ttlSec }
         if (uni?.minOutWei) {
           setQuickUniswapSingle({
             token: top.token.address,
@@ -124,7 +105,7 @@ const DustScanner = () => {
           })
         }
       }
-    } catch (_) {}
+    } catch {}
   }
 
   const scanForDust = async () => {
@@ -143,7 +124,6 @@ const DustScanner = () => {
         .filter((r) => r.status === 'fulfilled' && r.value?.hasDust)
         .map((r) => r.value)
 
-      // attach USD values + labels
       const enriched = await Promise.all(
         valid.map(async (r) => {
           const usdValue = await web3Service.getUSDValue(
@@ -152,19 +132,13 @@ const DustScanner = () => {
             r.tokenDust
           )
           const meta = SUPPORTED_CHAINS[r.chainId] || {}
-          return {
-            ...r,
-            usdValue,
-            chainName: meta.name,
-            symbol: meta.symbol,
-          }
+          return { ...r, usdValue, chainName: meta.name, symbol: meta.symbol }
         })
       )
 
       setDustResults(enriched)
       setTotalDustValue(enriched.reduce((sum, r) => sum + (r.usdValue || 0), 0))
 
-      // estimate savings (optional)
       try {
         const allTokenDust = enriched.flatMap((r) => r.tokenDust)
         const savings =
@@ -176,7 +150,6 @@ const DustScanner = () => {
         setBatchSavings(null)
       }
 
-      // prepare quick-action payloads for ClaimScreen (optional)
       await buildQuickActions(enriched)
     } catch (err) {
       console.error('Error scanning for dust:', err)
@@ -187,7 +160,6 @@ const DustScanner = () => {
 
   const handleBatchClaim = async () => {
     try {
-      // Build a normalized claim inputs list
       const claims = dustResults.flatMap((r) =>
         (r.tokenDust || []).map((t) => ({
           chainId: r.chainId,
@@ -198,7 +170,6 @@ const DustScanner = () => {
         }))
       )
 
-      // Prefer an optimized multi-step plan when available
       let claimPlan = []
       try {
         if (typeof batchService.buildClaimPlan === 'function') {
@@ -208,7 +179,6 @@ const DustScanner = () => {
         console.warn('buildClaimPlan failed or not available, falling back:', e?.message)
       }
 
-      // Legacy fallback – create raw per-chain tx set
       let batchTransactions = []
       if (!claimPlan?.length) {
         if (typeof batchService.createBatchDustClaim === 'function') {
@@ -220,16 +190,11 @@ const DustScanner = () => {
 
       navigate('/claim', {
         state: {
-          // new optimized route
           claimPlan,
-          // legacy route for compatibility
           batchTransactions,
-          // context for UI
           dustResults,
           totalDustValue,
           batchSavings,
-
-          // NEW: quick-action payloads (ClaimScreen shows buttons only if these exist)
           oneInchSingle: quickOneInchSingle,
           oneInchBatch: quickOneInchBatch,
           uniswapSingle: quickUniswapSingle
@@ -270,12 +235,8 @@ const DustScanner = () => {
         <div className="chain-selection-header">
           <h3>Select Chains to Scan</h3>
           <div className="selection-actions">
-            <button onClick={selectAllChains} className="btn btn-outline btn-sm">
-              Select All
-            </button>
-            <button onClick={deselectAllChains} className="btn btn-outline btn-sm">
-              Deselect All
-            </button>
+            <button onClick={selectAllChains} className="btn btn-outline btn-sm">Select All</button>
+            <button onClick={deselectAllChains} className="btn btn-outline btn-sm">Deselect All</button>
           </div>
         </div>
 
@@ -286,7 +247,7 @@ const DustScanner = () => {
               className={`chain-selector ${selectedChains[chainId] ? 'selected' : ''}`}
               onClick={() => toggleChainSelection(chainId)}
             >
-              <span className="chain-logo">{chain.logo}</span>
+              <ChainLogo src={chain.logo} alt={chain.name} />
               <span className="chain-name">{chain.name}</span>
               <div className="checkbox">{selectedChains[chainId] && <div className="checkmark">✓</div>}</div>
             </div>
@@ -329,10 +290,10 @@ const DustScanner = () => {
               <div key={idx} className="chain-result-card">
                 <div className="chain-result-header">
                   <div className="chain-info">
-                   <ChainLogo
-                   src={SUPPORTED_CHAINS[chain.chainId]?.logo}
-                   alt={SUPPORTED_CHAINS[chain.chainId]?.name}
-                   />
+                    <ChainLogo
+                      src={SUPPORTED_CHAINS[r.chainId]?.logo}
+                      alt={SUPPORTED_CHAINS[r.chainId]?.name}
+                    />
                     <div>
                       <h3>{r.chainName}</h3>
                       <p className="chain-value">${r.usdValue.toFixed(2)}</p>
@@ -388,9 +349,7 @@ const DustScanner = () => {
           <div className="empty-icon">🔍</div>
           <h3>No Dust Found</h3>
           <p>We scanned {selectedChainCount} chains but didn't find any claimable dust.</p>
-          <button onClick={scanForDust} className="btn btn-outline">
-            Try Scanning Again
-          </button>
+          <button onClick={scanForDust} className="btn btn-outline">Try Scanning Again</button>
         </div>
       )}
 
