@@ -5,6 +5,7 @@ import ethAbi from './contracts/dustclaim.eth.json'
 import bnbAbi from './contracts/dustclaim.bnb.json'
 import avaxAbi from './contracts/dustclaim.avax.json'
 import arbAbi from './contracts/dustclaim.arb.json'
+import polygonAbi from './contracts/dustclaim.polygon.json'
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
@@ -15,7 +16,7 @@ export const DUSTCLAIM_ADDRESS = {
   10: "", // OP Mainnet
   56: "0x8794D4CD9b641eD623235ca418640e10E4d75D6F", // BNB Smart Chain
   100: "", // Gnosis
-  137: "", // Polygon PoS
+  137: "0xf977f21430b99aE91680aC2e0fFD8cA481ec486F", // Polygon PoS
   195: "", // X1
   250: "", // Fantom
   1329: "", // Sei
