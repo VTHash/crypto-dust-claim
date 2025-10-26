@@ -87,7 +87,7 @@ export const SUPPORTED_CHAINS = {
     name: "Avalanche C-Chain",
     symbol: "AVAX",
     rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
-    explorer: "https://snowtrace.io",
+    explorer: "https://snowscan.xyz/",
     logo: "/logo/avalanche.png",
   },
 

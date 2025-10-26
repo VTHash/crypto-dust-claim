@@ -66,7 +66,7 @@ export const SUPPORTED_CHAINS = {
     name: 'Avalanche C-Chain',
     symbol: 'AVAX',
     rpcUrl: 'https://avalanche-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
-    explorer: 'https://snowtrace.io',
+    explorer: 'https://snowscan.xyz/',
     logo: '/logo/avalanche.png'
   },
   100: {
