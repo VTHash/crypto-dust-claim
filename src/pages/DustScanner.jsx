@@ -5,7 +5,7 @@ import web3Service from '../services/web3Service'
 import batchService from '../services/batchService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './DustScanner.css'
-
+import ChainLogo from '../components/ChainLogo'
 // Optional aggregator (1inch/Uni). If you don't have it yet, this import is fine;
 // calls are guarded so the app won’t crash.
 import * as dexAggregatorService from '../services/dexAggregatorService'
@@ -329,7 +329,10 @@ const DustScanner = () => {
               <div key={idx} className="chain-result-card">
                 <div className="chain-result-header">
                   <div className="chain-info">
-                    <span className="chain-logo">{SUPPORTED_CHAINS[r.chainId]?.logo}</span>
+                   <ChainLogo
+                   src={SUPPORTED_CHAINS[chain.chainId]?.logo}
+                   alt={SUPPORTED_CHAINS[chain.chainId]?.name}
+                   />
                     <div>
                       <h3>{r.chainName}</h3>
                       <p className="chain-value">${r.usdValue.toFixed(2)}</p>

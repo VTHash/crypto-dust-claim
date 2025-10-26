@@ -5,7 +5,7 @@ import web3Service from '../services/web3Service'
 import priceService from '../services/priceService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './Dashboard.css'
-
+import ChainLogo from '../components/ChainLogo'
 const Dashboard = () => {
   const { address } = useWallet()
   const navigate = useNavigate()
@@ -167,9 +167,10 @@ const Dashboard = () => {
               <div key={index} className="chain-card has-dust">
                 <div className="chain-header">
                   <div className="chain-info">
-                    <span className="chain-logo">
-                      {SUPPORTED_CHAINS[chain.chainId]?.logo}
-                    </span>
+                    <ChainLogo
+                    src={SUPPORTED_CHAINS[chain.chainId]?.logo}
+                    alt={SUPPORTED_CHAINS[chain.chainId]?.name}
+                     />
                     <div>
                       <h3>{SUPPORTED_CHAINS[chain.chainId]?.name}</h3>
                       <p className="chain-value">
