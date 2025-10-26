@@ -4,6 +4,8 @@ import commonAbi from './contracts/dustclaim.common.json'
 import ethAbi from './contracts/dustclaim.eth.json'
 import bnbAbi from './contracts/dustclaim.bnb.json'
 import avaxAbi from './contracts/dustclaim.avax.json'
+import arbAbi from './contracts/dustclaim.arb.json'
+
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
 
@@ -19,7 +21,7 @@ export const DUSTCLAIM_ADDRESS = {
   1329: "", // Sei
   8453: "", // Base
   34443: "", // Mode
-  42161: "", // Arbitrum One
+  42161: "0xd7aC005D908Cbf7A9692478c4DEef2525CA2A2fE", // Arbitrum One
   43114: "0xA10980211Cda7228708e774ef11c7E299E6947dB", // Avalanche C
   59144: "", // Linea
   80094: "", // Berachain (matches your SUPPORTED_CHAINS)
