@@ -2,7 +2,7 @@
 // Keep these files in: src/config/contracts/
 import commonAbi from './contracts/dustclaim.common.json'
 import ethAbi from './contracts/dustclaim.eth.json'
-
+import bnbAbi from './contracts/dustclaim.bnb.json'
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
 
@@ -10,7 +10,7 @@ export const DUSTCLAIM_ABI = commonAbi
 export const DUSTCLAIM_ADDRESS = {
   1: "0x73f2Ef769b3Dc5c84390347b05cc1D89dD9644f", // Ethereum ✅
   10: "", // OP Mainnet
-  56: "", // BNB Smart Chain
+  56: "0x8794D4CD9b641eD623235ca418640e10E4d75D6F", // BNB Smart Chain
   100: "", // Gnosis
   137: "", // Polygon PoS
   195: "", // X1
