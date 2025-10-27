@@ -7,6 +7,7 @@ import avaxAbi from './contracts/dustclaim.avax.json'
 import arbAbi from './contracts/dustclaim.arb.json'
 import polygonAbi from './contracts/dustclaim.polygon.json'
 import opAbi from './contracts/dustclaim.op.json'
+import seiAbi from './contracts/dustclaim.sei.json'
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
@@ -20,7 +21,7 @@ export const DUSTCLAIM_ADDRESS = {
   137: "0xf977f21430b99aE91680aC2e0fFD8cA481ec486F", // Polygon PoS
   195: "", // X1
   250: "", // Fantom
-  1329: "", // Sei
+  1329: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Sei
   8453: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Base
   34443: "", // Mode
   42161: "0xd7aC005D908Cbf7A9692478c4DEef2525CA2A2fE", // Arbitrum One
