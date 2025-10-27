@@ -124,7 +124,7 @@ export const SUPPORTED_CHAINS = {
     name: 'X1', // Previously Astar zkEVM
     symbol: 'OKB',
     rpcUrl: 'https://rpc.x1.xyz',
-    explorer: 'https://www.oklink.com/x-layer',
+    explorer: 'https://www.oklink.com/',
     logo: '/logo/okb.png'
   }
 };
