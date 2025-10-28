@@ -3,548 +3,388 @@ import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import web3Service from './web3Service'
 import dexAggregatorService from './dexAggregatorService'
 
+/**
+ * Use the same wrapped-native idea as dexAggregatorService:
+ * sell token -> wrapped-native (WETH/WBNB/WMATIC...) then your contract un-wraps to native.
+ * Keep this in sync with dexAggregatorService's WRAPPED_NATIVE_BY_CHAIN.
+ */
+const WRAPPED_NATIVE_BY_CHAIN = {
+  1: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // Mainnet WETH
+  10: '0x4200000000000000000000000000000000000006', // Optimism WETH
+  137:'0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // Polygon WMATIC
+  42161:'0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', // Arbitrum WETH
+  56: '0xBB4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // BNB Chain WBNB
+  8453:'0x4200000000000000000000000000000000000006', // Base WETH
+}
+
+/** Normalize any input into a wei-decimal string (no 0x). */
+const toAmountStr = (x) =>
+  typeof x === 'bigint' ? x.toString() : String(x ?? '0')
+
+/** Best-effort: if a decimal string, parse with 18; otherwise assume raw wei string */
+const toWeiStr18 = (maybeDecimal) => {
+  const s = String(maybeDecimal ?? '0')
+  if (s.includes('.')) return ethers.parseUnits(s, 18).toString()
+  return s // assume already wei
+}
+
 class BatchService {
   constructor() {
-    // Standard ERC-20 ABI
+    // Minimal ERC20 ABI used for approvals/transfers
     this.erc20ABI = [
-      "function transfer(address to, uint256 amount) external returns (bool)",
-      "function balanceOf(address account) external view returns (uint256)",
-      "function decimals() external view returns (uint8)",
-      "function approve(address spender, uint256 amount) external returns (bool)"
+      'function approve(address spender, uint256 amount) external returns (bool)',
+      'function transfer(address to, uint256 amount) external returns (bool)',
+      'function balanceOf(address) view returns (uint256)',
+      'function decimals() view returns (uint8)'
     ]
-    
-    // Batch transfer contract ABI (common pattern)
+
+    // Optional “batch” ABIs – keep for your fallback utilities
     this.batchTransferABI = [
-      "function batchTransfer(address token, address[] calldata recipients, uint256[] calldata amounts) external",
-      "function batchTransferETH(address[] calldata recipients, uint256[] calldata amounts) external payable"
+      'function batchTransfer(address token, address[] calldata recipients, uint256[] calldata amounts) external',
+      'function batchTransferETH(address[] calldata recipients, uint256[] calldata amounts) external payable'
     ]
-    
-    // Common batch contract addresses by chain
+
+    // Optional: sample batch/multisend contracts (replace with your own if you actually use them)
     this.BATCH_CONTRACTS = {
-      1: '0x6B175474E89094C44Da98b954EedeAC495271d0F', // Using DAI as example, replace with actual batch contract
-      137: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', // Matic USDC
-      42161: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8' // Arbitrum USDC
+      // 1: '0xYourBatchContractOnMainnet',
+      // 137: '0xYourBatchContractOnPolygon',
+      // 42161: '0xYourBatchContractOnArbitrum'
     }
   }
 
+  // ===========================================================================
+  // PREFERRED: Build an execution PLAN used by ClaimScreen -> executeChainPlan
+  // This prevents "Nothing to execute..." when the scanner passes claims forward.
+  // ===========================================================================
+
   /**
-   * Create optimized batch transactions for dust claiming
+   * claims = [
+   * { chainId, tokenAddress, tokenSymbol, amount, recipient }
+   * ]
+   * We group per-chain, and produce steps that:
+   * - approve (if needed) then
+   * - aggregator swap (1inch) tokenIn -> wrapped-native (your contract will unwrap)
+   * NOTE: We only attach quote metadata; executeChainPlan will call the API
+   * to get the actual /swap tx at runtime.
    */
-  async createBatchDustClaim(claims, walletAddress) {
-    try {
-      const batchTransactions = []
-      
-      // Group claims by chain and token
-      const claimsByChain = this.groupClaimsByChain(claims)
-      
-      for (const [chainId, chainClaims] of Object.entries(claimsByChain)) {
-        const chainTransactions = await this.createChainBatchTransactions(
-          parseInt(chainId),
-          chainClaims,
-          walletAddress
-        )
-        batchTransactions.push(...chainTransactions)
-      }
-      
-      return batchTransactions
-    } catch (error) {
-      console.error('Error creating batch dust claim:', error)
-      throw error
+  async buildClaimPlan(claims = []) {
+    if (!Array.isArray(claims) || !claims.length) return []
+
+    // Group by chain
+    const perChain = new Map()
+    for (const c of claims) {
+      const cid = Number(c.chainId)
+      if (!perChain.has(cid)) perChain.set(cid, [])
+      perChain.get(cid).push(c)
     }
-  }
 
-  /**
-   * Group claims by chain and token
-   */
-  groupClaimsByChain(claims) {
-    const claimsByChain = {}
-    
-    claims.forEach(claim => {
-      if (!claimsByChain[claim.chainId]) {
-        claimsByChain[claim.chainId] = {}
-      }
-      
-      if (!claimsByChain[claim.chainId][claim.tokenAddress]) {
-        claimsByChain[claim.chainId][claim.tokenAddress] = []
-      }
-      
-      claimsByChain[claim.chainId][claim.tokenAddress].push(claim)
-    })
-    
-    return claimsByChain
-  }
+    const plan = []
 
-  /**
-   * Create batch transactions for a specific chain
-   */
-  async createChainBatchTransactions(chainId, chainClaims, walletAddress) {
-    const transactions = []
-    
-    for (const [tokenAddress, tokenClaims] of Object.entries(chainClaims)) {
-      if (tokenAddress === '0x0000000000000000000000000000000000000000') {
-        // Native token transfers
-        const nativeTx = await this.createNativeBatchTransfer(
-          chainId,
-          tokenClaims,
-          walletAddress
-        )
-        if (nativeTx) transactions.push(nativeTx)
-      } else {
-        // ERC-20 token transfers
-        const tokenTxs = await this.createTokenBatchTransfers(
-          chainId,
-          tokenAddress,
-          tokenClaims,
-          walletAddress
-        )
-        transactions.push(...tokenTxs)
+    for (const [chainId, items] of perChain.entries()) {
+      const wrappedOut = WRAPPED_NATIVE_BY_CHAIN[chainId]
+      if (!wrappedOut) {
+        // skip chains not aligned with aggregator helper
+        continue
       }
-    }
-    
-    return transactions
-  }
 
-  /**
-   * Create batch transfer for native tokens (ETH, MATIC, etc.)
-   */
-  async createNativeBatchTransfer(chainId, claims, walletAddress) {
-    try {
-      const recipients = claims.map(claim => claim.recipient)
-      const amounts = claims.map(claim => 
-        ethers.parseEther(claim.amount.toString())
-      )
-      
-      const totalAmount = amounts.reduce((sum, amount) => sum + amount, 0n)
-      
-      // For native transfers, we can use a batch contract or multi-send
-      const batchContract = this.BATCH_CONTRACTS[chainId]
-      
-      if (batchContract) {
-        // Use batch contract if available
-        const contract = new ethers.Interface(this.batchTransferABI)
-        const data = contract.encodeFunctionData('batchTransferETH', [
-          recipients,
-          amounts
-        ])
-        
-        return {
-          to: batchContract,
-          data: data,
-          value: '0x' + totalAmount.toString(16),
-          gasLimit: '0x' + (50000 + (recipients.length * 21000)).toString(16),
-          chainId: chainId
-        }
-      } else {
-        // Fallback: Use multi-send in single transaction
-        // This is a simplified version - in production you'd use a proper multi-send contract
-        return await this.createMultiSendNative(chainId, recipients, amounts, totalAmount)
-      }
-    } catch (error) {
-      console.error('Error creating native batch transfer:', error)
-      return null
-    }
-  }
+      const steps = []
 
-  /**
-   * Multi-send implementation for native tokens
-   */
-  async createMultiSendNative(chainId, recipients, amounts, totalAmount) {
-    // Simple implementation: send to first recipient with note about distribution
-    // In production, use a proper multi-send contract like:
-    // 0x8d29be29923b68abf65421f2e882edc91572316c (MultiSend contract on Ethereum)
-    
-    const multiSendContract = '0x8d29be29923b68abf65421f2e882edc91572316c' // Example contract
-    
-    const contract = new ethers.Interface([
-      "function multiSend(bytes memory transactions) external payable"
-    ])
-    
-    // Encode multiple transfers into single transaction data
-    let transactionsData = '0x'
-    recipients.forEach((recipient, i) => {
-      const txData = ethers.solidityPacked(
-        ['uint8', 'address', 'uint256', 'uint256'],
-        [0, recipient, amounts[i], 0]
-      )
-      transactionsData += txData.slice(2)
-    })
-    
-    const data = contract.encodeFunctionData('multiSend', [transactionsData])
-    
-    return {
-      to: multiSendContract,
-      data: data,
-      value: '0x' + totalAmount.toString(16),
-      gasLimit: '0x' + (100000 + (recipients.length * 5000)).toString(16),
-      chainId: chainId
-    }
-  }
+      // We’ll create one step per token (not per recipient) because dust is from the user → contract
+      // Scanner already normalizes amounts per token per chain for the current user.
+      for (const it of items) {
+        const tokenIn = it.tokenAddress
+        const rawAmount = it.amount // could be decimal or wei
+        // we don't know token decimals here; treat amount as already in wei if no dot, else parse as 18
+        const amountWeiStr = toWeiStr18(rawAmount)
 
-  /**
-   * Create batch transfers for ERC-20 tokens
-   */
-  async createTokenBatchTransfers(chainId, tokenAddress, claims, walletAddress) {
-    const transactions = []
-    const recipients = claims.map(claim => claim.recipient)
-    
-    try {
-      // Get token decimals
-      const provider = web3Service.getProvider(chainId)
-      const tokenContract = new ethers.Contract(tokenAddress, this.erc20ABI, provider)
-      const decimals = await tokenContract.decimals()
-      
-      const amounts = claims.map(claim => 
-        ethers.parseUnits(claim.amount.toString(), decimals)
-      )
-      
-      // Option 1: Use batch transfer contract
-      const batchTx = await this.createTokenBatchViaContract(
-        chainId,
-        tokenAddress,
-        recipients,
-        amounts,
-        decimals
-      )
-      if (batchTx) {
-        transactions.push(batchTx)
-        return transactions
-      }
-      
-      // Option 2: Individual transfers (fallback)
-      console.log('Using individual transfers as fallback')
-      for (let i = 0; i < recipients.length; i++) {
-        const singleTx = await this.createSingleTokenTransfer(
-          chainId,
-          tokenAddress,
-          recipients[i],
-          amounts[i],
-          decimals
-        )
-        if (singleTx) transactions.push(singleTx)
-      }
-      
-    } catch (error) {
-      console.error('Error creating token batch transfers:', error)
-      // Fallback to individual transfers
-      for (const claim of claims) {
-        const singleTx = await this.createSingleTokenTransfer(
-          chainId,
-          tokenAddress,
-          claim.recipient,
-          ethers.parseUnits(claim.amount.toString(), 18), // Default 18 decimals
-          18
-        )
-        if (singleTx) transactions.push(singleTx)
-      }
-    }
-    
-    return transactions
-  }
-
-  /**
-   * Create batch transfer using a batch contract
-   */
-  async createTokenBatchViaContract(chainId, tokenAddress, recipients, amounts, decimals) {
-    try {
-      const batchContract = this.BATCH_CONTRACTS[chainId]
-      if (!batchContract) return null
-      
-      const contract = new ethers.Interface(this.batchTransferABI)
-      const data = contract.encodeFunctionData('batchTransfer', [
-        tokenAddress,
-        recipients,
-        amounts
-      ])
-      
-      // Estimate gas
-      const gasEstimate = 100000 + (recipients.length * 25000)
-      
-      return {
-        to: batchContract,
-        data: data,
-        value: '0x0',
-        gasLimit: '0x' + gasEstimate.toString(16),
-        chainId: chainId
-      }
-    } catch (error) {
-      console.error('Error creating batch transfer via contract:', error)
-      return null
-    }
-  }
-
-  /**
-   * Create single ERC-20 transfer transaction
-   */
-  async createSingleTokenTransfer(chainId, tokenAddress, recipient, amount, decimals) {
-    try {
-      const contract = new ethers.Interface(this.erc20ABI)
-      const data = contract.encodeFunctionData('transfer', [
-        recipient,
-        amount
-      ])
-      
-      return {
-        to: tokenAddress,
-        data: data,
-        value: '0x0',
-        gasLimit: '0x186A0', // 100,000 gas
-        chainId: chainId
-      }
-    } catch (error) {
-      console.error('Error creating single token transfer:', error)
-      return null
-    }
-  }
-
-  /**
-   * Create dust conversion transactions via DEX
-   */
-  async createDustConversionTransactions(dustResults, targetToken = 'USDC', walletAddress) {
-    const conversionTransactions = []
-    
-    try {
-      for (const chainResult of dustResults) {
-        const chainId = chainResult.chainId
-        
-        // Convert native dust
-        if (chainResult.nativeDust && parseFloat(chainResult.nativeBalance) > 0.0001) {
-          const nativeSwap = await this.createNativeToTokenSwap(
+        // Ask our aggregator helper for a minOut (safe placeholder). No calldata here.
+        let quoteMeta = null
+        try {
+          quoteMeta = await dexAggregatorService.quoteOneInchSingle({
             chainId,
-            chainResult.nativeBalance,
-            targetToken,
-            walletAddress
-          )
-          if (nativeSwap) conversionTransactions.push(nativeSwap)
+            tokenIn,
+            amount: amountWeiStr,
+            slippageBps: 100 // 1%
+          })
+        } catch {
+          quoteMeta = null
         }
-        
-        // Convert token dust
-        for (const token of chainResult.tokenDust) {
-          if (parseFloat(token.balance) > 0.0001) { // Minimum threshold
-            const tokenSwap = await this.createTokenToTokenSwap(
-              chainId,
-              token.address,
-              token.balance,
-              targetToken,
-              walletAddress
-            )
-            if (tokenSwap) conversionTransactions.push(tokenSwap)
-          }
+
+        steps.push({
+          // approval control – executeChainPlan will send ERC20.approve if needed
+          needsApproval: true,
+          usePermit: false,
+
+          // route
+          aggregator: '1inch',
+          tokenIn,
+          tokenOut: wrappedOut,
+
+          // amounts
+          amount: amountWeiStr,
+
+          // optional pricing meta
+          quote: quoteMeta || {},
+
+          // (optionally you could include a preferred slippage / recipient fields)
+        })
+      }
+
+      if (steps.length) {
+        plan.push({ chainId, steps })
+      }
+    }
+
+    return plan
+  }
+
+  // ===========================================================================
+  // LEGACY: Create raw batch transactions (fallback). Your ClaimScreen supports it.
+  // ===========================================================================
+
+  async createBatchDustClaim(claims) {
+    // Keep your previous behavior: group per chain then produce raw txs.
+    // Most people prefer the plan-based path; leaving here for compatibility.
+    const txs = []
+    const byChain = this.groupClaimsByChain(claims)
+
+    for (const [chainIdStr, chainClaims] of Object.entries(byChain)) {
+      const chainId = Number(chainIdStr)
+      for (const [tokenAddr, tokenClaims] of Object.entries(chainClaims)) {
+        if (tokenAddr === '0x0000000000000000000000000000000000000000') {
+          const nativeTx = await this.createNativeBatchTransfer(chainId, tokenClaims)
+          if (nativeTx) txs.push(nativeTx)
+        } else {
+          const tokenTxs = await this.createTokenBatchTransfers(chainId, tokenAddr, tokenClaims)
+          txs.push(...tokenTxs)
         }
       }
-      
-      return conversionTransactions
-    } catch (error) {
-      console.error('Error creating dust conversion transactions:', error)
-      return []
+    }
+    return txs
+  }
+
+  groupClaimsByChain(claims = []) {
+    const result = {}
+    for (const c of claims) {
+      const cid = Number(c.chainId)
+      if (!result[cid]) result[cid] = {}
+      if (!result[cid][c.tokenAddress]) result[cid][c.tokenAddress] = []
+      result[cid][c.tokenAddress].push(c)
+    }
+    return result
+  }
+
+  // ---------------------------------------------------------------------------
+  // Optional “batch transfer” utilities (only used in legacy flows)
+  // ---------------------------------------------------------------------------
+  async createNativeBatchTransfer(chainId, claims) {
+    try {
+      const recipients = claims.map((c) => c.recipient)
+      const amounts = claims.map((c) => ethers.parseEther(String(c.amount)))
+      const total = amounts.reduce((a, b) => a + b, 0n)
+
+      const batch = this.BATCH_CONTRACTS[chainId]
+      if (!batch) {
+        // no batch contract configured – return null (your UI can fall back)
+        return null
+      }
+      const iface = new ethers.Interface(this.batchTransferABI)
+      const data = iface.encodeFunctionData('batchTransferETH', [recipients, amounts])
+      return {
+        to: batch,
+        data,
+        value: '0x' + total.toString(16),
+        gasLimit: '0x' + (50000 + recipients.length * 21000).toString(16),
+        chainId
+      }
+    } catch (e) {
+      console.error('createNativeBatchTransfer error:', e)
+      return null
     }
   }
 
-  /**
-   * Create swap from native token to target token
-   */
-  async createNativeToTokenSwap(chainId, amount, targetToken, walletAddress) {
+  async createTokenBatchTransfers(chainId, tokenAddress, claims) {
+    const txs = []
+    const recipients = claims.map((c) => c.recipient)
+
     try {
-      // Use DEX aggregator to get the best swap route
+      const provider = web3Service.getProvider(chainId)
+      const erc = new ethers.Contract(tokenAddress, this.erc20ABI, provider)
+      const decimals = await erc.decimals()
+
+      const amounts = claims.map((c) => ethers.parseUnits(String(c.amount), decimals))
+
+      const batch = this.BATCH_CONTRACTS[chainId]
+      if (batch) {
+        const iface = new ethers.Interface(this.batchTransferABI)
+        const data = iface.encodeFunctionData('batchTransfer', [tokenAddress, recipients, amounts])
+        const gasEstimate = 100000 + recipients.length * 25000
+        txs.push({
+          to: batch,
+          data,
+          value: '0x0',
+          gasLimit: '0x' + gasEstimate.toString(16),
+          chainId
+        })
+        return txs
+      }
+
+      // Fallback: individual transfers
+      const iface = new ethers.Interface(this.erc20ABI)
+      for (let i = 0; i < recipients.length; i++) {
+        const data = iface.encodeFunctionData('transfer', [recipients[i], amounts[i]])
+        txs.push({
+          to: tokenAddress,
+          data,
+          value: '0x0',
+          gasLimit: '0x186A0', // 100k
+          chainId
+        })
+      }
+    } catch (e) {
+      console.error('createTokenBatchTransfers error:', e)
+    }
+    return txs
+  }
+
+  // ---------------------------------------------------------------------------
+  // Convenience helpers: produce swap transactions straight from aggregator
+  // (Optional – you can keep using the plan/executor route instead.)
+  // ---------------------------------------------------------------------------
+  async createNativeToTokenSwap(chainId, amount, targetTokenSymbol) {
+    try {
+      const target = await this.getTokenAddress(chainId, targetTokenSymbol)
       const quote = await dexAggregatorService.getBestQuote(
         chainId,
-        '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', // Native token address
-        await this.getTokenAddress(chainId, targetToken),
-        amount,
-        1 // 1% slippage
+        '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', // native pseudo-address
+        target,
+        toWeiStr18(amount),
+        1
       )
-      
-      if (quote && quote.transaction) {
-        return {
-          to: quote.transaction.to,
-          data: quote.transaction.data,
-          value: '0x' + BigInt(quote.transaction.value || 0).toString(16),
-          gasLimit: '0x' + (quote.estimatedGas || 300000).toString(16),
-          chainId: chainId
-        }
+      if (quote?.transaction) {
+        const val = BigInt(quote.transaction.value || 0)
+        const gl = BigInt(quote.estimatedGas || 300000)
+        return { to: quote.transaction.to, data: quote.transaction.data, value: '0x' + val.toString(16), gasLimit: '0x' + gl.toString(16), chainId }
       }
-    } catch (error) {
-      console.error('Error creating native to token swap:', error)
+    } catch (e) {
+      console.error('createNativeToTokenSwap error:', e)
     }
     return null
   }
 
-  /**
-   * Create swap from one token to another
-   */
-  async createTokenToTokenSwap(chainId, fromToken, amount, targetToken, walletAddress) {
+  async createTokenToTokenSwap(chainId, fromToken, amount, targetTokenSymbol) {
     try {
-      const toToken = await this.getTokenAddress(chainId, targetToken)
-      
+      const toToken = await this.getTokenAddress(chainId, targetTokenSymbol)
       const quote = await dexAggregatorService.getBestQuote(
         chainId,
         fromToken,
         toToken,
-        amount,
-        1 // 1% slippage
+        toAmountStr(amount),
+        1
       )
-      
-      if (quote && quote.transaction) {
-        return {
-          to: quote.transaction.to,
-          data: quote.transaction.data,
-          value: '0x' + BigInt(quote.transaction.value || 0).toString(16),
-          gasLimit: '0x' + (quote.estimatedGas || 300000).toString(16),
-          chainId: chainId
-        }
+      if (quote?.transaction) {
+        const val = BigInt(quote.transaction.value || 0)
+        const gl = BigInt(quote.estimatedGas || 300000)
+        return { to: quote.transaction.to, data: quote.transaction.data, value: '0x' + val.toString(16), gasLimit: '0x' + gl.toString(16), chainId }
       }
-    } catch (error) {
-      console.error('Error creating token to token swap:', error)
+    } catch (e) {
+      console.error('createTokenToTokenSwap error:', e)
     }
     return null
   }
 
-  /**
-   * Get token address by symbol
-   */
+  // ---------------------------------------------------------------------------
+  // Token maps (extend as you like)
+  // ---------------------------------------------------------------------------
   async getTokenAddress(chainId, symbol) {
-    const TOKEN_ADDRESSES = {
+    const map = {
       1: {
-        'USDC': '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-        'USDT': '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-        'DAI': '0x6B175474E89094C44Da98b954EedeAC495271d0F'
+        USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+        USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+        DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F'
       },
       137: {
-        'USDC': '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-        'USDT': '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'
+        USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+        USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F'
       },
       42161: {
-        'USDC': '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
-        'USDT': '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+        USDC: '0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8',
+        USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+      },
+      56: {
+        USDT: '0x55d398326f99059fF775485246999027B3197955',
+        USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d'
       }
     }
-    
-    return TOKEN_ADDRESSES[chainId]?.[symbol] || '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+    return map[Number(chainId)]?.[symbol] ?? '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
   }
 
-  /**
-   * Calculate real gas savings based on actual transaction counts
-   */
-  calculateGasSavings(individualTransactions, batchTransactions) {
-    // Real gas estimates based on transaction types
-    const individualGas = individualTransactions.reduce((total, tx) => {
-      let gas = 0
-      if (tx.data && tx.data.length > 10) {
-        // ERC-20 transfer: ~65,000 gas
-        gas = 65000
-      } else {
-        // Native transfer: ~21,000 gas
-        gas = 21000
-      }
-      return total + gas
+  // ---------------------------------------------------------------------------
+  // Analytics
+  // ---------------------------------------------------------------------------
+  calculateGasSavings(individualTxs, batchTxs) {
+    const individualGas = (individualTxs || []).reduce((sum, tx) => {
+      const isData = tx?.data && tx.data !== '0x'
+      return sum + (isData ? 65000 : 21000)
     }, 0)
-    
-    const batchGas = batchTransactions.reduce((total, tx) => {
-      let gas = 0
-      if (tx.data && tx.data.includes('batchTransfer')) {
-        // Batch transfer: ~100,000 base + 20,000 per recipient
-        const recipientCount = (tx.data.length - 138) / 64 // Rough estimate
-        gas = 100000 + (recipientCount * 20000)
-      } else if (tx.data && tx.data.includes('multiSend')) {
-        // Multi-send: ~150,000 base + 5,000 per transfer
-        const transferCount = (tx.data.length - 138) / 64
-        gas = 150000 + (transferCount * 5000)
-      } else {
-        // Regular transaction
-        gas = 65000
+
+    const batchGas = (batchTxs || []).reduce((sum, tx) => {
+      const d = tx?.data || ''
+      if (d.includes('batchTransfer')) {
+        const approxRecipients = Math.max(0, Math.floor((d.length - 138) / 64))
+        return sum + 100000 + approxRecipients * 20000
       }
-      return total + gas
+      if (d.includes('multiSend')) {
+        const approxTransfers = Math.max(0, Math.floor((d.length - 138) / 64))
+        return sum + 150000 + approxTransfers * 5000
+      }
+      return sum + 65000
     }, 0)
-    
+
     const savings = individualGas - batchGas
-    const savingsPercentage = individualGas > 0 ? ((savings / individualGas) * 100).toFixed(2) : '0.00'
-    
+    const savingsPct = individualGas > 0 ? ((savings / individualGas) * 100).toFixed(2) : '0.00'
+
     return {
       individualGas,
       batchGas,
       savings,
-      savingsPercentage,
+      savingsPercentage: savingsPct,
       estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
     }
   }
 
-  /**
-   * Estimate USD value of gas savings
-   */
-  estimateGasSavingsUSD(gasSavings, chainId = 1) {
-    // Average gas prices (in gwei)
-    const avgGasPrice = {
-      1: 30,    // Ethereum: 30 gwei
-      137: 200,  // Polygon: 200 gwei
-      42161: 0.1, // Arbitrum: 0.1 gwei
-      10: 0.001  // Optimism: 0.001 gwei
+  estimateGasSavingsUSD(gasUnits, chainId = 1) {
+    const avgGwei = {
+      1: 30,
+      137: 200,
+      42161: 0.1,
+      10: 0.001
     }
-    
-    const gasPrice = avgGasPrice[chainId] || 30
-    const ethPrice = 2500 // Assume $2500/ETH
-    
-    // Convert gas savings to USD
-    const ethSaved = (gasSavings * gasPrice * 1e9) / 1e18
+    const gwei = avgGwei[Number(chainId)] ?? 30
+    const ethPrice = 2500
+    const ethSaved = (Number(gasUnits) * gwei * 1e9) / 1e18
     return ethSaved * ethPrice
   }
 
-  /**
-   * Validate batch transactions before execution
-   */
-  validateBatchTransactions(transactions, walletAddress) {
+  validateBatchTransactions(txs) {
     const errors = []
-    
-    transactions.forEach((tx, index) => {
-      // Check for basic transaction structure
-      if (!tx.to) {
-        errors.push(`Transaction ${index + 1}: Missing 'to' address`)
-      }
-      
-      if (!tx.data && !tx.value) {
-        errors.push(`Transaction ${index + 1}: No data or value provided`)
-      }
-      
-      if (!tx.chainId) {
-        errors.push(`Transaction ${index + 1}: Missing chainId`)
-      }
-      
-      // Validate value format
-      if (tx.value && !this.isValidHex(tx.value)) {
-        errors.push(`Transaction ${index + 1}: Invalid value format`)
-      }
-      
-      // Validate gas limit
-      if (tx.gasLimit && !this.isValidHex(tx.gasLimit)) {
-        errors.push(`Transaction ${index + 1}: Invalid gas limit format`)
-      }
+    ;(txs || []).forEach((tx, i) => {
+      if (!tx?.to) errors.push(`Tx ${i + 1}: missing 'to'`)
+      if (!tx?.data && !tx?.value) errors.push(`Tx ${i + 1}: no data or value`)
+      if (!tx?.chainId) errors.push(`Tx ${i + 1}: missing chainId`)
+      if (tx?.value && !/^0x[0-9a-fA-F]+$/.test(tx.value)) errors.push(`Tx ${i + 1}: bad value`)
+      if (tx?.gasLimit && !/^0x[0-9a-fA-F]+$/.test(tx.gasLimit)) errors.push(`Tx ${i + 1}: bad gasLimit`)
     })
-    
-    return {
-      isValid: errors.length === 0,
-      errors
-    }
+    return { isValid: errors.length === 0, errors }
   }
 
-  /**
-   * Check if string is valid hex
-   */
-  isValidHex(str) {
-    return typeof str === 'string' && /^0x[0-9a-fA-F]+$/.test(str)
-  }
-
-  /**
-   * Optimize transaction order for gas efficiency
-   */
-  optimizeTransactionOrder(transactions) {
-    return transactions.sort((a, b) => {
-      // Execute native transfers first (cheaper)
-      const aIsNative = !a.data || a.data === '0x'
-      const bIsNative = !b.data || b.data === '0x'
-      
-      if (aIsNative && !bIsNative) return -1
-      if (!aIsNative && bIsNative) return 1
-      
-      // Then sort by chain (group by chain to avoid switching)
-      return a.chainId - b.chainId
+  optimizeTransactionOrder(txs = []) {
+    return [...txs].sort((a, b) => {
+      const aNative = !a.data || a.data === '0x'
+      const bNative = !b.data || b.data === '0x'
+      if (aNative && !bNative) return -1
+      if (!aNative && bNative) return 1
+      return Number(a.chainId) - Number(b.chainId)
     })
   }
 }

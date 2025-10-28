@@ -116,7 +116,8 @@ const DustScanner = () => {
       const chainsToScan = Object.keys(selectedChains).filter((id) => selectedChains[id])
 
       const scanPromises = chainsToScan.map((chainId) =>
-        web3Service.checkForDust(chainId, address)
+        // FIX: ensure numeric chainId for downstream libs
+        web3Service.checkForDust(Number(chainId), address)
       )
 
       const settled = await Promise.allSettled(scanPromises)
@@ -140,7 +141,7 @@ const DustScanner = () => {
       setTotalDustValue(enriched.reduce((sum, r) => sum + (r.usdValue || 0), 0))
 
       try {
-        const allTokenDust = enriched.flatMap((r) => r.tokenDust)
+        const allTokenDust = enriched.flatMap((r) => r.tokenDust || []) // FIX: guard
         const savings =
           (batchService.calculateGasSavings &&
             (await batchService.calculateGasSavings(allTokenDust, enriched))) ||
@@ -195,9 +196,9 @@ const DustScanner = () => {
           dustResults,
           totalDustValue,
           batchSavings,
-          oneInchSingle: quickOneInchSingle,
-          oneInchBatch: quickOneInchBatch,
-          uniswapSingle: quickUniswapSingle
+          oneInchSingle: setQuickOneInchSingle ? quickOneInchSingle : null,
+          oneInchBatch: setQuickOneInchBatch ? quickOneInchBatch : null,
+          uniswapSingle: setQuickUniswapSingle ? quickUniswapSingle : null
         },
       })
     } catch (err) {
@@ -301,7 +302,7 @@ const DustScanner = () => {
                   </div>
                   <div className="dust-stats">
                     <span className="dust-count">
-                      {r.tokenDust.length} token{r.tokenDust.length !== 1 ? 's' : ''}
+                      {(r.tokenDust?.length || 0)} token{(r.tokenDust?.length || 0) !== 1 ? 's' : ''}
                     </span>
                   </div>
                 </div>
@@ -314,19 +315,19 @@ const DustScanner = () => {
                     </span>
                   </div>
 
-                  {r.tokenDust.slice(0, 5).map((t, i) => (
+                  {(r.tokenDust || []).slice(0, 5).map((t, i) => (
                     <div key={i} className="token-dust">
                       <span className="dust-label">{t.symbol}:</span>
                       <span className="dust-amount">{parseFloat(t.balance).toFixed(6)}</span>
                     </div>
                   ))}
 
-                  {r.tokenDust.length > 5 && (
+                  {(r.tokenDust?.length || 0) > 5 && (
                     <div className="more-tokens">+{r.tokenDust.length - 5} more tokens</div>
                   )}
                 </div>
 
-                <div className="claim-indicator">🧹 {r.tokenDust.length} claimable tokens</div>
+                <div className="claim-indicator">🧹 {(r.tokenDust?.length || 0)} claimable tokens</div>
               </div>
             ))}
           </div>

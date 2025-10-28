@@ -12,24 +12,30 @@ const ClaimScreen = () => {
   const navigate = useNavigate()
   const { address, isConnected, loading: walletLoading } = useWallet()
 
-  // -------- incoming data from DustScanner (use whatever you already pass) --------
+  // -------- incoming data from DustScanner --------
   const {
-    // your previous optimized plan for the legacy executor
     claimPlan = [],
-
-    // legacy batch structure (kept for backward compatibility)
     batchTransactions = [],
-
-    // optional helpers from your scanner if you compute 1inch/uni quotes client side
     oneInchSingle = null, // { token, quotedMinOutWei, calldata }
     oneInchBatch = null, // { tokens, minOutsWei, datas }
     uniswapSingle = null, // { token, fee, minOutWei, ttlSec }
-
-    // display/summary
     dustResults = [],
     totalDustValue = 0,
     batchSavings = null
   } = location.state || {}
+
+  // is there anything we can execute with the legacy path?
+  const planAvailable = useMemo(() => {
+    if (Array.isArray(claimPlan) && claimPlan.length > 0) return true
+    if (Array.isArray(batchTransactions) && batchTransactions.length > 0) return true
+    return false
+  }, [claimPlan, batchTransactions])
+
+  // pick a chain for explorers when quick actions are used
+  const defaultChainId = useMemo(
+    () => Number(dustResults?.[0]?.chainId) || 1,
+    [dustResults]
+  )
 
   // -------- local UI state --------
   const [claiming, setClaiming] = useState(false)
@@ -37,18 +43,20 @@ const ClaimScreen = () => {
   const [claimResults, setClaimResults] = useState([])
   const [error, setError] = useState(null)
 
-  const totalChains = useMemo(
-    () => (claimPlan && claimPlan.length ? claimPlan.length : 1),
-    [claimPlan]
-  )
+  const totalChains = useMemo(() => {
+    if (Array.isArray(claimPlan) && claimPlan.length) return claimPlan.length
+    if (Array.isArray(batchTransactions) && batchTransactions.length) return 1
+    return 0
+  }, [claimPlan, batchTransactions])
 
   const getChainInfo = (chainId) =>
     SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
   // ============================================================================
-  // A) Your existing “optimized plan” path (uses executeChainPlan)
+  // A) Optimized plan path (uses executeChainPlan)
   // ============================================================================
   const handleExecuteClaim = async () => {
+    if (!planAvailable) return
     setClaiming(true)
     setError(null)
     setClaimResults([])
@@ -61,10 +69,6 @@ const ClaimScreen = () => {
           : batchTransactions.length
           ? [{ chainId: batchTransactions[0]?.chainId, steps: batchTransactions }]
           : []
-
-      if (!planToRun.length) {
-        throw new Error('Nothing to execute: missing plan/transactions')
-      }
 
       for (let i = 0; i < planToRun.length; i++) {
         const chainPlan = planToRun[i]
@@ -79,8 +83,7 @@ const ClaimScreen = () => {
             error: e?.message || 'Execution failed'
           })
         }
-        // tiny pause keeps UI feeling responsive
-        await new Promise((r) => setTimeout(r, 300))
+        await new Promise((r) => setTimeout(r, 250))
       }
 
       setClaimResults(allResults)
@@ -93,7 +96,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // B) New permissionless contract paths
+  // B) Permissionless contract quick actions
   // ============================================================================
 
   // 1) Single token via 1inch
@@ -107,7 +110,11 @@ const ClaimScreen = () => {
         ethers.toBigInt(quotedMinOutWei),
         calldata
       )
-      setClaimResults([{ chainId: (await permSvc.getReadonlyProvider)?.chainId, success: res.success, receipts: [{ txHash: res.txHash }] }])
+      setClaimResults([{
+        chainId: defaultChainId,
+        success: !!res.success,
+        receipts: [{ txHash: res.txHash }]
+      }])
     } catch (e) {
       setError(e?.message || '1inch swap failed')
     } finally {
@@ -126,7 +133,11 @@ const ClaimScreen = () => {
         minOutsWei.map(ethers.toBigInt),
         datas
       )
-      setClaimResults([{ success: res.success, receipts: [{ txHash: res.txHash }] }])
+      setClaimResults([{
+        chainId: defaultChainId,
+        success: !!res.success,
+        receipts: [{ txHash: res.txHash }]
+      }])
     } catch (e) {
       setError(e?.message || 'Batch 1inch swap failed')
     } finally {
@@ -147,7 +158,11 @@ const ClaimScreen = () => {
         ethers.toBigInt(minOutWei),
         deadline
       )
-      setClaimResults([{ success: res.success, receipts: [{ txHash: res.txHash }] }])
+      setClaimResults([{
+        chainId: defaultChainId,
+        success: !!res.success,
+        receipts: [{ txHash: res.txHash }]
+      }])
     } catch (e) {
       setError(e?.message || 'Uniswap swap failed')
     } finally {
@@ -205,11 +220,20 @@ const ClaimScreen = () => {
         {/* Legacy “optimized plan” executor */}
         <button
           onClick={handleExecuteClaim}
-          disabled={claiming || walletLoading || !isConnected}
+          disabled={!planAvailable || claiming || walletLoading || !isConnected}
           className="execute-button"
+          title={!planAvailable ? 'No plan/transactions were sent from the scanner.' : ''}
         >
           {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
         </button>
+
+        {!planAvailable && (
+          <div className="hint-banner">
+            Nothing to execute — the scanner didn’t provide a plan.
+            Run a scan again and proceed to Claim, or use the quick-action buttons below
+            if they’re available.
+          </div>
+        )}
 
         {/* Permissionless quick actions (only render if we have inputs) */}
         {oneInchSingle && (
@@ -250,7 +274,7 @@ const ClaimScreen = () => {
       </div>
 
       {/* Progress bar */}
-      {claiming && (
+      {claiming && totalChains > 0 && (
         <div className="claiming-progress">
           <div className="progress-info">
             <div className="spinner" />
@@ -278,9 +302,7 @@ const ClaimScreen = () => {
 
           <div className="results-details">
             {claimResults.map((result, idx) => {
-              const info =
-                getChainInfo(result.chainId) ||
-                { explorer: '', name: 'Unknown' }
+              const info = getChainInfo(result.chainId || defaultChainId)
               return (
                 <div
                   key={idx}
@@ -299,7 +321,7 @@ const ClaimScreen = () => {
                             href={
                               info.explorer
                                 ? `${info.explorer}/tx/${tx}`
-                                : `#`
+                                : '#'
                             }
                             target="_blank"
                             rel="noopener noreferrer"
