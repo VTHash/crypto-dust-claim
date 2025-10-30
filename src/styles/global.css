@@ -441,3 +441,23 @@ img, svg {
   margin-right: 8px;
   vertical-align: middle;
 }
+
+.token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.token-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.token-logo {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}

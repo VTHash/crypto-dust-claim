@@ -18,15 +18,14 @@ const DustScanner = () => {
   const [dustResults, setDustResults] = useState([])
   const [totalDustValue, setTotalDustValue] = useState(0)
   const [batchSavings, setBatchSavings] = useState(null)
+
+  // quick actions
   const [quickOneInchSingle, setQuickOneInchSingle] = useState(null)
   const [quickOneInchBatch, setQuickOneInchBatch] = useState(null)
   const [quickUniswapSingle, setQuickUniswapSingle] = useState(null)
 
   const [selectedChains, setSelectedChains] = useState(
-    Object.keys(SUPPORTED_CHAINS).reduce((acc, chainId) => {
-      acc[chainId] = true
-      return acc
-    }, {})
+    Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => (acc[id] = true, acc), {})
   )
 
   useEffect(() => {
@@ -34,6 +33,9 @@ const DustScanner = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address])
 
+  const selectedChainCount = Object.values(selectedChains).filter(Boolean).length
+
+  // Build quick action quotes from top item(s)
   const buildQuickActions = async (enriched) => {
     setQuickOneInchSingle(null)
     setQuickOneInchBatch(null)
@@ -41,20 +43,21 @@ const DustScanner = () => {
 
     if (!dexAggregatorService || typeof dexAggregatorService !== 'object') return
 
-    const withAnyToken = enriched
+    const withTokens = enriched
       .map(r => ({
         ...r,
-        tokenDust: (r.tokenDust || []).map(t => ({ ...t, _usd: typeof t.usd === 'number' ? t.usd : 0 }))
+        tokenDust: (r.tokenDetails?.length ? r.tokenDetails : r.tokenDust || []).map(t => ({
+          ...t, _usd: typeof t.value === 'number' ? t.value : 0
+        }))
       }))
       .filter(r => r.tokenDust && r.tokenDust.length > 0)
 
-    const top =
-      withAnyToken
-        .map(r => {
-          const best = [...r.tokenDust].sort((a, b) => (b._usd ?? 0) - (a._usd ?? 0))[0]
-          return best ? { chainId: r.chainId, token: best } : null
-        })
-        .filter(Boolean)[0] || null
+    const top = withTokens
+      .map(r => {
+        const best = [...r.tokenDust].sort((a, b) => (b._usd ?? 0) - (a._usd ?? 0))[0]
+        return best ? { chainId: r.chainId, token: best } : null
+      })
+      .filter(Boolean)[0] || null
 
     try {
       if (top && typeof dexAggregatorService.quoteOneInchSingle === 'function') {
@@ -63,27 +66,27 @@ const DustScanner = () => {
           tokenIn: top.token.address,
           amount: top.token.balance
         })
-        if (single?.calldata && single?.quotedMinOutWei) {
+        if (single?.quotedMinOutWei) {
           setQuickOneInchSingle({
             token: top.token.address,
             quotedMinOutWei: single.quotedMinOutWei,
-            calldata: single.calldata
+            calldata: single.calldata || null
           })
         }
       }
     } catch {}
 
     try {
-      if (withAnyToken.length && typeof dexAggregatorService.quoteOneInchBatch === 'function') {
-        const flat = withAnyToken.flatMap(r =>
+      if (withTokens.length && typeof dexAggregatorService.quoteOneInchBatch === 'function') {
+        const flat = withTokens.flatMap(r =>
           r.tokenDust.map(t => ({ chainId: Number(r.chainId), token: t.address, amount: t.balance }))
         )
         const batch = await dexAggregatorService.quoteOneInchBatch(flat)
-        if (batch?.tokens?.length && batch?.minOutsWei?.length && batch?.datas?.length) {
+        if (batch?.tokens?.length && batch?.minOutsWei?.length) {
           setQuickOneInchBatch({
             tokens: batch.tokens,
             minOutsWei: batch.minOutsWei,
-            datas: batch.datas
+            datas: batch.datas || batch.tokens.map(() => '0x')
           })
         }
       }
@@ -96,7 +99,7 @@ const DustScanner = () => {
           tokenIn: top.token.address,
           amount: top.token.balance
         })
-        if (uni?.minOutWei) {
+        if (uni?.minOutWei !== undefined) {
           setQuickUniswapSingle({
             token: top.token.address,
             fee: uni.fee ?? 3000,
@@ -113,39 +116,29 @@ const DustScanner = () => {
     setScanning(true)
     setDustResults([])
     try {
-      const chainsToScan = Object.keys(selectedChains).filter((id) => selectedChains[id])
+      const chainsToScan = Object.keys(selectedChains).filter(id => selectedChains[id])
 
-      const scanPromises = chainsToScan.map((chainId) =>
-        // FIX: ensure numeric chainId for downstream libs
-        web3Service.checkForDust(Number(chainId), address)
+      // gather base info
+      const settled = await Promise.allSettled(
+        chainsToScan.map((id) => web3Service.getDetailedDustAnalysis(id, address))
       )
 
-      const settled = await Promise.allSettled(scanPromises)
-      const valid = settled
-        .filter((r) => r.status === 'fulfilled' && r.value?.hasDust)
-        .map((r) => r.value)
+      const enriched = settled
+        .filter(r => r.status === 'fulfilled' && r.value)
+        .map(r => r.value)
+        .filter(r => r.hasDust)
 
-      const enriched = await Promise.all(
-        valid.map(async (r) => {
-          const usdValue = await web3Service.getUSDValue(
-            r.chainId,
-            r.nativeBalance,
-            r.tokenDust
-          )
-          const meta = SUPPORTED_CHAINS[r.chainId] || {}
-          return { ...r, usdValue, chainName: meta.name, symbol: meta.symbol }
-        })
-      )
-
+      // totals
+      const total = enriched.reduce((sum, r) => sum + (r.totalValue || 0), 0)
       setDustResults(enriched)
-      setTotalDustValue(enriched.reduce((sum, r) => sum + (r.usdValue || 0), 0))
+      setTotalDustValue(Number(total.toFixed(4)))
 
+      // rough gas saving calc if you have it
       try {
-        const allTokenDust = enriched.flatMap((r) => r.tokenDust || []) // FIX: guard
+        const allDustTokens = enriched.flatMap(r => r.tokenDetails?.length ? r.tokenDetails : r.tokenDust)
         const savings =
           (batchService.calculateGasSavings &&
-            (await batchService.calculateGasSavings(allTokenDust, enriched))) ||
-          null
+            (await batchService.calculateGasSavings(allDustTokens, enriched))) || null
         setBatchSavings(savings)
       } catch {
         setBatchSavings(null)
@@ -153,7 +146,7 @@ const DustScanner = () => {
 
       await buildQuickActions(enriched)
     } catch (err) {
-      console.error('Error scanning for dust:', err)
+      console.error('scanForDust error:', err)
     } finally {
       setScanning(false)
     }
@@ -162,7 +155,7 @@ const DustScanner = () => {
   const handleBatchClaim = async () => {
     try {
       const claims = dustResults.flatMap((r) =>
-        (r.tokenDust || []).map((t) => ({
+        (r.tokenDetails?.length ? r.tokenDetails : r.tokenDust || []).map((t) => ({
           chainId: r.chainId,
           tokenAddress: t.address,
           tokenSymbol: t.symbol,
@@ -183,9 +176,7 @@ const DustScanner = () => {
       let batchTransactions = []
       if (!claimPlan?.length) {
         if (typeof batchService.createBatchDustClaim === 'function') {
-          batchTransactions = await batchService.createBatchDustClaim(claims)
-        } else {
-          batchTransactions = []
+          batchTransactions = await batchService.createBatchDustClaim(claims, address)
         }
       }
 
@@ -196,9 +187,9 @@ const DustScanner = () => {
           dustResults,
           totalDustValue,
           batchSavings,
-          oneInchSingle: setQuickOneInchSingle ? quickOneInchSingle : null,
-          oneInchBatch: setQuickOneInchBatch ? quickOneInchBatch : null,
-          uniswapSingle: setQuickUniswapSingle ? quickUniswapSingle : null
+          oneInchSingle: quickOneInchSingle,
+          oneInchBatch: quickOneInchBatch,
+          uniswapSingle: quickUniswapSingle
         },
       })
     } catch (err) {
@@ -206,23 +197,14 @@ const DustScanner = () => {
     }
   }
 
-  const toggleChainSelection = (chainId) => {
+  const toggleChainSelection = (chainId) =>
     setSelectedChains((prev) => ({ ...prev, [chainId]: !prev[chainId] }))
-  }
 
-  const selectAllChains = () => {
-    setSelectedChains(
-      Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => ((acc[id] = true), acc), {})
-    )
-  }
+  const selectAllChains = () =>
+    setSelectedChains(Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => (acc[id] = true, acc), {}))
 
-  const deselectAllChains = () => {
-    setSelectedChains(
-      Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => ((acc[id] = false), acc), {})
-    )
-  }
-
-  const selectedChainCount = Object.values(selectedChains).filter(Boolean).length
+  const deselectAllChains = () =>
+    setSelectedChains(Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => (acc[id] = false, acc), {}))
 
   return (
     <div className="dust-scanner">
@@ -296,13 +278,13 @@ const DustScanner = () => {
                       alt={SUPPORTED_CHAINS[r.chainId]?.name}
                     />
                     <div>
-                      <h3>{r.chainName}</h3>
-                      <p className="chain-value">${r.usdValue.toFixed(2)}</p>
+                      <h3>{SUPPORTED_CHAINS[r.chainId]?.name}</h3>
+                      <p className="chain-value">${(r.totalValue || 0).toFixed(2)}</p>
                     </div>
                   </div>
                   <div className="dust-stats">
                     <span className="dust-count">
-                      {(r.tokenDust?.length || 0)} token{(r.tokenDust?.length || 0) !== 1 ? 's' : ''}
+                      {(r.tokenDetails?.length || r.tokenDust?.length || 0)} token{(r.tokenDetails?.length || r.tokenDust?.length || 0) !== 1 ? 's' : ''}
                     </span>
                   </div>
                 </div>
@@ -311,23 +293,25 @@ const DustScanner = () => {
                   <div className="native-dust">
                     <span className="dust-label">Native:</span>
                     <span className="dust-amount">
-                      {parseFloat(r.nativeBalance).toFixed(6)} {r.symbol}
+                      {parseFloat(r.nativeBalance).toFixed(6)} {SUPPORTED_CHAINS[r.chainId]?.symbol}
                     </span>
                   </div>
 
-                  {(r.tokenDust || []).slice(0, 5).map((t, i) => (
+                  {(r.tokenDetails?.length ? r.tokenDetails : r.tokenDust || []).slice(0, 5).map((t, i) => (
                     <div key={i} className="token-dust">
                       <span className="dust-label">{t.symbol}:</span>
                       <span className="dust-amount">{parseFloat(t.balance).toFixed(6)}</span>
                     </div>
                   ))}
 
-                  {(r.tokenDust?.length || 0) > 5 && (
-                    <div className="more-tokens">+{r.tokenDust.length - 5} more tokens</div>
+                  {(r.tokenDetails?.length || r.tokenDust?.length || 0) > 5 && (
+                    <div className="more-tokens">
+                      +{(r.tokenDetails?.length || r.tokenDust.length) - 5} more tokens
+                    </div>
                   )}
                 </div>
 
-                <div className="claim-indicator">🧹 {(r.tokenDust?.length || 0)} claimable tokens</div>
+                <div className="claim-indicator">🧹 {(r.tokenDetails?.length || r.tokenDust?.length || 0)} claimable tokens</div>
               </div>
             ))}
           </div>
@@ -344,12 +328,12 @@ const DustScanner = () => {
         </div>
       )}
 
-      {/* Empty States */}
+      {/* Empty states */}
       {!scanning && dustResults.length === 0 && selectedChainCount > 0 && (
         <div className="empty-state">
           <div className="empty-icon">🔍</div>
           <h3>No Dust Found</h3>
-          <p>We scanned {selectedChainCount} chains but didn't find any claimable dust.</p>
+          <p>We scanned {selectedChainCount} chains but didn’t find any claimable dust.</p>
           <button onClick={scanForDust} className="btn btn-outline">Try Scanning Again</button>
         </div>
       )}
