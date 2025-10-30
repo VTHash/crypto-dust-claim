@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import ThemeToggle from './ThemeToggle'
 import './Navbar.css'
+import DebugWalletPanel from './DebugWalletPanel'
 
 const Navbar = () => {
   const { address, isConnected, connect, disconnect, loading } = useWallet()
@@ -88,5 +89,14 @@ function ConnDebug() {
       }, null, 2)}
     </pre>
   );
+}
+
+{
+  import.meta.env.MODE !== 'production' && (
+    <div style={{ position: 'fixed', right: 12, bottom: 12, zIndex: 9999}}>
+      <DebygWalletPanel />
+      </div>
+  )
+
 }
 export default Navbar
