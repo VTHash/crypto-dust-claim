@@ -43,7 +43,7 @@ const WalletScreen = () => {
       {/* HERO */}
       <section className="hero">
         <h1><span className="hero-icon">🧹</span> DustClaim</h1>
-        <p>Claim your crypto dust across multiple blockchains.</p>
+        <li>Claim your crypto dust across multiple blockchains.</li>
       </section>
 
       {/* CONNECT / INFO */}
@@ -77,7 +77,7 @@ const WalletScreen = () => {
           <div className="info-cards">
             <InfoCard icon="🧠" title="1) What DustClaim does (at a glance)" defaultOpen>
               <ul className="info-list">
-                <li>Connect your wallet and <strong>scan 15+ chains</strong> for small, forgotten balances (“dust”).</li>
+                <li>Connect your wallet and <strong>scan 8+ chains</strong> for small, forgotten balances (“dust”).</li>
                 <li>We show <strong>native</strong> (e.g., ETH, BNB) and <strong>ERC-20 tokens</strong> with live USD values & real logos.</li>
                 <li>You can <strong>claim as-is</strong> (send tokens back to you), or <strong>swap & consolidate</strong> into one token per chain first (mini-exchange).</li>
                 <li>Every action is <strong>non-custodial</strong> — you sign each transaction from your wallet.</li>
@@ -127,9 +127,9 @@ const WalletScreen = () => {
 
             {error && <div className="error-message">{error}</div>}
 
-            <p className="supported-wallets">
+            <li> Supported-Wallets
               Supports MetaMask, WalletConnect, Coinbase Wallet, and 100+ more.
-            </p>
+            </li>
           </div>
         </section>
       ) : (
