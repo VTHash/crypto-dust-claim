@@ -4,6 +4,7 @@ import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
 import { executeChainPlan } from '../services/claimExecutor'
 import permSvc from '../services/permissionlessContractService'
+import { buildDustClaimBatch } from '../services/dustClaimService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './ClaimScreen.css'
 
@@ -24,12 +25,30 @@ const ClaimScreen = () => {
     batchSavings = null
   } = location.state || {}
 
-  // is there anything we can execute with the legacy path?
+  // Is there anything we can execute with the legacy path?
   const planAvailable = useMemo(() => {
     if (Array.isArray(claimPlan) && claimPlan.length > 0) return true
     if (Array.isArray(batchTransactions) && batchTransactions.length > 0) return true
     return false
   }, [claimPlan, batchTransactions])
+
+  // Real-time number of chains that actually have dust (distinct chainIds from dustResults)
+  const realTimeChains = useMemo(() => {
+    const s = new Set()
+    for (const r of (dustResults || [])) {
+      if ((r.tokenDust && r.tokenDust.length) || Number(r.nativeBalance) > 0) {
+        s.add(Number(r.chainId))
+      }
+    }
+    return s.size
+  }, [dustResults])
+
+  // When a plan exists, we still show its chain length; otherwise we show the live count.
+  const totalChains = useMemo(() => {
+    if (planAvailable && Array.isArray(claimPlan) && claimPlan.length) return claimPlan.length
+    if (planAvailable && Array.isArray(batchTransactions) && batchTransactions.length) return 1
+    return realTimeChains
+  }, [planAvailable, claimPlan, batchTransactions, realTimeChains])
 
   // pick a chain for explorers when quick actions are used
   const defaultChainId = useMemo(
@@ -43,50 +62,86 @@ const ClaimScreen = () => {
   const [claimResults, setClaimResults] = useState([])
   const [error, setError] = useState(null)
 
-  const totalChains = useMemo(() => {
-    if (Array.isArray(claimPlan) && claimPlan.length) return claimPlan.length
-    if (Array.isArray(batchTransactions) && batchTransactions.length) return 1
-    return 0
-  }, [claimPlan, batchTransactions])
-
   const getChainInfo = (chainId) =>
     SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
   // ============================================================================
-  // A) Optimized plan path (uses executeChainPlan)
+  // A) Optimized plan path (uses executeChainPlan); if absent, fall back to contract path
   // ============================================================================
   const handleExecuteClaim = async () => {
-    if (!planAvailable) return
     setClaiming(true)
     setError(null)
     setClaimResults([])
 
     try {
-      const allResults = []
-      const planToRun =
-        claimPlan && claimPlan.length
-          ? claimPlan
-          : batchTransactions.length
-          ? [{ chainId: batchTransactions[0]?.chainId, steps: batchTransactions }]
-          : []
+      // 1) If we received an explicit plan from the scanner, run it.
+      if (planAvailable) {
+        const allResults = []
+        const planToRun =
+          claimPlan && claimPlan.length
+            ? claimPlan
+            : batchTransactions.length
+            ? [{ chainId: batchTransactions[0]?.chainId, steps: batchTransactions }]
+            : []
 
-      for (let i = 0; i < planToRun.length; i++) {
-        const chainPlan = planToRun[i]
-        setCurrentStep(i + 1)
-        try {
-          const receipts = await executeChainPlan(chainPlan, address)
-          allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
-        } catch (e) {
-          allResults.push({
-            chainId: chainPlan.chainId,
-            success: false,
-            error: e?.message || 'Execution failed'
-          })
+        for (let i = 0; i < planToRun.length; i++) {
+          const chainPlan = planToRun[i]
+          setCurrentStep(i + 1)
+          try {
+            const receipts = await executeChainPlan(chainPlan, address)
+            allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
+          } catch (e) {
+            allResults.push({
+              chainId: chainPlan.chainId,
+              success: false,
+              error: e?.message || 'Execution failed'
+            })
+          }
+          await new Promise((r) => setTimeout(r, 250))
         }
-        await new Promise((r) => setTimeout(r, 250))
+
+        setClaimResults(allResults)
+        return
       }
 
-      setClaimResults(allResults)
+      // 2) No plan? Build direct contract transactions for every ERC-20 in dustResults.
+      if (!dustResults || dustResults.length === 0) {
+        throw new Error('Nothing to execute: no dust found')
+      }
+
+      if (typeof window === 'undefined' || !window.ethereum) {
+        throw new Error('No wallet provider in browser')
+      }
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
+
+      const txs = await buildDustClaimBatch(dustResults, signer)
+      if (!txs.length) throw new Error('Nothing to execute: no ERC-20 dust tokens')
+
+      const results = []
+      let step = 0
+      for (const tx of txs) {
+        step += 1
+        setCurrentStep(step)
+        try {
+          const sent = await signer.sendTransaction({
+            to: tx.to,
+            data: tx.data,
+            value: tx.value ?? 0n
+          })
+          const r = await sent.wait()
+          results.push({ chainId: tx.chainId, success: true, receipts: [{ hash: r.hash }] })
+        } catch (e) {
+          results.push({
+            chainId: tx.chainId,
+            success: false,
+            error: e?.message || 'Transaction failed'
+          })
+        }
+        await new Promise((r) => setTimeout(r, 150))
+      }
+
+      setClaimResults(results)
     } catch (e) {
       setError(e?.message || 'Claim execution error')
     } finally {
@@ -96,7 +151,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // B) Permissionless contract quick actions
+  // B) Permissionless contract quick actions (still available)
   // ============================================================================
 
   // 1) Single token via 1inch
@@ -198,7 +253,10 @@ const ClaimScreen = () => {
             <div className="summary-icon">🌐</div>
             <div className="summary-content">
               <h3>Chains</h3>
-              <div className="summary-value">{totalChains}</div>
+              <div className="summary-value">
+                {totalChains}
+              </div>
+              {!planAvailable && <div className="summary-sub">live from scan</div>}
             </div>
           </div>
           {batchSavings && (
@@ -217,25 +275,23 @@ const ClaimScreen = () => {
 
       {/* Actions */}
       <div className="action-section">
-        {/* Legacy “optimized plan” executor */}
         <button
           onClick={handleExecuteClaim}
-          disabled={!planAvailable || claiming || walletLoading || !isConnected}
+          disabled={claiming || walletLoading || !isConnected}
           className="execute-button"
-          title={!planAvailable ? 'No plan/transactions were sent from the scanner.' : ''}
+          title={!planAvailable ? 'No plan provided — falling back to contract path' : 'Run plan'}
         >
           {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
         </button>
 
         {!planAvailable && (
           <div className="hint-banner">
-            Nothing to execute — the scanner didn’t provide a plan.
-            Run a scan again and proceed to Claim, or use the quick-action buttons below
-            if they’re available.
+            No prepared plan from the scanner. We will build contract calls directly
+            for each ERC-20 dust item and execute them one by one.
           </div>
         )}
 
-        {/* Permissionless quick actions (only render if we have inputs) */}
+        {/* Permissionless quick actions (optional) */}
         {oneInchSingle && (
           <button
             onClick={handleOneInchSingle}
@@ -285,7 +341,7 @@ const ClaimScreen = () => {
           <div className="progress-bar">
             <div
               className="progress-fill"
-              style={{ width: `${(currentStep / totalChains) * 100}%` }}
+              style={{ width: `${(currentStep / Math.max(totalChains, 1)) * 100}%` }}
             />
           </div>
         </div>
