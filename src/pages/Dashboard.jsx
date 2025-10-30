@@ -3,10 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import web3Service from '../services/web3Service'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
+import { NATIVE_LOGOS } from '../services/logoService'
+import TokenRow from '../components/TokenRow'
 import './Dashboard.css'
-import ChainLogo from '../components/ChainLogo'
 
-const Dashboard = () => {
+const fmt = (n) => Number(n || 0).toFixed(6)
+const usd = (n) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+
+export default function Dashboard() {
   const { address } = useWallet()
   const navigate = useNavigate()
 
@@ -15,7 +20,7 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false)
   const [priceLoading, setPriceLoading] = useState(false)
 
-  // 1) On mount, try to hydrate from the last scanner run (sessionStorage)
+  // 1) Hydrate from last scanner run
   useEffect(() => {
     try {
       const cached = sessionStorage.getItem('dustclaim:lastScan')
@@ -27,35 +32,26 @@ const Dashboard = () => {
     } catch {}
   }, [])
 
-  // 2) If wallet changes, do a fresh scan
-  useEffect(() => {
-    if (address) scanAllChains()
-  }, [address])
+  // 2) If wallet connects / changes — rescan using the SAME logic as scanner
+  useEffect(() => { if (address) scanAllChains() }, [address])
 
-  const scanAllChains = async () => {
+  async function scanAllChains() {
     setLoading(true)
     setPriceLoading(true)
     try {
-      const chainIds = Object.keys(SUPPORTED_CHAINS)
+      const chainIds = Object.keys(SUPPORTED_CHAINS).map(Number)
 
-      // Use the SAME flow as DustScanner
-      const scanPromises = chainIds.map((id) =>
-        web3Service.checkForDust(Number(id), address)
+      const settled = await Promise.allSettled(
+        chainIds.map((id) => web3Service.checkForDust(id, address))
       )
 
-      const settled = await Promise.allSettled(scanPromises)
       const valid = settled
         .filter((r) => r.status === 'fulfilled' && r.value?.hasDust)
         .map((r) => r.value)
 
-      // Enrich with USD values exactly like Scanner
       const enriched = await Promise.all(
         valid.map(async (r) => {
-          const usdValue = await web3Service.getUSDValue(
-            r.chainId,
-            r.nativeBalance,
-            r.tokenDust
-          )
+          const usdValue = await web3Service.getUSDValue(r.chainId, r.nativeBalance, r.tokenDust)
           const meta = SUPPORTED_CHAINS[r.chainId] || {}
           return {
             ...r,
@@ -70,13 +66,7 @@ const Dashboard = () => {
       const total = enriched.reduce((s, x) => s + (x.usdValue || 0), 0)
       setTotalDustValue(total)
 
-      // Save for the next visit (so Dashboard shows immediately)
-      try {
-        sessionStorage.setItem(
-          'dustclaim:lastScan',
-          JSON.stringify({ dustResults: enriched, total })
-        )
-      } catch {}
+      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: enriched, total }))
     } catch (err) {
       console.error('Dashboard scan error:', err)
       setChainData([])
@@ -87,40 +77,25 @@ const Dashboard = () => {
     }
   }
 
-  const refreshPrices = async () => {
-    // recompute usdValue using current balances (no new RPC calls for balances)
+  async function refreshPrices() {
     setPriceLoading(true)
     try {
       const repriced = await Promise.all(
-        chainData.map(async (r) => {
-          const usdValue = await web3Service.getUSDValue(
-            r.chainId,
-            r.nativeBalance,
-            r.tokenDust
-          )
-          return { ...r, usdValue }
-        })
+        (chainData || []).map(async (r) => ({
+          ...r,
+          usdValue: await web3Service.getUSDValue(r.chainId, r.nativeBalance, r.tokenDust),
+        }))
       )
       setChainData(repriced)
       const total = repriced.reduce((s, x) => s + (x.usdValue || 0), 0)
       setTotalDustValue(total)
-
-      try {
-        sessionStorage.setItem(
-          'dustclaim:lastScan',
-          JSON.stringify({ dustResults: repriced, total })
-        )
-      } catch {}
+      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: repriced, total }))
     } catch (e) {
       console.error('Price refresh error:', e)
     } finally {
       setPriceLoading(false)
     }
   }
-
-  const fmt = (n) => parseFloat(n || 0).toFixed(6)
-  const usd = (n) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0)
 
   return (
     <div className="dashboard">
@@ -129,12 +104,8 @@ const Dashboard = () => {
         <p>Real-time dust valuation across all chains</p>
 
         <div className="price-refresh">
-          <button
-            onClick={refreshPrices}
-            disabled={priceLoading}
-            className="btn btn-outline btn-sm"
-          >
-            {priceLoading ? '🔄 Updating...' : '🔄 Refresh Prices'}
+          <button onClick={refreshPrices} disabled={priceLoading} className="btn btn-outline btn-sm">
+            {priceLoading ? '🔄 Updating…' : '🔄 Refresh Prices'}
           </button>
         </div>
       </div>
@@ -174,19 +145,17 @@ const Dashboard = () => {
         <button onClick={() => navigate('/scanner')} className="btn btn-primary btn-large">
           🔍 Advanced Dust Scanner
         </button>
-
         <button onClick={scanAllChains} disabled={loading} className="btn btn-secondary">
-          {loading ? '🔄 Scanning...' : '🔄 Rescan All Chains'}
+          {loading ? '🔄 Scanning…' : '🔄 Rescan All Chains'}
         </button>
-
         <button onClick={refreshPrices} disabled={priceLoading} className="btn btn-outline">
-          {priceLoading ? '📊 Updating...' : '📊 Refresh Prices'}
+          {priceLoading ? '📊 Updating…' : '📊 Refresh Prices'}
         </button>
       </div>
 
       <div className="chains-section">
         <h2>
-          Chain Overview {priceLoading && <span className="loading-badge">Updating Prices...</span>}
+          Chain Overview {priceLoading && <span className="loading-badge">Updating Prices…</span>}
         </h2>
 
         {chainData.length === 0 && !loading ? (
@@ -202,11 +171,12 @@ const Dashboard = () => {
           <div className="chains-grid">
             {chainData.map((r, idx) => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
+              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
               return (
                 <div key={idx} className="chain-card has-dust">
                   <div className="chain-header">
                     <div className="chain-info">
-                      <ChainLogo src={meta.logo} alt={meta.name} />
+                      <img className="chain-logo" src={nativeLogo} alt={meta.name} />
                       <div>
                         <h3>{meta.name}</h3>
                         <p className="chain-value">{usd(r.usdValue)}</p>
@@ -222,6 +192,7 @@ const Dashboard = () => {
                     </div>
                   </div>
 
+                  {/* Native row */}
                   <div className="price-details">
                     <div className="price-item">
                       <span>Native:</span>
@@ -230,13 +201,9 @@ const Dashboard = () => {
                       </span>
                     </div>
 
+                    {/* First 3 token rows with real logos */}
                     {(r.tokenDust || []).slice(0, 3).map((t, i) => (
-                      <div key={i} className="price-item">
-                        <span>{t.symbol}:</span>
-                        <span>
-                          {fmt(t.balance)} ({usd(t.value || 0)})
-                        </span>
-                      </div>
+                      <TokenRow key={`${t.address}-${i}`} token={t} />
                     ))}
 
                     {(r.tokenDust?.length || 0) > 3 && (
@@ -258,5 +225,3 @@ const Dashboard = () => {
     </div>
   )
 }
-
-export default Dashboard
