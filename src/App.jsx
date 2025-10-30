@@ -44,7 +44,6 @@ const App = () => {
             path="/claim"
             element={isConnected ? <ClaimScreen /> : <Navigate to="/" replace />}
           />
-
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
