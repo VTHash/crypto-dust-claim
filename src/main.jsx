@@ -8,6 +8,7 @@ import App from './App.jsx'
 import { ThemeProvider } from './contexts/ThemeContext.jsx'
 import { WalletProvider } from './contexts/WalletContext.jsx'
 import { ScanProvider } from './contexts/ScanContext'
+import { SettingsProvider } from './contexts/SettingsContext.jsx'
 import './styles/global.css'
 
 // NOTE:
@@ -22,13 +23,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <WalletProvider>
-            <ScanProvider>
-            <App />
-            </ScanProvider>
+            <SettingsProvider>
+              <ScanProvider>
+                <App />
+              </ScanProvider>
+            </SettingsProvider>
           </WalletProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>
-    
   </React.StrictMode>
 )

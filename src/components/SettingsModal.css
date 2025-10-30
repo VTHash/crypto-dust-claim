@@ -1,0 +1,80 @@
+/* src/components/SettingsModal.css */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.modal {
+  width: min(900px, 92vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: #0e1117;
+  border: 1px solid #2a2f3a;
+  border-radius: 14px;
+  padding: 16px 18px;
+  color: #cfd6e6;
+}
+.modal h2 {
+  margin: 0 0 8px;
+}
+.block {
+  margin: 14px 0;
+  padding: 10px;
+  border: 1px solid #202533;
+  border-radius: 10px;
+}
+.block h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0;
+}
+label.row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+input {
+  background: #111522;
+  border: 1px solid #2a2f3a;
+  border-radius: 8px;
+  padding: 8px;
+  color: #cfd6e6;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.hint {
+  opacity: 0.8;
+  margin: -4px 0 8px;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.btn {
+  background: #12d6a7;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #071218;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn.ghost {
+  background: transparent;
+  border: 1px solid #2a2f3a;
+  color: #cfd6e6;
+}

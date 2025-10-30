@@ -1,8 +1,11 @@
+// src/components/Navbar.jsx
 import React, { useState, useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import ThemeToggle from './ThemeToggle'
 import DebugWalletPanel from './DebugWalletPanel'
+import { useSettings } from '../contexts/SettingsContext'
+import SettingsModal from './SettingsModal'
 import './Navbar.css'
 
 const shorten = (addr) => (addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : '')
@@ -29,6 +32,9 @@ export default function Navbar() {
   const { address, isConnected, connect, disconnect, loading } = useWallet()
   const location = useLocation()
   const [showDebug, setShowDebug] = useState(false)
+
+  // 🔧 settings modal control comes from SettingsContext
+  const { open, setOpen } = useSettings()
 
   const isActive = (path) => location.pathname === path
 
@@ -61,7 +67,7 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* Middle: nav links + theme + wallet */}
+        {/* Middle: nav links + settings + theme + wallet */}
         <div className="navbar-middle">
           <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
             Dashboard
@@ -72,6 +78,17 @@ export default function Navbar() {
           <Link to="/claim" className={`nav-link ${isActive('/claim') ? 'active' : ''}`}>
             Claim
           </Link>
+
+          {/* Settings button (opens modal) */}
+          <button
+            type="button"
+            className="btn-settings"
+            title="Settings"
+            aria-label="Open settings"
+            onClick={() => setOpen(true)}
+          >
+            ⚙️ Settings
+          </button>
 
           <div className="theme-toggle-wrapper">
             <ThemeToggle />
@@ -100,9 +117,10 @@ export default function Navbar() {
             </button>
           )}
         </div>
-
-       
       </nav>
+
+      {/* Settings Modal lives here so it’s available app-wide */}
+      <SettingsModal open={open} onClose={() => setOpen(false)} />
 
       {/* Floating Debug panel toggle (dev only) */}
       {import.meta.env.MODE !== 'production' && (
@@ -135,3 +153,9 @@ export default function Navbar() {
     </>
   )
 }
+
+
+
+
+
+
