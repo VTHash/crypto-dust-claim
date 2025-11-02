@@ -115,10 +115,10 @@ export const DEPLOYMENTS = {
   7777777: {
     chainId: 7777777,
     name: 'Zora',
-    dustclaim: '',
+    dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
     weth: '0x4200000000000000000000000000000000000006', // WETH
     oneInchRouter: null,
-    uniswapV3Router: null
+    uniswapV3Router: '0x7De04c96BE5159c3b5CeffC82aa176dc81281557'
   },
 
   80094: {

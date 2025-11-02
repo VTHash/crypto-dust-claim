@@ -13,7 +13,7 @@ export const CHAIN_CAPS = {
   100: { directSwap: true, uniV3Path: true }, // Gnosis (conservative)
   250: { directSwap: true, uniV3Path: true }, // Fantom
   59144: { directSwap: true, uniV3Path: false }, // Linea
-  7777777: { directSwap: false, uniV3Path: false }, // Zora
+  7777777: { directSwap: false, uniV3Path: true }, // Zora
   34443: { directSwap: false, uniV3Path: false }, // Mode
   1329: { directSwap: false, uniV3Path: false }, // Sei
   80094: { directSwap: false, uniV3Path: false }, // Berachain

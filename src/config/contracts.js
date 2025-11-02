@@ -11,6 +11,8 @@ import seiAbi from './contracts/dustclaim.sei.json'
 import modeAbi from './contracts/dustclaim.mode.json'
 import gnosisAbi from './contracts/dustclaim.gnosis.json'
 import lineaAbi from './contracts/dustclaim.linea.json'
+import zoraAbi from './contracts/dustclaim.zora.json'
+
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
 
@@ -30,7 +32,7 @@ export const DUSTCLAIM_ADDRESS = {
   43114: "0xA10980211Cda7228708e774ef11c7E299E6947dB", // Avalanche C
   59144: "0xEB4931BE941D830425420D1Ba7206e8E43854795", // Linea
   80094: "", // Berachain (matches your SUPPORTED_CHAINS)
-  7777777: "" // Zora
+  7777777: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Zora
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
