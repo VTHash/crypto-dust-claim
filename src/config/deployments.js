@@ -106,7 +106,7 @@ export const DEPLOYMENTS = {
   250: {
     chainId: 250,
     name: 'Fantom Opera',
-    dustclaim: '',
+    dustclaim: '0xe6292481711419e6035b8Ac263Fd91AF48142966',
     weth: '0x21be370D5312f44cb42ce377BC9b8a0cef1A4C83', // WFTM
     oneInchRouter: null, // keep null unless you confirm 1inch v5 is active
     uniswapV3Router: null // fill if you integrate a Fantom router

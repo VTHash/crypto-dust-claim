@@ -13,6 +13,7 @@ import gnosisAbi from './contracts/dustclaim.gnosis.json'
 import lineaAbi from './contracts/dustclaim.linea.json'
 import zoraAbi from './contracts/dustclaim.zora.json'
 import beraAbi from './contracts/dustclaim.bera.json'
+import fantomAbi from './contracts/dustclaim.fantom.json'
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
@@ -25,7 +26,7 @@ export const DUSTCLAIM_ADDRESS = {
   100: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Gnosis
   137: "0xf977f21430b99aE91680aC2e0fFD8cA481ec486F", // Polygon PoS
   195: "", // X1
-  250: "", // Fantom
+  250: "0xe6292481711419e6035b8Ac263Fd91AF48142966", // Fantom
   1329: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Sei
   8453: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Base
   34443: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Mode
