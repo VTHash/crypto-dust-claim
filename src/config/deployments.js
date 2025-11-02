@@ -123,8 +123,8 @@ export const DEPLOYMENTS = {
 
   80094: {
     chainId: 80094,
-    name: 'Berachain bArtio',
-    dustclaim: '',
+    name: 'Berachain',
+    dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
     weth: '0x6969696969696969696969696969696969696969', // WBERA (update if mainnet diff)
     oneInchRouter: null,
     uniswapV3Router: null
