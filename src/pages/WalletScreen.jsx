@@ -3,6 +3,7 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
+import metamaskLogo from '/logo/metamask.png'
 
 /** Lightweight, accessible accordion card */
 function InfoCard({ icon, title, children, defaultOpen = false }) {
@@ -36,6 +37,15 @@ const WalletScreen = () => {
   const isCurrentChain = (id) => {
     const hex = '0x' + Number(id).toString(16)
     return String(chainId || '').toLowerCase() === hex
+  }
+
+  // Detect mobile device
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+
+  // MetaMask deep link
+  const openInMetaMask = () => {
+    const dappUrl = encodeURIComponent(window.location.href)
+    window.location.href = `https://metamask.app.link/dapp/${dappUrl}`
   }
 
   return (
