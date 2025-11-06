@@ -1,4 +1,3 @@
-/* src/components/SettingsModal.css */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -8,6 +7,7 @@
   justify-content: center;
   z-index: 60;
 }
+
 .modal {
   width: min(900px, 92vw);
   max-height: 90vh;
@@ -18,30 +18,36 @@
   padding: 16px 18px;
   color: #cfd6e6;
 }
+
 .modal h2 {
   margin: 0 0 8px;
 }
+
 .block {
   margin: 14px 0;
   padding: 10px;
   border: 1px solid #202533;
   border-radius: 10px;
 }
+
 .block h3 {
   margin: 0 0 8px;
   font-size: 15px;
 }
+
 label {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 6px 0;
 }
+
 label.row {
   flex-direction: row;
   align-items: center;
   gap: 8px;
 }
+
 input {
   background: #111522;
   border: 1px solid #2a2f3a;
@@ -49,21 +55,25 @@ input {
   padding: 8px;
   color: #cfd6e6;
 }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 10px;
 }
+
 .hint {
   opacity: 0.8;
   margin: -4px 0 8px;
 }
+
 .actions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
   margin-top: 10px;
 }
+
 .btn {
   background: #12d6a7;
   border: none;
@@ -73,8 +83,84 @@ input {
   font-weight: 700;
   cursor: pointer;
 }
+
 .btn.ghost {
   background: transparent;
   border: 1px solid #2a2f3a;
   color: #cfd6e6;
+}
+
+/* ───────────────────────────── */
+/* New styles for quick help UI */
+/* ───────────────────────────── */
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.settings-subtitle {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin: 0 0 10px;
+}
+
+.help-toggle {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #2a2f3a;
+  background: #111522;
+  color: #cfd6e6;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.help-toggle:hover {
+  background: #151a28;
+  border-color: #3a4255;
+}
+
+.help-panel {
+  background: #0a0d15;
+  border: 1px solid #202533;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.help-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.help-card {
+  background: #111522;
+  border: 1px solid #202533;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.help-card h4 {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.help-card code {
+  background: #0a0d15;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 0.75em;
 }

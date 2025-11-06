@@ -1,4 +1,3 @@
-// src/components/SettingsModal.jsx
 import React, { useState } from 'react'
 import { useSettings } from '../contexts/SettingsContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
@@ -7,6 +6,7 @@ import './SettingsModal.css'
 export default function SettingsModal() {
   const { settings, save, open, setOpen } = useSettings()
   const [local, setLocal] = useState(settings)
+  const [showHelp, setShowHelp] = useState(false)
 
   if (!open) return null
 
@@ -22,7 +22,62 @@ export default function SettingsModal() {
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e)=>e.stopPropagation()}>
-        <h2>Settings</h2>
+        <div className="modal-header">
+          <h2>Settings</h2>
+          <button
+            className="help-toggle"
+            onClick={() => setShowHelp((s) => !s)}
+          >
+            {showHelp ? 'Hide quick guide' : 'How does this work?'}
+          </button>
+        </div>
+
+        <p className="settings-subtitle">
+          Adjust thresholds and claim modes to control how DustClaim detects and collects your small balances.
+        </p>
+
+        {/* QUICK HELP PANEL */}
+        {showHelp && (
+          <div className="help-panel">
+            <h3>Quick Guide</h3>
+            <div className="help-grid">
+              <div className="help-card">
+                <h4>1. Dust thresholds</h4>
+                <p>
+                  <strong>Token min / max (USD)</strong> define the value range for what counts as
+                  dust. Example: <code>0.25 → 25</code> means balances worth between $0.25 and $25
+                  are counted as dust and will be included.
+                </p>
+              </div>
+
+              <div className="help-card">
+                <h4>2. Native dust flag</h4>
+                <p>
+                  Flags native balances (like ETH, MATIC, FTM) below your chosen amount as “dust”.
+                  This only marks them visually — it won’t automatically move them.
+                </p>
+              </div>
+
+              <div className="help-card">
+                <h4>3. Include non-dust balances</h4>
+                <p>
+                  When enabled, DustClaim ignores your thresholds and includes all token balances
+                  (not just small ones). Perfect for full wallet sweeping.
+                </p>
+              </div>
+
+              <div className="help-card">
+                <h4>4. Claim modes</h4>
+                <p>
+                  <strong>Contract → Native</strong>: convert ERC-20s to native per chain.
+                  <br/>
+                  <strong>Direct Swap → Target Token</strong>: route balances via DEX aggregators
+                  (like 1inch or Uniswap) into a stablecoin or custom token.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="block">
           <h3>Dust thresholds</h3>
