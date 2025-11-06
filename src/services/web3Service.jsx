@@ -1,13 +1,14 @@
+// src/services/web3Service.js
 import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import priceService from './priceService'
 
 const toKey = (id) => String(id)
 
-// Adjust to taste
-const DUST_THRESHOLDS = {
+// Default thresholds (used when Settings not provided)
+const DEFAULT_DUST_THRESHOLDS = {
   native: 0.001, // e.g., ETH < 0.001
-  token: 0.01 // token units < 0.01
+  tokenUnit: 0.01 // token units < 0.01
 }
 
 class Web3Service {
@@ -76,20 +77,20 @@ class Web3Service {
     },
     '10': {
       USDC: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607',
-      USDT: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
+      USDT: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
     },
     '137': {
       USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
       USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-      DAI: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063',
+      DAI: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
     },
     '42161': {
       USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-      USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+      USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
     },
     '56': {
       USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-      USDT: '0x55d398326f99059fF775485246999027B3197955',
+      USDT: '0x55d398326f99059fF775485246999027B3197955'
     }
     // …add the rest of the chains you’ve enabled
   }
@@ -105,7 +106,11 @@ class Web3Service {
     const out = []
     for (const [symbolGuess, token] of entries) {
       try {
-        const { amount, decimals, symbol } = await this._readErc20Balance(provider, token, address)
+        const { amount, decimals, symbol } = await this._readErc20Balance(
+          provider,
+          token,
+          address
+        )
         const bal = parseFloat(amount)
         if (bal > 0) {
           out.push({
@@ -124,7 +129,12 @@ class Web3Service {
   }
 
   // ---------- valuation + dust marking ----------
-  async getDetailedChainView(chainId, address) {
+  /**
+   * @param {number} chainId
+   * @param {string} address
+   * @param {object} [settings] - optional SettingsContext snapshot
+   */
+  async getDetailedChainView(chainId, address, settings = null) {
     const key = Number(chainId)
     const symbol = SUPPORTED_CHAINS[key]?.symbol || 'ETH'
 
@@ -134,7 +144,7 @@ class Web3Service {
     const nativePrice = await priceService.getNativeUsdPrice(key)
     const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)
 
-    const tokenAddrs = tokens.map(t => t.address.toLowerCase())
+    const tokenAddrs = tokens.map((t) => t.address.toLowerCase())
     const priceMap = tokenAddrs.length
       ? await priceService.getTokenUsdPrices(key, tokenAddrs)
       : {}
@@ -145,11 +155,46 @@ class Web3Service {
       return { ...t, price, value }
     })
 
-    // mark dust, but still return everything for display
-    const isNativeDust = parseFloat(nativeBalance) > 0 && parseFloat(nativeBalance) < DUST_THRESHOLDS.native
-    const claimableTokens = tokenDetails.filter(t => parseFloat(t.balance) < DUST_THRESHOLDS.token)
+    // ---- apply dust logic (respect Settings where possible) ----
+    const nativeDustThreshold =
+      settings && settings.nativeDustThreshold != null
+        ? Number(settings.nativeDustThreshold)
+        : DEFAULT_DUST_THRESHOLDS.native
 
-    const totalValue = Number((nativeValue + tokenDetails.reduce((s, x) => s + x.value, 0)).toFixed(6))
+    const isNativeDust =
+      parseFloat(nativeBalance) > 0 && parseFloat(nativeBalance) < nativeDustThreshold
+
+    let claimableTokens = []
+
+    if (settings) {
+      const includeNonDust = !!settings.includeNonDust
+      const minUsd = Number(settings.tokenMinUSD ?? 0)
+      const maxUsdRaw = settings.tokenMaxUSD
+      const maxUsd =
+        maxUsdRaw === undefined || maxUsdRaw === null || maxUsdRaw === 0
+          ? Infinity
+          : Number(maxUsdRaw)
+
+      if (includeNonDust) {
+        // Everything with non-zero balance is considered "claimable"
+        claimableTokens = tokenDetails.filter((t) => Number(t.balance || 0) > 0)
+      } else {
+        // Only items in the USD "dust window"
+        claimableTokens = tokenDetails.filter((t) => {
+          const v = Number(t.value || 0)
+          return v >= minUsd && v <= maxUsd
+        })
+      }
+    } else {
+      // Legacy behaviour: purely unit-based dust threshold
+      claimableTokens = tokenDetails.filter(
+        (t) => parseFloat(t.balance) < DEFAULT_DUST_THRESHOLDS.tokenUnit
+      )
+    }
+
+    const totalValue = Number(
+      (nativeValue + tokenDetails.reduce((s, x) => s + x.value, 0)).toFixed(6)
+    )
 
     return {
       chainId: key,
@@ -159,18 +204,24 @@ class Web3Service {
       nativePrice,
       nativeValue,
       tokenDetails, // all tokens (for UI)
-      claimableTokens, // only dust (for plan)
+      claimableTokens, // dust (or all, depending on settings)
       hasDust: isNativeDust || claimableTokens.length > 0,
       totalValue
     }
   }
 
   // bulk scan helper – always returns *all* chains requested
-  async scanChains(chainIds, address) {
+  /**
+   * @param {number[]} chainIds
+   * @param {string} address
+   * @param {object} [settings] - optional SettingsContext snapshot
+   */
+  async scanChains(chainIds, address, settings = null) {
     const out = []
     for (const id of chainIds) {
-      try { out.push(await this.getDetailedChainView(id, address)) }
-      catch (e) {
+      try {
+        out.push(await this.getDetailedChainView(id, address, settings))
+      } catch (e) {
         console.warn('scan error for chain', id, e?.message)
       }
     }
