@@ -3,7 +3,8 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
-import metamaskLogo from '/logo/metamask.png'
+
+const metamaskLogo = '/logo/metamask.png'
 
 /** Lightweight, accessible accordion card */
 function InfoCard({ icon, title, children, defaultOpen = false }) {
