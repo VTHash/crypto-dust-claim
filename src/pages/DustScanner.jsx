@@ -20,7 +20,10 @@ const DustScanner = () => {
 
   const [scanning, setScanning] = useState(false)
   const [selectedChains, setSelectedChains] = useState(
-    Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => ((acc[id] = true), acc), {})
+    Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => {
+      acc[id] = true
+      return acc
+    }, {})
   )
 
   const selectedIds = useMemo(
@@ -41,15 +44,18 @@ const DustScanner = () => {
 
   // auto scan when address arrives and nothing loaded
   useEffect(() => {
-    if (address && results.length === 0) handleScan()
+    if (address && results.length === 0) {
+      handleScan()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address])
+  }, [address, settings])
 
   const handleScan = async () => {
     if (!address) return
     setScanning(true)
     try {
-      const scan = await web3Service.scanChains(selectedIds, address)
+      // Pass settings as optional 3rd arg (web3Service can ignore it or use it)
+      const scan = await web3Service.scanChains(selectedIds, address, settings)
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
@@ -58,16 +64,6 @@ const DustScanner = () => {
       setScanning(false)
     }
   }
-
-  const totalValue = useMemo(
-    () => results.reduce((s, r) => s + (r.totalValue || 0), 0),
-    [results]
-  )
-
-  const totalClaimableCount = useMemo(
-    () => results.reduce((s, r) => s + (r.claimableTokens?.length || 0), 0),
-    [results]
-  )
 
   /**
    * Build the list of items to act on based on settings:
@@ -82,22 +78,26 @@ const DustScanner = () => {
 
       for (const t of tokenList) {
         const usd = Number(t.value || 0)
+        const balance = Number(t.balance || 0)
+
+        if (balance <= 0) continue
 
         if (settings.includeNonDust) {
-          // include everything non-zero
-          if (Number(t.balance) > 0) {
-            list.push({
-              chainId,
-              symbol: t.symbol,
-              address: t.address,
-              balance: t.balance,
-              usd
-            })
-          }
+          list.push({
+            chainId,
+            symbol: t.symbol,
+            address: t.address,
+            balance: t.balance,
+            usd
+          })
         } else {
-          // enforce dust window
-          if (usd >= Number(settings.tokenMinUSD || 0) &&
-              usd <= Number(settings.tokenMaxUSD || Infinity)) {
+          const min = Number(settings.tokenMinUSD || 0)
+          const max = Number(
+            settings.tokenMaxUSD === 0 || settings.tokenMaxUSD === undefined
+              ? Infinity
+              : settings.tokenMaxUSD
+          )
+          if (usd >= min && usd <= max) {
             list.push({
               chainId,
               symbol: t.symbol,
@@ -114,13 +114,36 @@ const DustScanner = () => {
   }, [results, settings.includeNonDust, settings.tokenMinUSD, settings.tokenMaxUSD])
 
   /**
+   * Aggregate action universe by chain so UI counts & totals reflect settings.
+   */
+  const actionByChain = useMemo(() => {
+    const m = {}
+    for (const item of buildActionUniverse) {
+      const key = String(item.chainId)
+      if (!m[key]) m[key] = { value: 0, count: 0 }
+      m[key].value += Number(item.usd || 0)
+      m[key].count += 1
+    }
+    return m
+  }, [buildActionUniverse])
+
+  const totalValue = useMemo(
+    () => Object.values(actionByChain).reduce((s, x) => s + x.value, 0),
+    [actionByChain]
+  )
+
+  const totalClaimableCount = useMemo(
+    () => buildActionUniverse.length,
+    [buildActionUniverse]
+  )
+
+  /**
    * Fully wired batch-claim navigator
    * - If settings.mode === 'contract-native': try your legacy plan creator first; else fallback
-   * - If settings.mode === 'swap-token': create 1inch batch quotes per chain (tokens → wrapped-native),
-   * and also provide a "single best" helper for UX. We pass these to ClaimScreen.
+   * - If settings.mode === 'swap-token': create 1inch / Uniswap helpers (best single + batch)
    */
   const handleBatchClaim = async () => {
-    // 1) Build base claims (for "contract-native" path or legacy fallback)
+    // 1) Base claims for contract-native path or legacy fallback
     const claims = buildActionUniverse.map((it) => ({
       chainId: it.chainId,
       tokenAddress: it.address,
@@ -138,32 +161,37 @@ const DustScanner = () => {
 
     try {
       if (settings.mode === 'contract-native') {
-        // A) Try optimized plan first
+        // Optimized plan first
         try {
           if (typeof batchService.buildClaimPlan === 'function') {
             claimPlan = await batchService.buildClaimPlan(claims)
           }
         } catch {}
-        // B) Fallback: create simple per-token txs
+
+        // Fallback simple tx batch
         if (!claimPlan?.length && typeof batchService.createBatchDustClaim === 'function') {
           batchTransactions = await batchService.createBatchDustClaim(claims, address)
         }
-        // Optionally compute savings (safe to leave null if your impl is partial)
+
+        // Optional gas savings estimate
         try {
-          if (Array.isArray(batchTransactions) && batchTransactions.length &&
-              typeof batchService.calculateGasSavings === 'function') {
-            const indiv = claims.map(c => ({ to: c.tokenAddress, data: '0x' })) // heuristic
+          if (
+            Array.isArray(batchTransactions) &&
+            batchTransactions.length &&
+            typeof batchService.calculateGasSavings === 'function'
+          ) {
+            const indiv = claims.map((c) => ({ to: c.tokenAddress, data: '0x' }))
             batchSavings = batchService.calculateGasSavings(indiv, batchTransactions)
           }
         } catch {}
       } else if (settings.mode === 'swap-token') {
-        // Build 1inch helpers:
-        // - "Single best" (highest USD) to give the user a simple action
-        // - "Batch" list across all selected tokens
-        const byValueDesc = [...buildActionUniverse].sort((a, b) => Number(b.usd) - Number(a.usd))
+        // Helpers for aggregator-based swaps
+        const byValueDesc = [...buildActionUniverse].sort(
+          (a, b) => Number(b.usd) - Number(a.usd)
+        )
         const best = byValueDesc[0] || null
 
-        // 1) Single (if we have a best token)
+        // Single best token (1inch)
         if (best) {
           try {
             const q1 = await dexAggregatorService.quoteOneInchSingle({
@@ -176,30 +204,30 @@ const DustScanner = () => {
               oneInchSingle = {
                 token: best.address,
                 quotedMinOutWei: q1.quotedMinOutWei,
-                calldata: q1.calldata // null on purpose (backendless)
+                calldata: q1.calldata
               }
             }
           } catch {}
         }
 
-        // 2) Batch (group all items, but 1inch expects a flat list — our service handles loops)
+        // Batch 1inch (all items)
         try {
           const items = buildActionUniverse.map((it) => ({
             chainId: Number(it.chainId),
             token: it.address,
             amount: it.balance
           }))
-          const qb = await dexAggregatorService.quoteOneInchBatch(items, 100) // 1%
+          const qb = await dexAggregatorService.quoteOneInchBatch(items, 100)
           if (qb?.tokens?.length) {
             oneInchBatch = {
               tokens: qb.tokens,
               minOutsWei: qb.minOutsWei,
-              datas: qb.datas // '0x' placeholders as discussed
+              datas: qb.datas
             }
           }
         } catch {}
 
-        // 3) Optional: Uniswap single helper (same "best" token)
+        // Optional Uniswap single helper
         if (best) {
           try {
             const qu = await dexAggregatorService.quoteUniswapSingle({
@@ -213,14 +241,14 @@ const DustScanner = () => {
               uniswapSingle = {
                 token: best.address,
                 fee: qu.fee ?? 3000,
-                minOutWei: qu.minOutWei, // '0' sentinel (no slippage protection in-browser)
+                minOutWei: qu.minOutWei,
                 ttlSec: qu.ttlSec ?? 900
               }
             }
           } catch {}
         }
 
-        // Keep claimPlan/batchTransactions empty so ClaimScreen uses quick-action path
+        // Leave claimPlan/batchTransactions empty so ClaimScreen uses quick actions only.
         claimPlan = []
         batchTransactions = []
       }
@@ -229,11 +257,9 @@ const DustScanner = () => {
         state: {
           claimPlan,
           batchTransactions,
-          // quick action payloads (available only in swap-token mode or when you choose to provide them)
           oneInchSingle,
           oneInchBatch,
           uniswapSingle,
-          // context for UI
           dustResults: results,
           totalDustValue: totalValue,
           batchSavings
@@ -242,11 +268,14 @@ const DustScanner = () => {
     }
   }
 
-  const toggleChain = (id) => setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
+  const toggleChain = (id) =>
+    setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
 
   const fmt = (n) => Number(n || 0).toFixed(6)
   const usd = (n) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+      Number(n || 0)
+    )
 
   return (
     <div className="dust-scanner">
@@ -268,7 +297,9 @@ const DustScanner = () => {
               >
                 <img className="chain-logo" src={nativeLogo} alt={chain.name} />
                 <span className="chain-name">{chain.name}</span>
-                <div className="checkbox">{selectedChains[id] && <div className="checkmark">✓</div>}</div>
+                <div className="checkbox">
+                  {selectedChains[id] && <div className="checkmark">✓</div>}
+                </div>
               </div>
             )
           })}
@@ -298,7 +329,11 @@ const DustScanner = () => {
           <div className="dust-results">
             {results.map((r) => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
-              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
+              const nativeLogo =
+                meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
+              const key = String(r.chainId)
+              const chainActions = actionByChain[key] || { value: 0, count: 0 }
+
               return (
                 <div key={r.chainId} className="chain-result-card">
                   <div className="chain-result-header">
@@ -306,7 +341,11 @@ const DustScanner = () => {
                       <img className="chain-logo" src={nativeLogo} alt={meta.name} />
                       <div>
                         <h3>{r.chainName}</h3>
-                        <p className="chain-value">{usd(r.totalValue)}</p>
+                        <p className="chain-value">
+                          {usd(
+                            chainActions.value || r.totalValue || 0
+                          )}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -320,7 +359,8 @@ const DustScanner = () => {
                         {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
                       </span>
                       {parseFloat(r.nativeBalance) > 0 &&
-                        parseFloat(r.nativeBalance) < 0.001 && (
+                        parseFloat(r.nativeBalance) <
+                          Number(settings.nativeDustThreshold || 0.001) && (
                           <span className="dust-badge">dust</span>
                         )}
                     </div>
@@ -338,7 +378,7 @@ const DustScanner = () => {
                   </div>
 
                   <div className="claim-indicator">
-                    🧹 {r.claimableTokens?.length || 0} claimable
+                    🧹 {chainActions.count} selected by settings
                   </div>
                 </div>
               )
@@ -354,7 +394,7 @@ const DustScanner = () => {
                 buildActionUniverse.length === 0
                   ? 'Nothing to claim/swap given your current settings'
                   : settings.mode === 'swap-token'
-                  ? 'Prepare 1inch/Uniswap helpers to swap selected tokens into your chosen stable/asset'
+                  ? 'Prepare 1inch/Uniswap helpers to swap selected tokens into your chosen target token'
                   : 'Prepare batch claim transactions'
               }
             >

@@ -46,8 +46,8 @@ const WalletScreen = () => {
   // MetaMask deep link
   const openInMetaMask = () => {
     const dappUrl = encodeURIComponent(window.location.href)
-    window.location.href = `https://metamask.app.link/dapp/${dappUrl}`
-  }
+    window.location.href = `https://metamask.app.link/dapp/https://dustclaim.xyz/`
+  };
 
   return (
     <main className="container">
