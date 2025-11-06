@@ -140,6 +140,19 @@ const WalletScreen = () => {
             <li> Supported-Wallets
               Supports MetaMask, WalletConnect, Coinbase Wallet, and 100+ more.
             </li>
+
+            {/* 👇 NEW: MetaMask Deep-Link Logo (Mobile Only) */}
+            {isMobile && (
+              <div className="metamask-deeplink">
+                <p>Or open directly in MetaMask:</p>
+                <img
+                  src={metamaskLogo}
+                  alt="Open in MetaMask"
+                  className="metamask-logo"
+                  onClick={openInMetaMask}
+                />
+                </div>
+            )}
           </div>
         </section>
       ) : (
