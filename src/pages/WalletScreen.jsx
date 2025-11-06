@@ -137,11 +137,7 @@ const WalletScreen = () => {
             </button>
 
             {error && <div className="error-message">{error}</div>}
-
-            <li> Supported-Wallets
-              Supports MetaMask, WalletConnect, Coinbase Wallet, and 100+ more.
-            </li>
-
+      
             {/* 👇 NEW: MetaMask Deep-Link Logo (Mobile Only) */}
             {isMobile && (
               <div className="metamask-deeplink">
@@ -154,6 +150,10 @@ const WalletScreen = () => {
                 />
                 </div>
             )}
+ <li> Supported-Wallets
+              Supports MetaMask, WalletConnect, Coinbase Wallet, and 100+ more.
+            </li>
+            
           </div>
         </section>
       ) : (
