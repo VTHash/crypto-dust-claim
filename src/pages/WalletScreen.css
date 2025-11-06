@@ -256,28 +256,63 @@
 }
 
 .metamask-deeplink {
-  margin-top: 1.2rem;
+  margin-top: 1.8rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  color: #ccc;
+  color: #ddd;
 }
 
 .metamask-deeplink p {
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.3px;
+  color: #bbb;
 }
 
 .metamask-logo {
-  width: 60px;
-  height: 60px;
+  width: 68px;
+  height: 68px;
   cursor: pointer;
-  border-radius: 16px;
-  padding: 6px;
-  background: radial-gradient(circle, #1a1a1a 0%, #000 80%);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border-radius: 20px;
+  padding: 8px;
+  background: radial-gradient(circle at center, #1c1c1c 0%, #000 85%);
+  box-shadow: 0 0 10px rgba(246, 133, 27, 0.4);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* subtle pulse animation for mobile attention */
+@keyframes pulseGlow {
+  0% {
+    box-shadow: 0 0 8px rgba(246, 133, 27, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(246, 133, 27, 0.8);
+    transform: scale(1.05);
+  }
+  100% {
+    box-shadow: 0 0 8px rgba(246, 133, 27, 0.4);
+    transform: scale(1);
+  }
 }
 
 .metamask-logo:hover {
-  transform: scale(1.08);
-  box-shadow: 0 0 18px rgba(246, 133, 27, 0.7);
+  transform: scale(1.1);
+  box-shadow: 0 0 22px rgba(246, 133, 27, 0.8);
 }
-}
+
+@media (max-width: 768px) {
+  .metamask-deeplink {
+    margin-top: 2rem;
+  }
+
+  .metamask-logo {
+    width: 72px;
+    height: 72px;
+    animation: pulseGlow 2.5s infinite ease-in-out;
+  }
+}}
