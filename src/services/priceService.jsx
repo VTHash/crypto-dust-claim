@@ -42,8 +42,10 @@ cg.interceptors.response.use((response) => {
 });
 
 /**
- * Map EVM chainId -> CoinGecko "platform" slug for token price lookups
+ * Map EVM chainId → CoinGecko "platform" slug for token price lookups
+ * (Used to get ERC-20 token USD values)
  */
+
 const PLATFORM_BY_CHAIN = {
    1: 'ethereum', // Ethereum Mainnet
   10: 'optimistic-ethereum', // Optimism
@@ -68,7 +70,8 @@ const PLATFORM_BY_CHAIN = {
 };
 
 /**
- * Map EVM chainId -> Coin ID for native coin price
+ * Map EVM chainId → CoinGecko "coin id" for native asset USD pricing
+ * (Used to get ETH, BNB, AVAX, etc. prices)
  */
 const NATIVE_ID_BY_CHAIN = {
    1: 'ethereum', // ETH
