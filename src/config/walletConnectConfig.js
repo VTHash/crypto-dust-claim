@@ -195,6 +195,63 @@ export const SUPPORTED_CHAINS = {
     logo: "/logo/harmony.png",
   },
 
+  324: {
+  name: "zkSync Mainnet",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.ankr.com/zksync_era",
+  explorer: "https://explorer.zksync.io",
+  logo: "/logo/zksync.jpg",
+},
+
+388: {
+  name: "Cronos zkEVM Mainnet",
+  symbol: "zkCRO",
+  rpcUrl: "https://rpc-zkevm.cronos.org",
+  explorer: "https://zkevm.cronos.org/explorer",
+  logo: "/logo/cronos.png",
+},
+
+11297108109: {
+  name: "Palm Mainnet",
+  symbol: "PALM",
+  rpcUrl: "https://palm-mainnet.public.blastapi.io",
+  explorer: "https://explorer.palm.io",
+  logo: "/logo/palm.jpg",
+},
+
+9745: {
+  name: "Plasma Mainnet",
+  symbol: "XPL",
+  rpcUrl: "https://plasma.drpc.org",
+  explorer: "https://explorer.plasma.to",
+  logo: "/logo/plasma.png",
+},
+
+130: {
+  name: "Unichain",
+  symbol: "ETH",
+  rpcUrl: "https://unichain.drpc.org",
+  explorer: "https://uniscan.xyz",
+  logo: "/logo/unichain.png",
+},
+
+5000: {
+  name: "Mantle",
+  symbol: "MNT",
+  rpcUrl: "https://mantle.drpc.org",
+  explorer: "https://explorer.mantlenetwork.io",
+  logo: "/logo/mantle.png",
+},
+
+99999: {
+  name: "Solana Mainnet",
+  symbol: "SOL",
+  rpcUrl: "https://api.mainnet-beta.solana.com",
+  explorer: "https://solscan.io",
+  logo: "/logo/solana.png",
+  disabled: true, // mark as non-EVM / inactive
+},
+
 };
 // -------------------------------
 // 4) Convert to Reown CAIP networks
