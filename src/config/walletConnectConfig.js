@@ -102,7 +102,7 @@ export const SUPPORTED_CHAINS = {
   250: {
     name: "Fantom Opera",
     symbol: "FTM",
-    rpcUrl: "https://rpc.ftm.tools",
+    rpcUrl: "https://public-ftm-mainnet.fastnode.io",
     explorer: "https://ftmscan.com",
     logo: "/logo/fantom.png",
   },
@@ -150,7 +150,7 @@ export const SUPPORTED_CHAINS = {
   195: {
     name: "X1",
     symbol: "OKB",
-    rpcUrl: "https://rpc.x1.tech", // corrected: .tech not .xyz
+    rpcUrl: "https://rpc.ankr.com/xlayer",
     explorer: "https://www.oklink.com/x1",
     logo: "/logo/okb.png",
   },
