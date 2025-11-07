@@ -66,7 +66,8 @@ const PLATFORM_BY_CHAIN = {
   42220: 'celo',
   1284: 'moonbeam',
   1285: 'moonriver',
-  1666600000: 'harmony-shard-0'
+  1666600000: 'harmony-shard-0',
+  170: 'unichain' // Unichain
 };
 
 /**
