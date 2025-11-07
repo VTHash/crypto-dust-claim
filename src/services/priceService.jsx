@@ -45,17 +45,22 @@ cg.interceptors.response.use((response) => {
  * Map EVM chainId -> CoinGecko "platform" slug for token price lookups
  */
 const PLATFORM_BY_CHAIN = {
-  1: 'ethereum',
-  10: 'optimistic-ethereum',
-  137: 'polygon-pos',
-  42161: 'arbitrum-one',
-  43114: 'avalanche',
-  250: 'fantom',
-  56: 'binance-smart-chain',
-  8453: 'base',
-  59144: 'linea',
-  100: 'xdai',
-  1313161554: 'aurora',
+   1: 'ethereum', // Ethereum Mainnet
+  10: 'optimistic-ethereum', // Optimism
+  56: 'binance-smart-chain', // BNB Smart Chain
+  100: 'xdai', // Gnosis (xDAI)
+  137: 'polygon-pos', // Polygon PoS
+  195: 'okex-chain', // X1 (OKX Chain base)
+  250: 'fantom', // Fantom Opera
+  8453: 'base', // Base
+  59144: 'linea', // Linea
+  34443: 'mode', // Mode Network
+  42161: 'arbitrum-one', // Arbitrum One
+  43114: 'avalanche', // Avalanche C-Chain
+  1329: 'sei-network', // Sei (when listed)
+  80094: 'berachain', // Berachain (future support)
+  7777777: 'zora', // Zora Network (future support)
+  1313161554: 'aurora', //
   42220: 'celo',
   1284: 'moonbeam',
   1285: 'moonriver',
@@ -66,17 +71,21 @@ const PLATFORM_BY_CHAIN = {
  * Map EVM chainId -> Coin ID for native coin price
  */
 const NATIVE_ID_BY_CHAIN = {
-  1: 'ethereum', // ETH
-  10: 'ethereum', // ETH on OP
-  8453: 'ethereum', // ETH on Base
-  42161: 'ethereum', // ETH on Arbitrum
-  137: 'matic-network', // MATIC
+   1: 'ethereum', // ETH
+  10: 'ethereum', // OP uses ETH
   56: 'binancecoin', // BNB
-  43114: 'avalanche-2', // AVAX
+  100: 'xdai', // xDAI
+  137: 'matic-network', // MATIC
+  195: 'okb', // X1 uses OKB (approx)
   250: 'fantom', // FTM
-  59144: 'ethereum', // ETH on Linea
-  100: 'dai', // xDAI (using DAI price)
-  1313161554: 'ethereum', // ETH on Aurora
+  8453: 'ethereum', // Base (ETH)
+  59144: 'ethereum', // Linea (ETH)
+  34443: 'ethereum', // Mode (ETH)
+  42161: 'ethereum', // Arbitrum (ETH)
+  43114: 'avalanche-2', // AVAX
+  1329: 'sei-network', // SEI
+  80094: 'ethereum', // fallback for Berachain (uses ETH price until BERA is listed)
+  7777777: 'ethereum', // fallback for Zora (uses ETH price)
   42220: 'celo', // CELO
   1284: 'moonbeam', // GLMR
   1285: 'moonriver', // MOVR
