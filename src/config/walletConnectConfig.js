@@ -154,6 +154,47 @@ export const SUPPORTED_CHAINS = {
     explorer: "https://www.oklink.com/x1",
     logo: "/logo/okb.png",
   },
+
+  42220: {
+    name: "Celo Mainnet",
+    symbol: "CELO",
+    rpcUrl: "https://rpc.ankr.com/celo",
+    explorer: "https://celoscan.io",
+    logo: "/logo/celo.png",
+  },
+
+  1313161554: {
+    name: "Aurora Mainnet",
+    symbol: "ETH",
+    rpcUrl: "https://mainnet.aurora.dev",
+    explorer: "https://aurorascan.dev",
+    logo: "/logo/aurora.png",
+  },
+
+  1284: {
+    name: "Moonbeam",
+    symbol: "GLMR",
+    rpcUrl: "https://moonbeam.drpc.org",
+    explorer: "https://moonscan.io",
+    logo: "/logo/moonbeam.png",
+  },
+
+  1285: {
+    name: "Moonriver",
+    symbol: "MOVR",
+    rpcUrl: "https://moonriver.drpc.org",
+    explorer: "https://moonriver.moonscan.io",
+    logo: "/logo/moonriver.png",
+  },
+
+  1666600000: {
+    name: "Harmony Mainnet Shard 0",
+    symbol: "ONE",
+    rpcUrl: "https://api.harmony.one",
+    explorer: "https://explorer.harmony.one",
+    logo: "/logo/harmony.png",
+  },
+
 };
 // -------------------------------
 // 4) Convert to Reown CAIP networks
