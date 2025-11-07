@@ -11,6 +11,9 @@ class Web3Service {
     this.initializeProviders()
   }
 
+  // ------------------------
+  // Provider bootstrap
+  // ------------------------
   initializeProviders() {
     this.providers = {}
     Object.keys(SUPPORTED_CHAINS).forEach((rawId) => {
@@ -32,6 +35,9 @@ class Web3Service {
     return p
   }
 
+  // ------------------------
+  // Balances
+  // ------------------------
   async getNativeBalance(chainId, address) {
     try {
       const provider = this.getProvider(chainId)
@@ -43,16 +49,23 @@ class Web3Service {
     }
   }
 
-  // NEW: discover every ERC-20 on chain for the user
+  // Discover ALL ERC-20s the wallet holds on this chain
   async getTokenBalances(chainId, address) {
     const provider = this.getProvider(chainId)
-    const discovered = await discoverAllERC20s({
-      provider,
-      chainId: Number(chainId),
-      owner: address
-    })
+    if (!provider) return []
 
-    // convert raw (wei strings) → human strings with decimals
+    let discovered = []
+    try {
+      discovered = await discoverAllERC20s({
+        provider,
+        chainId: Number(chainId),
+        owner: address
+      })
+    } catch (e) {
+      console.warn('token discovery failed for chain', chainId, e?.message)
+      return []
+    }
+
     const out = []
     for (const t of discovered) {
       try {
@@ -73,42 +86,173 @@ class Web3Service {
     return out
   }
 
-  async checkForDust(chainId, address) {
-    const key = toKey(chainId)
-    const [nativeBalance, tokenBalances] = await Promise.all([
+  // ------------------------
+  // Core detailed view
+  // ------------------------
+  /**
+   * Main “rich” view used by DustScanner & Dashboard.
+   *
+   * @param {number} chainId
+   * @param {string} address
+   * @param {object|null} settings - snapshot from SettingsContext
+   */
+  async getDetailedChainView(chainId, address, settings = null) {
+    const key = Number(chainId)
+    const meta = SUPPORTED_CHAINS[key] || {}
+    const symbol = meta.symbol || 'ETH'
+
+    const [nativeBalance, tokens] = await Promise.all([
       this.getNativeBalance(key, address),
       this.getTokenBalances(key, address)
     ])
 
-    // define dust thresholds
-    const nativeDust = parseFloat(nativeBalance) > 0 && parseFloat(nativeBalance) < 0.002
-    const tokenDust = (tokenBalances || []).filter(t => parseFloat(t.balance) < 1) // < 1 token as "dust"
+    // Prices
+    const nativePrice = await priceService.getNativeUsdPrice(key)
+    const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)
+
+    const tokenAddrs = tokens.map((t) => t.address.toLowerCase())
+    const priceMap = tokenAddrs.length
+      ? await priceService.getTokenUsdPrices(key, tokenAddrs)
+      : {}
+
+    const tokenDetails = tokens.map((t) => {
+      const price = priceMap[t.address.toLowerCase()] || 0
+      const value = parseFloat(t.balance || '0') * price
+      return { ...t, price, value }
+    })
+
+    // ---- Settings integration ----
+    const tokenMin = Number(settings?.tokenMinUSD ?? 0)
+    const tokenMax =
+      settings?.tokenMaxUSD == null || settings.tokenMaxUSD === 0
+        ? Infinity
+        : Number(settings.tokenMaxUSD)
+
+    const includeNonDust = !!settings?.includeNonDust
+    const nativeDustThreshold =
+      settings?.nativeDustThreshold != null
+        ? Number(settings.nativeDustThreshold)
+        : 0.001 // default 0.001 native units
+
+    const isNativeDust =
+      parseFloat(nativeBalance || '0') > 0 &&
+      parseFloat(nativeBalance || '0') < nativeDustThreshold
+
+    let claimableTokens
+    if (includeNonDust) {
+      // Sweep everything with a non-zero balance
+      claimableTokens = tokenDetails.filter((t) => parseFloat(t.balance || '0') > 0)
+    } else {
+      // Only tokens whose USD value is within the dust window
+      claimableTokens = tokenDetails.filter((t) => {
+        const v = t.value || 0
+        return v >= tokenMin && v <= tokenMax
+      })
+    }
+
+    const totalValue = Number(
+      (
+        nativeValue +
+        tokenDetails.reduce((sum, t) => sum + (t.value || 0), 0)
+      ).toFixed(6)
+    )
 
     return {
-      chainId: Number(key),
+      chainId: key,
+      chainName: meta.name || `Chain ${key}`,
+      symbol,
       nativeBalance,
-      nativeDust,
-      tokenDust,
-      hasDust: nativeDust || tokenDust.length > 0
+      nativePrice,
+      nativeValue,
+      tokenDetails, // ALL tokens + prices
+      claimableTokens, // filtered by Settings
+      hasDust: isNativeDust || claimableTokens.length > 0,
+      totalValue
     }
   }
 
-  async getUSDValue(chainId, nativeBalance, tokenDust = []) {
+  /**
+   * Scan many chains – used by DustScanner.
+   * Settings is passed through so Scanner + Dashboard stay in sync.
+   */
+  async scanChains(chainIds, address, settings = null) {
+    const out = []
+    for (const id of chainIds) {
+      try {
+        out.push(await this.getDetailedChainView(id, address, settings))
+      } catch (e) {
+        console.warn('scan error for chain', id, e?.message)
+      }
+    }
+    return out
+  }
+
+  // ------------------------
+  // Helpers for Dashboard
+  // ------------------------
+
+  /**
+   * Lightweight “is there dust here?” helper for a single chain.
+   * Wraps getDetailedChainView so logic stays consistent.
+   */
+  async checkForDust(chainId, address, settings = null) {
+    const detail = await this.getDetailedChainView(chainId, address, settings)
+    const nativeDustThreshold =
+      settings?.nativeDustThreshold != null
+        ? Number(settings.nativeDustThreshold)
+        : 0.001
+
+    const nativeDust =
+      parseFloat(detail.nativeBalance || '0') > 0 &&
+      parseFloat(detail.nativeBalance || '0') < nativeDustThreshold
+
+    return {
+      chainId: detail.chainId,
+      nativeBalance: detail.nativeBalance,
+      nativeDust,
+      tokenDust: detail.claimableTokens, // tokens matching Settings
+      hasDust: detail.hasDust
+    }
+  }
+
+  /**
+   * Stand-alone USD valuation helper – used by Dashboard.
+   * Sums native + tokens, and (optionally) re-applies Settings filters.
+   */
+  async getUSDValue(chainId, nativeBalance, tokenList = [], settings = null) {
     try {
       const id = Number(chainId)
       let total = 0
 
+      // native
       const nativePrice = await priceService.getNativeUsdPrice(id)
-      total += (parseFloat(nativeBalance || '0') * (nativePrice || 0))
+      total += parseFloat(nativeBalance || '0') * (nativePrice || 0)
 
-      if (tokenDust.length) {
-        const addrs = tokenDust.map(t => t.address.toLowerCase())
+      // tokens
+      if (tokenList.length) {
+        const addrs = tokenList.map((t) => t.address.toLowerCase())
         const priceMap = await priceService.getTokenUsdPrices(id, addrs)
-        for (const t of tokenDust) {
-          const p = priceMap[t.address.toLowerCase()] || 0
-          total += parseFloat(t.balance || '0') * p
+
+        const tokenMin = Number(settings?.tokenMinUSD ?? 0)
+        const tokenMax =
+          settings?.tokenMaxUSD == null || settings.tokenMaxUSD === 0
+            ? Infinity
+            : Number(settings.tokenMaxUSD)
+        const includeNonDust = !!settings?.includeNonDust
+
+        for (const t of tokenList) {
+          const price = priceMap[t.address.toLowerCase()] || 0
+          const value = parseFloat(t.balance || '0') * price
+
+          if (
+            includeNonDust ||
+            (value >= tokenMin && value <= tokenMax)
+          ) {
+            total += value
+          }
         }
       }
+
       return Number(total.toFixed(6))
     } catch (e) {
       console.error(`getUSDValue(${chainId}) error:`, e)
@@ -116,22 +260,12 @@ class Web3Service {
     }
   }
 
-  async getDetailedDustAnalysis(chainId, address) {
-    const base = await this.checkForDust(chainId, address)
-
-    const nativePrice = await priceService.getNativeUsdPrice(Number(chainId))
-    const nativeValue = parseFloat(base.nativeBalance || '0') * (nativePrice || 0)
-
-    const addrs = (base.tokenDust || []).map(t => t.address.toLowerCase())
-    const priceMap = await priceService.getTokenUsdPrices(Number(chainId), addrs)
-
-    const tokenDetails = (base.tokenDust || []).map(t => {
-      const price = priceMap[t.address.toLowerCase()] || 0
-      return { ...t, price, value: parseFloat(t.balance || '0') * price }
-    })
-
-    const totalValue = Number((nativeValue + tokenDetails.reduce((s, t) => s + t.value, 0)).toFixed(6))
-    return { ...base, nativePrice, nativeValue, tokenDetails, totalValue }
+  /**
+   * Alias kept for backwards-compatibility. Returns the same rich object
+   * DustScanner uses, including token USD values and Settings-aware filters.
+   */
+  async getDetailedDustAnalysis(chainId, address, settings = null) {
+    return this.getDetailedChainView(chainId, address, settings)
   }
 }
 
