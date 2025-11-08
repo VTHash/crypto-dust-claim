@@ -1,7 +1,7 @@
 import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
-import priceService from './priceService'
-import { discoverAllERC20s } from './tokenDiscoveryService'
+import priceService from '../services/priceService'
+import { discoverAllERC20s } from '../services/tokenDiscoveryService'
 
 const toKey = (id) => String(id)
 

@@ -14,7 +14,7 @@ import lineaAbi from './contracts/dustclaim.linea.json'
 import zoraAbi from './contracts/dustclaim.zora.json'
 import beraAbi from './contracts/dustclaim.bera.json'
 import fantomAbi from './contracts/dustclaim.fantom.json'
-import unichainAbi from 'contracts/dustclaim.unichain.json'
+import unichainAbi from './contracts/dustclaim.unichain.json'
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
 
