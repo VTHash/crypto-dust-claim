@@ -1,283 +1,172 @@
-import React, { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useWallet } from '../contexts/WalletContext'
-import { useScan } from '../contexts/ScanContext'
-import { useSettings } from '../contexts/SettingsContext'
-import web3Service from '../services/web3Service'
+import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
-import { NATIVE_LOGOS } from '../services/logoService'
-import TokenRow from '../components/TokenRow'
-import './Dashboard.css'
+import priceService from './priceService'
+import { discoverAllERC20s } from './tokenDiscoveryService'
 
-const fmt = (n) => Number(n || 0).toFixed(6)
-const usd = (n) =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+const toKey = (id) => String(id)
 
-export default function Dashboard() {
-  const { address } = useWallet()
-  const navigate = useNavigate()
-  const { results, setResults } = useScan()
-  const { settings } = useSettings()
+// very simple native dust flag (UI only)
+const NATIVE_DUST_THRESHOLD = 0.001
 
-  const [loading, setLoading] = useState(false)
-  const [priceLoading, setPriceLoading] = useState(false)
+class Web3Service {
+  constructor () {
+    this.providers = {}
+    this.initializeProviders()
+  }
 
-  // 1) Hydrate results from last scan if we have them
-  useEffect(() => {
-    try {
-      const cached = sessionStorage.getItem('dustclaim:lastScan')
-      if (cached) {
-        const { dustResults = [] } = JSON.parse(cached)
-        if (dustResults.length) {
-          setResults(dustResults)
-        }
+  initializeProviders () {
+    this.providers = {}
+    Object.keys(SUPPORTED_CHAINS).forEach((rawId) => {
+      const id = toKey(rawId)
+      const chain = SUPPORTED_CHAINS[id]
+      if (!chain?.rpcUrl) return
+      try {
+        this.providers[id] = new ethers.JsonRpcProvider(chain.rpcUrl, Number(id))
+      } catch (e) {
+        console.warn(`RPC init failed for chain ${id}`, e)
       }
-    } catch {}
-  }, [setResults])
+    })
+  }
 
-  // 2) If wallet connects and no results, run a full scan (same as Scanner)
-  useEffect(() => {
-    if (address && results.length === 0) {
-      rescanAllChains()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address])
+  getProvider (chainId) {
+    const id = toKey(chainId)
+    const p = this.providers[id]
+    if (!p) console.warn(`No provider for chain ${id}. Check SUPPORTED_CHAINS.rpcUrl`)
+    return p
+  }
 
-  async function rescanAllChains() {
-    if (!address) return
-    setLoading(true)
-    setPriceLoading(true)
+  // ------------ low-level balance helpers ------------
+
+  async getNativeBalance (chainId, address) {
     try {
-      const chainIds = Object.keys(SUPPORTED_CHAINS).map(Number)
-      const scan = await web3Service.scanChains(chainIds, address)
-
-      setResults(scan)
-
-      const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
-    } catch (e) {
-      console.error('Dashboard scan error:', e)
-      setResults([])
-    } finally {
-      setLoading(false)
-      setPriceLoading(false)
+      const provider = this.getProvider(chainId)
+      if (!provider) return '0'
+      const balance = await provider.getBalance(address)
+      return ethers.formatEther(balance)
+    } catch {
+      return '0'
     }
   }
 
-  async function refreshPrices() {
-    if (!address || results.length === 0) return
-    setPriceLoading(true)
-    try {
-      const chainIds = results.map((r) => r.chainId)
-      const scan = await web3Service.scanChains(chainIds, address)
-      setResults(scan)
-      const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
-    } catch (e) {
-      console.error('Price refresh error:', e)
-    } finally {
-      setPriceLoading(false)
+  // discover all ERC-20s held by the user on this chain
+  async getTokenBalances (chainId, address) {
+    const provider = this.getProvider(chainId)
+    if (!provider) return []
+
+    const discovered = await discoverAllERC20s({
+      provider,
+      chainId: Number(chainId),
+      owner: address
+    })
+
+    const out = []
+    for (const t of discovered) {
+      try {
+        const human = ethers.formatUnits(t.balance, t.decimals ?? 18)
+        if (parseFloat(human) > 0) {
+          out.push({
+            chainId: Number(chainId),
+            address: t.address,
+            symbol: t.symbol || 'TOKEN',
+            decimals: t.decimals ?? 18,
+            balance: human
+          })
+        }
+      } catch {
+        // ignore malformed token
+      }
+    }
+    return out
+  }
+
+  // ------------ main “rich view” used by Scanner / Dashboard ------------
+
+  async getDetailedChainView (chainId, address) {
+    const key = Number(chainId)
+    const meta = SUPPORTED_CHAINS[key] || {}
+    const symbol = meta.symbol || 'ETH'
+
+    // 1) raw balances
+    const nativeBalance = await this.getNativeBalance(key, address)
+    const tokens = await this.getTokenBalances(key, address)
+
+    // 2) native USD
+    const nativePrice = await priceService.getNativeUsdPrice(key)
+    const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)
+
+    // 3) token USD (per token)
+    const tokenAddrs = tokens.map((t) => t.address.toLowerCase())
+    const priceMap = tokenAddrs.length
+      ? await priceService.getTokenUsdPrices(key, tokenAddrs)
+      : {}
+
+    const tokenDetails = tokens.map((t) => {
+      const price = priceMap[t.address.toLowerCase()] || 0
+      const value = parseFloat(t.balance || '0') * price
+      return { ...t, price, value }
+    })
+
+    const totalTokenValue = tokenDetails.reduce((s, t) => s + (t.value || 0), 0)
+    const totalValue = Number((nativeValue + totalTokenValue).toFixed(6))
+
+    const isNativeDust =
+      parseFloat(nativeBalance) > 0 &&
+      parseFloat(nativeBalance) < NATIVE_DUST_THRESHOLD
+
+    // For now we let the front-end Settings decide what’s “selected”.
+    // claimableTokens is just “all tokens we know about”.
+    const claimableTokens = tokenDetails
+
+    return {
+      chainId: key,
+      chainName: meta.name || `Chain ${key}`,
+      symbol,
+      nativeBalance,
+      nativePrice,
+      nativeValue,
+      tokenDetails,
+      claimableTokens,
+      hasDust: isNativeDust || claimableTokens.length > 0,
+      totalValue
     }
   }
 
-  // 3) Build the "action universe" using EXACTLY the same rules as DustScanner
-  const buildActionUniverse = useMemo(() => {
-    const list = []
-    for (const chain of results) {
-      const chainId = chain.chainId
-      const tokenList = chain.tokenDetails || []
-
-      for (const t of tokenList) {
-        const usdValue = Number(t.value || 0)
-
-        if (settings.includeNonDust) {
-          // include every non-zero balance
-          if (Number(t.balance) > 0) {
-            list.push({
-              chainId,
-              symbol: t.symbol,
-              address: t.address,
-              balance: t.balance,
-              usd: usdValue
-            })
-          }
-        } else {
-          const min = Number(settings.tokenMinUSD || 0)
-          const max = Number(settings.tokenMaxUSD || Infinity)
-          if (usdValue >= min && usdValue <= max) {
-            list.push({
-              chainId,
-              symbol: t.symbol,
-              address: t.address,
-              balance: t.balance,
-              usd: usdValue
-            })
-          }
-        }
+  // bulk scan used by DustScanner & Dashboard
+  async scanChains (chainIds, address) {
+    const out = []
+    for (const id of chainIds) {
+      try {
+        out.push(await this.getDetailedChainView(id, address))
+      } catch (e) {
+        console.warn('scan error for chain', id, e?.message)
       }
     }
-    return list
-  }, [results, settings.includeNonDust, settings.tokenMinUSD, settings.tokenMaxUSD])
+    return out
+  }
 
-  // 4) Aggregate by chain for the top cards and overview
-  const actionByChain = useMemo(() => {
-    const m = {}
-    for (const item of buildActionUniverse) {
-      const key = String(item.chainId)
-      if (!m[key]) m[key] = { value: 0, count: 0 }
-      m[key].value += Number(item.usd || 0)
-      m[key].count += 1
+  // keep this helper for Dashboard/etc if you still use it anywhere
+  async getUSDValue (chainId, nativeBalance, tokenList = []) {
+    try {
+      const id = Number(chainId)
+      let total = 0
+
+      const nativePrice = await priceService.getNativeUsdPrice(id)
+      total += parseFloat(nativeBalance || '0') * (nativePrice || 0)
+
+      if (tokenList.length) {
+        const addrs = tokenList.map((t) => t.address.toLowerCase())
+        const priceMap = await priceService.getTokenUsdPrices(id, addrs)
+        for (const t of tokenList) {
+          const p = priceMap[t.address.toLowerCase()] || 0
+          total += parseFloat(t.balance || '0') * p
+        }
+      }
+      return Number(total.toFixed(6))
+    } catch (e) {
+      console.error(`getUSDValue(${chainId}) error:`, e)
+      return 0
     }
-    return m
-  }, [buildActionUniverse])
-
-  const totalDustValue = useMemo(
-    () => Object.values(actionByChain).reduce((s, x) => s + x.value, 0),
-    [actionByChain]
-  )
-
-  const totalTokens = useMemo(
-    () => buildActionUniverse.length,
-    [buildActionUniverse]
-  )
-
-  const activeChains = useMemo(
-    () => Object.keys(actionByChain).length,
-    [actionByChain]
-  )
-
-  return (
-    <div className="dashboard">
-      <div className="dashboard-header">
-        <h1>Dashboard</h1>
-        <p>Real-time dust valuation across all chains</p>
-
-        <div className="price-refresh">
-          <button
-            onClick={refreshPrices}
-            disabled={priceLoading}
-            className="btn btn-outline btn-sm"
-          >
-            {priceLoading ? '🔄 Updating…' : '🔄 Refresh Prices'}
-          </button>
-        </div>
-      </div>
-
-      <div className="stats-grid">
-        <div className="stat-card primary">
-          <div className="stat-icon">💰</div>
-          <div className="stat-content">
-            <h3>Total Claimable Dust</h3>
-            <div className="stat-value">{usd(totalDustValue)}</div>
-            <div className="stat-subtitle">
-              Uses your current dust settings ({settings.includeNonDust ? 'swap everything' : 'USD window'})
-            </div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon">🔗</div>
-          <div className="stat-content">
-            <h3>Active Chains</h3>
-            <div className="stat-value">{activeChains}</div>
-            <div className="stat-subtitle">With selected balances</div>
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-icon">🧹</div>
-          <div className="stat-content">
-            <h3>Total Tokens</h3>
-            <div className="stat-value">{totalTokens}</div>
-            <div className="stat-subtitle">Tokens matching your settings</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="actions-section">
-        <button onClick={() => navigate('/scanner')} className="btn btn-primary btn-large">
-          🔍 Advanced Dust Scanner
-        </button>
-        <button onClick={rescanAllChains} disabled={loading} className="btn btn-secondary">
-          {loading ? '🔄 Scanning…' : '🔄 Rescan All Chains'}
-        </button>
-        <button onClick={refreshPrices} disabled={priceLoading} className="btn btn-outline">
-          {priceLoading ? '📊 Updating…' : '📊 Refresh Prices'}
-        </button>
-      </div>
-
-      <div className="chains-section">
-        <h2>
-          Chain Overview {priceLoading && <span className="loading-badge">Updating Prices…</span>}
-        </h2>
-
-        {buildActionUniverse.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🎉</div>
-            <h3>No Dust Found!</h3>
-            <p>No balances match your current settings.</p>
-            <button onClick={() => navigate('/scanner')} className="btn btn-primary">
-              Run Advanced Scan
-            </button>
-          </div>
-        ) : (
-          <div className="chains-grid">
-            {results.map((r) => {
-              const meta = SUPPORTED_CHAINS[r.chainId] || {}
-              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
-              const action = actionByChain[String(r.chainId)] || { value: 0, count: 0 }
-
-              if (!action.count) return null // nothing selected on this chain
-
-              return (
-                <div key={r.chainId} className="chain-card has-dust">
-                  <div className="chain-header">
-                    <div className="chain-info">
-                      <img className="chain-logo" src={nativeLogo} alt={meta.name} />
-                      <div>
-                        <h3>{meta.name}</h3>
-                        <p className="chain-value">{usd(action.value)}</p>
-                      </div>
-                    </div>
-                    <div className="chain-balance">
-                      <div className="native-balance">
-                        {fmt(r.nativeBalance)} {meta.symbol}
-                      </div>
-                      {!!action.count && (
-                        <div className="token-count">{action.count} tokens selected</div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="price-details">
-                    <div className="price-item">
-                      <span>Native:</span>
-                      <span>
-                        {fmt(r.nativeBalance)} {meta.symbol}{' '}
-                        {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
-                      </span>
-                    </div>
-
-                    {(r.tokenDetails || []).slice(0, 3).map((t, i) => (
-                      <TokenRow key={`${t.address}-${i}`} token={t} />
-                    ))}
-
-                    {(r.tokenDetails?.length || 0) > 3 && (
-                      <div className="price-item more">
-                        <span>+{r.tokenDetails.length - 3} more tokens</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="dust-indicator">
-                    🧹 {action.count} tokens matching settings
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  )
+  }
 }
+
+export default new Web3Service()
