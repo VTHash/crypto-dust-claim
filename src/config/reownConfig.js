@@ -184,14 +184,6 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/cronos.png",
 },
 
-11297108109: {
-  name: "Palm Mainnet",
-  symbol: "PALM",
-  rpcUrl: "https://palm-mainnet.public.blastapi.io",
-  explorer: "https://explorer.palm.io",
-  logo: "/logo/palm.jpg",
-},
-
 9745: {
   name: "Plasma Mainnet",
   symbol: "XPL",
@@ -216,13 +208,5 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/mantle.png",
 },
 
-99999: {
-  name: "Solana Mainnet",
-  symbol: "SOL",
-  rpcUrl: "https://api.mainnet-beta.solana.com",
-  explorer: "https://solscan.io",
-  logo: "/logo/solana.png",
-  disabled: true, // mark as non-EVM / inactive
-},
 };
 

@@ -8,7 +8,7 @@ import axios from 'axios';
  */
 
 const COINGECKO_API_KEY = import.meta.env.VITE_COINGECKO_API_KEY;
-
+console.log("🧩 CoinGecko key detected:", import.meta.env.VITE_COINGECKO_API_KEY ? "✅ yes" : "❌ no");
 const cg = axios.create({
   baseURL: 'https://api.coingecko.com/api/v3',
   timeout: 15000,
@@ -70,7 +70,6 @@ const PLATFORM_BY_CHAIN = {
   1285: 'moonriver',
   1666600000: 'harmony-shard-0',
   170: 'unichain',
-  112358: 'palm', // ✅ added
   9001: 'cronos-zkevm' // ✅ added
 };
 
@@ -102,7 +101,6 @@ const NATIVE_ID_BY_CHAIN = {
   1285: "moonriver", // Moonriver → MOVR
   1666600000: "harmony", // Harmony → ONE
   170: "ethereum", // Unichain → ETH (until native listed)
-  112358: "palm", // Palm → PALM
   9001: "cronos-zkevm" // Cronos zkEVM → CRO
 };
 
