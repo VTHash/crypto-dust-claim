@@ -47,27 +47,31 @@ cg.interceptors.response.use((response) => {
  */
 
 const PLATFORM_BY_CHAIN = {
-   1: 'ethereum', // Ethereum Mainnet
-  10: 'optimistic-ethereum', // Optimism
-  56: 'binance-smart-chain', // BNB Smart Chain
-  100: 'xdai', // Gnosis (xDAI)
-  137: 'polygon-pos', // Polygon PoS
-  195: 'okex-chain', // X1 (OKX Chain base)
-  250: 'fantom', // Fantom Opera
-  8453: 'base', // Base
-  59144: 'linea', // Linea
-  34443: 'mode', // Mode Network
-  42161: 'arbitrum-one', // Arbitrum One
-  43114: 'avalanche', // Avalanche C-Chain
-  1329: 'sei-network', // Sei (when listed)
-  80094: 'berachain', // Berachain (future support)
-  7777777: 'zora', // Zora Network (future support)
-  1313161554: 'aurora', //
+  1: 'ethereum',
+  10: 'optimistic-ethereum',
+  56: 'binance-smart-chain',
+  100: 'xdai',
+  137: 'polygon-pos',
+  195: 'okx-chain', // ✅ fixed
+  250: 'fantom',
+  8453: 'base',
+  59144: 'linea',
+  34443: 'mode',
+  42161: 'arbitrum-one',
+  43114: 'avalanche',
+  1329: 'sei-network',
+  324: 'zksync', // ✅ added
+  204: 'mantle', // ✅ added
+  80094: 'ethereum', // fallback for berachain
+  7777777: 'zora',
+  1313161554: 'aurora',
   42220: 'celo',
   1284: 'moonbeam',
   1285: 'moonriver',
   1666600000: 'harmony-shard-0',
-  170: 'unichain' // Unichain
+  170: 'unichain',
+  112358: 'palm', // ✅ added
+  9001: 'cronos-zkevm' // ✅ added
 };
 
 /**
@@ -75,25 +79,31 @@ const PLATFORM_BY_CHAIN = {
  * (Used to get ETH, BNB, AVAX, etc. prices)
  */
 const NATIVE_ID_BY_CHAIN = {
-   1: 'ethereum', // ETH
-  10: 'ethereum', // OP uses ETH
-  56: 'binancecoin', // BNB
-  100: 'xdai', // xDAI
-  137: 'matic-network', // MATIC
-  195: 'okb', // X1 uses OKB (approx)
-  250: 'fantom', // FTM
-  8453: 'ethereum', // Base (ETH)
-  59144: 'ethereum', // Linea (ETH)
-  34443: 'ethereum', // Mode (ETH)
-  42161: 'ethereum', // Arbitrum (ETH)
-  43114: 'avalanche-2', // AVAX
-  1329: 'sei-network', // SEI
-  80094: 'ethereum', // fallback for Berachain (uses ETH price until BERA is listed)
-  7777777: 'ethereum', // fallback for Zora (uses ETH price)
-  42220: 'celo', // CELO
-  1284: 'moonbeam', // GLMR
-  1285: 'moonriver', // MOVR
-  1666600000: 'harmony' // ONE
+  1: "ethereum", // ETH
+  10: "ethereum", // Optimism → ETH
+  56: "binancecoin", // BNB Smart Chain → BNB
+  100: "xdai", // Gnosis Chain → xDAI
+  137: "matic-network", // Polygon → MATIC
+  195: "okb", // OKX Chain (X1) → OKB
+  250: "fantom", // Fantom → FTM
+  8453: "ethereum", // Base → ETH
+  59144: "ethereum", // Linea → ETH
+  34443: "ethereum", // Mode → ETH
+  42161: "ethereum", // Arbitrum One → ETH
+  43114: "avalanche-2", // Avalanche C-Chain → AVAX
+  1329: "sei-network", // Sei → SEI
+  324: "ethereum", // zkSync → ETH
+  204: "mantle", // Mantle → MNT
+  80094: "ethereum", // Berachain (fallback → ETH)
+  7777777: "ethereum", // Zora (fallback → ETH)
+  1313161554: "aurora", // Aurora → AURORA
+  42220: "celo", // Celo → CELO
+  1284: "moonbeam", // Moonbeam → GLMR
+  1285: "moonriver", // Moonriver → MOVR
+  1666600000: "harmony", // Harmony → ONE
+  170: "ethereum", // Unichain → ETH (until native listed)
+  112358: "palm", // Palm → PALM
+  9001: "cronos-zkevm" // Cronos zkEVM → CRO
 };
 
 /**
