@@ -16,6 +16,7 @@ import beraAbi from './contracts/dustclaim.bera.json'
 import fantomAbi from './contracts/dustclaim.fantom.json'
 import unichainAbi from './contracts/dustclaim.unichain.json'
 import celoAbi from './contracts/dustclaim.celo.json'
+import auroraAbi from './contracts/dustclaim.aurora.json'
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
@@ -38,7 +39,8 @@ export const DUSTCLAIM_ADDRESS = {
   80094: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Berachain (matches your SUPPORTED_CHAINS)
   7777777: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Zora
   130: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Unichain
-  42220: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Celo
+  42220: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Celo
+  1313161554: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Aurora
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
