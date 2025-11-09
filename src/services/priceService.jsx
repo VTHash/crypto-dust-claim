@@ -100,13 +100,14 @@ const NATIVE_ID_BY_CHAIN = {
  * Get USD price for a native asset on a given chainId with caching
  */
 export async function getNativeUsdPrice(chainId) {
-  const id = NATIVE_ID_BY_CHAIN[chainId];
+  const cid = Number(chainId); // 👈 normalize once
+  const id = NATIVE_ID_BY_CHAIN[cid];
   if (!id) {
     console.warn(`No native price mapping for chainId: ${chainId}`);
     return 0;
   }
 
-  const cacheKey = `native_${chainId}`;
+  const cacheKey = `native_${cid}`;
   const cached = priceCache.get(cacheKey);
   
   if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
@@ -142,14 +143,16 @@ export async function getNativeUsdPrice(chainId) {
  * Returns: { [lowercasedAddress]: priceUsd }
  */
 export async function getTokenUsdPrices(chainId, addresses = []) {
-  const platform = PLATFORM_BY_CHAIN[chainId];
+  const cid = Number(chainId); // 👈 normalize
+  const platform = PLATFORM_BY_CHAIN[cid];
   if (!platform || !addresses.length) {
     console.warn(`No platform mapping for chainId: ${chainId} or no addresses provided`);
     return {};
   }
 
+
   // Create cache key
-  const cacheKey = `tokens_${chainId}_${addresses.sort().join('_')}`;
+  const cacheKey = `tokens_${cid}_${addresses.map(String).sort().join('_')}`;
   const cached = priceCache.get(cacheKey);
   
   if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
@@ -161,12 +164,12 @@ export async function getTokenUsdPrices(chainId, addresses = []) {
   
   try {
     const { data } = await cg.get(`/simple/token_price/${platform}`, {
-      params: {
-        contract_addresses: addrs,
-        vs_currencies: 'usd',
-        include_last_updated_at: true
-      }
-    });
+    params: {
+      contract_addresses: addrs,
+      vs_currencies: 'usd',
+      include_last_updated_at: true
+    }
+  });
 
     // data is keyed by address; normalize to numbers
     const prices = {};
@@ -191,9 +194,15 @@ export async function getTokenUsdPrices(chainId, addresses = []) {
  * Get multiple native prices in one call (optimized for multi-chain apps)
  */
 export async function getMultipleNativePrices(chainIds = []) {
-  const uniqueIds = [...new Set(chainIds.map(id => NATIVE_ID_BY_CHAIN[id]).filter(Boolean))];
-  
+  const normIds = chainIds.map((id) => Number(id)); // 👈 normalize all
+
+  const uniqueIds = [...new Set(normIds
+    .map((id) => NATIVE_ID_BY_CHAIN[id])
+    .filter(Boolean)
+  )];
+
   if (!uniqueIds.length) return {};
+
 
   const cacheKey = `multi_native_${uniqueIds.sort().join('_')}`;
   const cached = priceCache.get(cacheKey);
@@ -210,11 +219,11 @@ export async function getMultipleNativePrices(chainIds = []) {
       }
     });
 
-    const prices = {};
-    chainIds.forEach(chainId => {
-      const coinId = NATIVE_ID_BY_CHAIN[chainId];
-      prices[chainId] = Number(data?.[coinId]?.usd || 0);
-    });
+   const prices = {};
+  normIds.forEach((chainId) => {
+    const coinId = NATIVE_ID_BY_CHAIN[chainId];
+    prices[chainId] = Number(data?.[coinId]?.usd || 0);
+  });
 
     // Cache the results
     priceCache.set(cacheKey, {
