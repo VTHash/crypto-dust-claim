@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
+import { useScan } from '../contexts/ScanContext'
 import { executeChainPlan } from '../services/claimExecutor'
 import permSvc from '../services/permissionlessContractService'
 import { buildDustClaimBatch } from '../services/dustClaimService'
@@ -14,6 +15,7 @@ const ClaimScreen = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { address, isConnected, loading: walletLoading } = useWallet()
+  const { results: scanResults } = useScan()
 
   // -------- A) read whatever the Scanner passed (except dustResults/totalDustValue) --------
   const {
@@ -25,7 +27,7 @@ const ClaimScreen = () => {
     batchSavings = null
   } = location.state || {}
 
-  // -------- B) hydrate dustResults + totalDustValue (state OR cache) --------
+  // -------- B) hydrate dustResults + totalDustValue (state OR context OR cache) --------
   const [scanSnapshot] = useState(() => {
     // 1) Prefer data from navigation state (Scanner → Claim)
     if (location.state?.dustResults && location.state.dustResults.length) {
@@ -35,27 +37,45 @@ const ClaimScreen = () => {
       }
       // mirror Dashboard behavior: persist last scan
       try {
-        sessionStorage.setItem(
-          'dustclaim:lastScan',
-          JSON.stringify({ dustResults: snap.dustResults, total: snap.totalDustValue })
-        )
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            'dustclaim:lastScan',
+            JSON.stringify({ dustResults: snap.dustResults, total: snap.totalDustValue })
+          )
+        }
       } catch {}
       return snap
     }
 
-    // 2) Fallback: same cache Dashboard uses
-    try {
-      const raw = sessionStorage.getItem('dustclaim:lastScan')
-      if (!raw) return { dustResults: [], totalDustValue: 0 }
-
-      const parsed = JSON.parse(raw)
-      return {
-        dustResults: parsed.dustResults || [],
-        totalDustValue: Number(parsed.total || 0)
-      }
-    } catch {
-      return { dustResults: [], totalDustValue: 0 }
+    // 2) Next preference: ScanContext (what Dashboard / DustScanner currently have)
+    if (Array.isArray(scanResults) && scanResults.length) {
+      const total = scanResults.reduce((s, x) => s + Number(x.totalValue || 0), 0)
+      try {
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            'dustclaim:lastScan',
+            JSON.stringify({ dustResults: scanResults, total })
+          )
+        }
+      } catch {}
+      return { dustResults: scanResults, totalDustValue: total }
     }
+
+    // 3) Fallback: same cache Dashboard uses
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = sessionStorage.getItem('dustclaim:lastScan')
+        if (!raw) return { dustResults: [], totalDustValue: 0 }
+
+        const parsed = JSON.parse(raw)
+        return {
+          dustResults: parsed.dustResults || [],
+          totalDustValue: Number(parsed.total || 0)
+        }
+      }
+    } catch {}
+
+    return { dustResults: [], totalDustValue: 0 }
   })
 
   const { dustResults, totalDustValue } = scanSnapshot
@@ -355,11 +375,11 @@ const ClaimScreen = () => {
           {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
         </button>
 
-        {!planAvailable && (
-          <div className="hint-banner">
-            No prepared plan from the scanner. We’ll build contract calls directly for each ERC-20 dust item.
-          </div>
-        )}
+      {!planAvailable && (
+        <div className="hint-banner">
+          No prepared plan from the scanner. We’ll build contract calls directly for each ERC-20 dust item.
+        </div>
+      )}
 
         {oneInchSingle && (
           <button
