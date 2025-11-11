@@ -34,12 +34,13 @@ const ClaimScreen = () => {
     return false
   }, [claimPlan, batchTransactions])
 
-  // ✅ Live chain count (dust found)
+  // ✅ Live chain count (dust found / claimable tokens)
   const realTimeChains = useMemo(() => {
     const s = new Set()
-    for (const r of (dustResults || [])) {
+    for (const r of dustResults || []) {
       const hasNative = Number(r?.nativeBalance || '0') > 0
-      const hasTokens = Array.isArray(r?.tokenDust) && r.tokenDust.length > 0
+      const tokensArr = r?.claimableTokens || r?.tokenDust || []
+      const hasTokens = Array.isArray(tokensArr) && tokensArr.length > 0
       if (hasNative || hasTokens) s.add(Number(r.chainId))
     }
     return s.size
@@ -59,6 +60,14 @@ const ClaimScreen = () => {
     const fromDust = dustResults?.[0]?.chainId
     return Number(fromPlan || fromBatch || fromDust || 1)
   }, [claimPlan, batchTransactions, dustResults])
+
+  // ✅ Fallback: compute total value from dustResults if state.totalDustValue is 0/undefined
+  const computedTotalDustValue = useMemo(() => {
+    const n = Number(totalDustValue || 0)
+    if (n > 0) return n
+    if (!dustResults || !dustResults.length) return 0
+    return dustResults.reduce((sum, r) => sum + Number(r.totalValue || 0), 0)
+  }, [totalDustValue, dustResults])
 
   // -------- Local UI state --------
   const [claiming, setClaiming] = useState(false)
@@ -202,8 +211,9 @@ const ClaimScreen = () => {
   // ============================================================================
   const successful = claimResults.filter((r) => r.success).length
   const failed = Math.max(0, claimResults.length - successful)
-  const fmt = (n) => Number(n || 0).toFixed(6)
-  const usd = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+  const fmtNum = (n) => Number(n || 0).toFixed(6)
+  const usdFmt = (n) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
 
   return (
     <div className="claim-screen">
@@ -219,7 +229,7 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">{usd(totalDustValue)}</div>
+              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
             </div>
           </div>
           <div className="summary-item">
@@ -250,6 +260,8 @@ const ClaimScreen = () => {
             {dustResults.map((r, idx) => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
               const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
+              const tokens = r.claimableTokens || r.tokenDust || []
+
               return (
                 <div key={idx} className="chain-card">
                   <div className="chain-header">
@@ -257,15 +269,15 @@ const ClaimScreen = () => {
                       <img className="chain-logo" src={nativeLogo} alt={meta.name} />
                       <div>
                         <h3>{meta.name}</h3>
-                        <p className="chain-value">{usd(r.totalValue || 0)}</p>
+                        <p className="chain-value">{usdFmt(r.totalValue || 0)}</p>
                       </div>
                     </div>
                     <div className="chain-balance">
                       <div className="native-balance">
-                        {fmt(r.nativeBalance)} {meta.symbol}
+                        {fmtNum(r.nativeBalance)} {meta.symbol}
                       </div>
-                      {!!(r.tokenDust?.length) && (
-                        <div className="token-count">+{r.tokenDust.length} tokens</div>
+                      {!!tokens.length && (
+                        <div className="token-count">+{tokens.length} tokens</div>
                       )}
                     </div>
                   </div>
@@ -274,17 +286,17 @@ const ClaimScreen = () => {
                     <div className="price-item">
                       <span>Native:</span>
                       <span>
-                        {fmt(r.nativeBalance)} {meta.symbol} ({usd(r.nativeValue || 0)})
+                        {fmtNum(r.nativeBalance)} {meta.symbol} ({usdFmt(r.nativeValue || 0)})
                       </span>
                     </div>
 
-                    {(r.tokenDust || []).slice(0, 3).map((t, i) => (
+                    {tokens.slice(0, 3).map((t, i) => (
                       <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={t} />
                     ))}
 
-                    {(r.tokenDust?.length || 0) > 3 && (
+                    {tokens.length > 3 && (
                       <div className="price-item more">
-                        +{r.tokenDust.length - 3} more tokens
+                        +{tokens.length - 3} more tokens
                       </div>
                     )}
                   </div>
@@ -353,7 +365,10 @@ const ClaimScreen = () => {
             <span>Processing {Math.min(currentStep, totalChains)}/{totalChains}</span>
           </div>
           <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${(currentStep / Math.max(totalChains, 1)) * 100}%` }} />
+            <div
+              className="progress-fill"
+              style={{ width: `${(currentStep / Math.max(totalChains, 1)) * 100}%` }}
+            />
           </div>
         </div>
       )}
