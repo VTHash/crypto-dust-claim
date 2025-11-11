@@ -253,7 +253,7 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
+              <div className="summary-value">{usdFmt(totalDustValue)}</div>
             </div>
           </div>
           <div className="summary-item">
