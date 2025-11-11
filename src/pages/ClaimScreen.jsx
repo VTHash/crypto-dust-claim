@@ -16,44 +16,76 @@ const ClaimScreen = () => {
   const { address, isConnected, loading: walletLoading } = useWallet()
 
   // -------- incoming data from DustScanner --------
+  // -------- A) read whatever the Scanner passed --------
   const {
     claimPlan = [],
     batchTransactions = [],
     oneInchSingle = null,
     oneInchBatch = null,
     uniswapSingle = null,
-    dustResults = [],
-    totalDustValue = 0,
+    // (we'll handle dustResults/totalDustValue via snapshot below)
     batchSavings = null
   } = location.state || {}
 
-  // ✅ Determine if we have something to execute
+  // -------- B) hydrate dustResults + totalDustValue --------
+  const [scanSnapshot] = useState(() => {
+    // 1) Prefer data from navigation state (Scanner → Claim)
+    if (location.state?.dustResults && location.state.dustResults.length) {
+      return {
+        dustResults: location.state.dustResults,
+        totalDustValue: Number(location.state.totalDustValue || 0)
+      }
+    }
+
+    // 2) Fallback: use the same cache as Dashboard
+    try {
+      const raw = sessionStorage.getItem('dustclaim:lastScan')
+      if (!raw) return { dustResults: [], totalDustValue: 0 }
+
+      const parsed = JSON.parse(raw)
+      return {
+        dustResults: parsed.dustResults || [],
+        totalDustValue: Number(parsed.total || 0)
+      }
+    } catch {
+      return { dustResults: [], totalDustValue: 0 }
+    }
+  })
+
+  const { dustResults, totalDustValue } = scanSnapshot
+
+  // ✅ do we have anything pre-planned?
   const planAvailable = useMemo(() => {
     if (Array.isArray(claimPlan) && claimPlan.length > 0) return true
     if (Array.isArray(batchTransactions) && batchTransactions.length > 0) return true
     return false
   }, [claimPlan, batchTransactions])
 
-  // ✅ Live chain count (dust found / claimable tokens)
+  // ✅ how many chains actually have balances
   const realTimeChains = useMemo(() => {
     const s = new Set()
     for (const r of dustResults || []) {
       const hasNative = Number(r?.nativeBalance || '0') > 0
-      const tokensArr = r?.claimableTokens || r?.tokenDust || []
-      const hasTokens = Array.isArray(tokensArr) && tokensArr.length > 0
-      if (hasNative || hasTokens) s.add(Number(r.chainId))
+      const tokens =
+        Array.isArray(r?.tokenDust) && r.tokenDust.length
+          ? r.tokenDust
+          : Array.isArray(r?.claimableTokens)
+          ? r.claimableTokens
+          : []
+
+      if (hasNative || tokens.length) s.add(Number(r.chainId))
     }
     return s.size
   }, [dustResults])
 
-  // ✅ Chain count used for progress bar
+  // ✅ chain count for the progress meter
   const totalChains = useMemo(() => {
     if (planAvailable && claimPlan.length) return claimPlan.length
     if (planAvailable && batchTransactions.length) return 1
     return realTimeChains
   }, [planAvailable, claimPlan, batchTransactions, realTimeChains])
 
-  // ✅ Smart chainId fallback for explorer
+  // ✅ default chain for explorers
   const defaultChainId = useMemo(() => {
     const fromPlan = claimPlan?.[0]?.chainId
     const fromBatch = batchTransactions?.[0]?.chainId
@@ -61,15 +93,7 @@ const ClaimScreen = () => {
     return Number(fromPlan || fromBatch || fromDust || 1)
   }, [claimPlan, batchTransactions, dustResults])
 
-  // ✅ Fallback: compute total value from dustResults if state.totalDustValue is 0/undefined
-  const computedTotalDustValue = useMemo(() => {
-    const n = Number(totalDustValue || 0)
-    if (n > 0) return n
-    if (!dustResults || !dustResults.length) return 0
-    return dustResults.reduce((sum, r) => sum + Number(r.totalValue || 0), 0)
-  }, [totalDustValue, dustResults])
-
-  // -------- Local UI state --------
+  // -------- local UI state --------
   const [claiming, setClaiming] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [claimResults, setClaimResults] = useState([])
