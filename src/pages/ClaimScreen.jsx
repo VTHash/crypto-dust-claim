@@ -15,29 +15,35 @@ const ClaimScreen = () => {
   const navigate = useNavigate()
   const { address, isConnected, loading: walletLoading } = useWallet()
 
-  // -------- incoming data from DustScanner --------
-  // -------- A) read whatever the Scanner passed --------
+  // -------- A) read whatever the Scanner passed (except dustResults/totalDustValue) --------
   const {
     claimPlan = [],
     batchTransactions = [],
     oneInchSingle = null,
     oneInchBatch = null,
     uniswapSingle = null,
-    // (we'll handle dustResults/totalDustValue via snapshot below)
     batchSavings = null
   } = location.state || {}
 
-  // -------- B) hydrate dustResults + totalDustValue --------
+  // -------- B) hydrate dustResults + totalDustValue (state OR cache) --------
   const [scanSnapshot] = useState(() => {
     // 1) Prefer data from navigation state (Scanner → Claim)
     if (location.state?.dustResults && location.state.dustResults.length) {
-      return {
+      const snap = {
         dustResults: location.state.dustResults,
         totalDustValue: Number(location.state.totalDustValue || 0)
       }
+      // mirror Dashboard behavior: persist last scan
+      try {
+        sessionStorage.setItem(
+          'dustclaim:lastScan',
+          JSON.stringify({ dustResults: snap.dustResults, total: snap.totalDustValue })
+        )
+      } catch {}
+      return snap
     }
 
-    // 2) Fallback: use the same cache as Dashboard
+    // 2) Fallback: same cache Dashboard uses
     try {
       const raw = sessionStorage.getItem('dustclaim:lastScan')
       if (!raw) return { dustResults: [], totalDustValue: 0 }
@@ -53,6 +59,14 @@ const ClaimScreen = () => {
   })
 
   const { dustResults, totalDustValue } = scanSnapshot
+
+  // If totalDustValue is 0 or missing, recompute from dustResults so it matches Dashboard
+  const computedTotalDustValue = useMemo(() => {
+    const base = Number(totalDustValue || 0)
+    if (base > 0) return base
+    if (!Array.isArray(dustResults) || !dustResults.length) return 0
+    return dustResults.reduce((sum, r) => sum + Number(r.totalValue || 0), 0)
+  }, [dustResults, totalDustValue])
 
   // ✅ do we have anything pre-planned?
   const planAvailable = useMemo(() => {
@@ -231,7 +245,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // Render
+  // Render helpers
   // ============================================================================
   const successful = claimResults.filter((r) => r.success).length
   const failed = Math.max(0, claimResults.length - successful)
@@ -253,7 +267,7 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">{usdFmt(totalDustValue)}</div>
+              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
             </div>
           </div>
           <div className="summary-item">
