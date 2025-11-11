@@ -1,37 +1,32 @@
 import axios from 'axios'
 
 /**
- * CoinGecko price service
- * - Uses Vite dev proxy (/api/coingecko/…) to bypass browser CORS
- * - Uses API key if VITE_COINGECKO_API_KEY is set
- * - Caches responses in-memory to reduce calls
+ * CoinGecko client (FREE / DEMO tier)
+ * - Base URL: https://api.coingecko.com/api/v3
+ * - Auth header: x-cg-demo-api-key: <your-key>
+ * - Simple in-memory cache
  */
 
 const COINGECKO_API_KEY = import.meta.env.VITE_COINGECKO_API_KEY || ''
 
-// In dev we proxy through Vite -> CoinGecko.
-// In production you can point this directly at your backend proxy if you add one.
-const API_BASE =
-  import.meta.env.VITE_COINGECKO_BASE_URL || '/api/coingecko/api/v3'
-
+// Use the PUBLIC (non-pro) base URL for demo / free tier
 const cg = axios.create({
-  baseURL: API_BASE,
+  baseURL: 'https://api.coingecko.com/api/v3',
   timeout: 15000,
   headers: {
-    'User-Agent': 'CryptoDustClaim/1.0',
-  },
+    'User-Agent': 'CryptoDustClaim/1.0'
+  }
 })
 
-// ----------------- simple in-memory cache -----------------
-
+// Simple in-memory cache to reduce API calls
 const priceCache = new Map()
-const CACHE_DURATION = 60_000 // 1 minute
+const CACHE_DURATION = 60_000 // 1 minute cache
 
-// Attach API key header if provided (support both demo/pro headers)
+// Attach API key header if provided
 cg.interceptors.request.use((config) => {
   if (COINGECKO_API_KEY) {
+    // IMPORTANT: demo / free tier uses *this* header
     config.headers['x-cg-demo-api-key'] = COINGECKO_API_KEY
-    config.headers['x-cg-pro-api-key'] = COINGECKO_API_KEY
   }
   return config
 })
