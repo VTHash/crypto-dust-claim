@@ -80,8 +80,8 @@ const PLATFORM_BY_CHAIN = {
   1285: 'moonriver', // Moonriver
   1666600000: 'harmony-shard-0', // Harmony shard 0
   170: 'unichain', // Unichain (when listed)
+  7777777: 'zora'
   // 80094: 'berachain', // add when officially on CG
-  // 7777777: 'zora', // add when needed
   // others (zkSync, Palm, etc.) can be added as CG lists them
 }
 
