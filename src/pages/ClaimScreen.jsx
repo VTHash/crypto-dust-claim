@@ -184,7 +184,9 @@ const ClaimScreen = () => {
       const provider = new ethers.BrowserProvider(window.ethereum)
       const signer = await provider.getSigner()
 
-      const txs = await buildDustClaimBatch(dustResults, signer)
+      const txs = await buildDustClaimBatch(dustResults, signer, {
+        includeNative: true
+      })
       if (!txs.length) throw new Error('Nothing to execute: no ERC-20 dust tokens')
 
       const results = []

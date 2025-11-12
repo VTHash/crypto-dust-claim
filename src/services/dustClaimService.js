@@ -4,8 +4,7 @@ import dexAggregator from './dexAggregatorService'
 
 /**
  * Per-chain wrapped native (WETH/WBNB/WMATIC …) address.
- * We only need it to quote token -> wrappedNative; contract unwraps to ETH.
- * (Your custom DustClaim deployments per chain)
+ * Used both for DustClaim ERC-20 swaps and for native sweep (via aggregator).
  */
 const WRAPPED_NATIVE_BY_CHAIN = {
   1: '0x73f2Ef769b3Dc5c84390347b05cc1D89dD9644f', // Ethereum ✅
@@ -32,15 +31,11 @@ const WRAPPED_NATIVE_BY_CHAIN = {
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
 const NATIVE_ADDR = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
-/** Small helpers ----------------------------------------------------------- */
+/** Helpers ---------------------------------------------------------------- */
 
 const toWeiString = (v) =>
   typeof v === 'bigint' ? v.toString() : String(v ?? '0')
 
-/**
- * Check if an address is a real ERC-20 contract address
- * (not zero and not the native pseudo-address).
- */
 function isErc20Address(addr) {
   if (!addr) return false
   const a = addr.toLowerCase()
@@ -50,20 +45,18 @@ function isErc20Address(addr) {
 }
 
 /**
- * Try to resolve a token's amount in wei from various shapes the scanner may use.
+ * Resolve a token's amount in wei from various shapes the scanner may use.
  * Supports:
- * - amountWei / balanceWei / raw (already wei)
+ * - amountWei / balanceWei / raw (already wei-like)
  * - balance + decimals (human units)
  */
 function resolveAmountWeiFromToken(token) {
   if (!token) return null
 
-  // Already-wei fields
   if (token.amountWei != null) return toWeiString(token.amountWei)
   if (token.balanceWei != null) return toWeiString(token.balanceWei)
   if (token.raw != null) return toWeiString(token.raw)
 
-  // Human-readable balance + decimals
   if (token.balance != null && token.decimals != null) {
     try {
       const bn = ethers.parseUnits(String(token.balance), Number(token.decimals))
@@ -78,13 +71,15 @@ function resolveAmountWeiFromToken(token) {
 }
 
 /** ------------------------------------------------------------------------ */
-/** Single DustClaim call builder */
+/** ERC-20 DustClaim route */
 /** ------------------------------------------------------------------------ */
 
 /**
  * Build a single DustClaim contract call:
  * claimDustToETH(token, minReturnAmount, swapData)
- * We use a 1inch quote for minReturnAmount. swapData is left 0x unless you add a backend builder.
+ *
+ * We use a 1inch quote for minReturnAmount. swapData is still "0x" for now,
+ * unless/until you wire real router calldata from a backend.
  */
 export async function buildDustClaimTx(chainId, token, amountWei, signer) {
   const cfg = getContractConfig(chainId)
@@ -95,7 +90,6 @@ export async function buildDustClaimTx(chainId, token, amountWei, signer) {
 
   const amountStr = toWeiString(amountWei)
 
-  // Quote token -> wrappedNative on 1inch to get minReturnAmount
   const q = await dexAggregator.get1InchQuote(
     Number(chainId),
     token,
@@ -108,9 +102,8 @@ export async function buildDustClaimTx(chainId, token, amountWei, signer) {
   }
 
   const minReturnAmount = q.toTokenAmount
-  const swapData = '0x' // placeholder; wire real router calldata when backend is ready
+  const swapData = '0x'
 
-  // Encode function call
   const iface = new ethers.Interface(cfg.abi)
   const data = iface.encodeFunctionData('claimDustToETH', [
     token,
@@ -127,19 +120,75 @@ export async function buildDustClaimTx(chainId, token, amountWei, signer) {
 }
 
 /** ------------------------------------------------------------------------ */
+/** Native sweep route (new) */
+/** ------------------------------------------------------------------------ */
+
+/**
+ * Build a direct aggregator swap for native dust:
+ * native (ETH/BNB/MATIC/…) -> wrapped native (WETH/WBNB/WMATIC…)
+ *
+ * The router tx is executed directly by the wallet; your DustClaim contract
+ * isn’t involved here.
+ */
+async function buildNativeSweepTx(chainId, nativeAmountWei) {
+  const wrapped = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
+  if (!wrapped) throw new Error(`No wrapped-native configured for chain ${chainId}`)
+
+  const amountStr = toWeiString(nativeAmountWei)
+
+  // Use your generic aggregator helper (same pattern as in BatchService)
+  const quote = await dexAggregator.getBestQuote(
+    Number(chainId),
+    NATIVE_ADDR,
+    wrapped,
+    amountStr,
+    1 // 1 bp slippage guard; adjust if needed
+  )
+
+  if (!quote?.transaction) {
+    throw new Error('No aggregator transaction returned for native sweep')
+  }
+
+  const tx = quote.transaction
+  const valueBig = BigInt(tx.value || 0)
+
+  return {
+    chainId: Number(chainId),
+    to: tx.to,
+    data: tx.data,
+    value: valueBig
+    // gasLimit is optional; provider/wallet can estimate
+  }
+}
+
+/** ------------------------------------------------------------------------ */
 /** Batch builder used by ClaimScreen */
 /** ------------------------------------------------------------------------ */
 
 /**
- * Build a list of transactions for all ERC-20 balances the scanner marked as claimable.
+ * Build transactions for all claimable balances the scanner found.
  *
- * Accepts `dustResults` from:
- * - DustScanner (r.claimableTokens[] or r.tokenDust[])
- * - Dashboard (r.claimableTokens[] or r.tokenDetails[])
+ * - ERC-20s → DustClaim.claimDustToETH (same as before)
+ * - (NEW) optional native sweeps → aggregator router txs
  *
- * Each token item should have { address, balance/amountWei, decimals? }.
+ * dustResults: array of per-chain objects, coming from Scanner / Dashboard:
+ * {
+ * chainId,
+ * nativeBalance,
+ * // one of:
+ * claimableTokens?: [...],
+ * tokenDust?: [...],
+ * tokenDetails?: [...]
+ * }
+ *
+ * options:
+ * - includeNative (bool): also sweep native if > 0.
  */
-export async function buildDustClaimBatch(dustResults = [], signer) {
+export async function buildDustClaimBatch(
+  dustResults = [],
+  signer,
+  { includeNative = false } = {}
+) {
   const txs = []
 
   for (const r of dustResults || []) {
@@ -148,11 +197,11 @@ export async function buildDustClaimBatch(dustResults = [], signer) {
 
     const wrapped = WRAPPED_NATIVE_BY_CHAIN[chainId]
     if (!wrapped) {
-      // silently skip chains that don't have a DustClaim deployment / wrapped native
+      // Skip chains without a configured wrapped native / DustClaim deployment.
       continue
     }
 
-    // Merge possible token sources coming from different parts of the app
+    // ------- 1) ERC-20 balances (unchanged logic, just more flexible source) ------
     const tokens =
       (Array.isArray(r.claimableTokens) && r.claimableTokens.length
         ? r.claimableTokens
@@ -161,8 +210,6 @@ export async function buildDustClaimBatch(dustResults = [], signer) {
         : Array.isArray(r.tokenDetails)
         ? r.tokenDetails
         : [])
-
-    if (!tokens.length) continue
 
     for (const t of tokens) {
       const addr = (t.address || '').toLowerCase()
@@ -175,13 +222,31 @@ export async function buildDustClaimBatch(dustResults = [], signer) {
         const tx = await buildDustClaimTx(chainId, t.address, amountWei, signer)
         txs.push(tx)
       } catch (e) {
-        // don't kill the whole batch if one token/quote fails
         console.warn(
-          'buildDustClaimBatch: skipping token',
+          'buildDustClaimBatch: skipping ERC20 token',
           chainId,
           t.address,
           e?.message || e
         )
+      }
+    }
+
+    // ------- 2) Native sweep (NEW) -----------------------------------------------
+    if (includeNative) {
+      const nativeBal = Number(r.nativeBalance || 0)
+      if (nativeBal > 0) {
+        try {
+          // All these chains are 18-decimal native assets
+          const nativeWei = ethers.parseUnits(String(r.nativeBalance), 18)
+          const nativeTx = await buildNativeSweepTx(chainId, nativeWei)
+          txs.push(nativeTx)
+        } catch (e) {
+          console.warn(
+            'buildDustClaimBatch: skipping native sweep',
+            chainId,
+            e?.message || e
+          )
+        }
       }
     }
   }
