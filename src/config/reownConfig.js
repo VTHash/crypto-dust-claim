@@ -188,7 +188,7 @@ export const SUPPORTED_CHAINS = {
   name: "Plasma Mainnet",
   symbol: "XPL",
   rpcUrl: "https://plasma.drpc.org",
-  explorer: "https://explorer.plasma.to",
+  explorer: "https://plasmascan.to/",
   logo: "/logo/plasma.png",
 },
 
