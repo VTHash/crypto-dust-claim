@@ -383,16 +383,21 @@
 }
 .btn-settings:hover { filter: brightness(1.1); }}
 
-.navbar-marquee {
+/* Secondary navbar bar under the main one */
+.navbar-secondary {
   width: 100%;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--navbar-bg, #020617); /* or same as .navbar */
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 4px 0;
-  /* match your dark theme */
-  background: var(--navbar-bg, #020617);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.navbar-marquee gecko-coin-price-marquee-widget {
+.navbar-secondary-inner {
+  max-width: 1200px; /* match your main container width if you have one */
+  margin: 0 auto;
+  padding: 4px 12px;
+}
+
+.navbar-secondary-inner gecko-coin-price-marquee-widget {
   width: 100%;
   display: block;
 }

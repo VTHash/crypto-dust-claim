@@ -1,4 +1,3 @@
-// src/components/Navbar.jsx
 import React, { useState, useMemo } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
@@ -58,6 +57,7 @@ export default function Navbar() {
 
   return (
     <>
+      {/* Primary navbar */}
       <nav className="navbar">
         {/* Brand */}
         <div className="navbar-center">
@@ -69,13 +69,22 @@ export default function Navbar() {
 
         {/* Middle: nav links + settings + theme + wallet */}
         <div className="navbar-middle">
-          <Link to="/dashboard" className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}>
+          <Link
+            to="/dashboard"
+            className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
+          >
             Dashboard
           </Link>
-          <Link to="/scanner" className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}>
+          <Link
+            to="/scanner"
+            className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}
+          >
             Dust Scanner
           </Link>
-          <Link to="/claim" className={`nav-link ${isActive('/claim') ? 'active' : ''}`}>
+          <Link
+            to="/claim"
+            className={`nav-link ${isActive('/claim') ? 'active' : ''}`}
+          >
             Claim
           </Link>
 
@@ -96,7 +105,9 @@ export default function Navbar() {
 
           {isConnected ? (
             <div className="wallet-chip">
-              <span className="wallet-address" title={address}>{shorten(address)}</span>
+              <span className="wallet-address" title={address}>
+                {shorten(address)}
+              </span>
               <button
                 onClick={handleDisconnect}
                 className="btn-disconnect"
@@ -119,6 +130,21 @@ export default function Navbar() {
         </div>
       </nav>
 
+      {/* Secondary navbar: price marquee directly under the main navbar */}
+      <div className="navbar-secondary">
+        <div className="navbar-secondary-inner">
+          <gecko-coin-price-marquee-widget
+            locale="en"
+            dark-mode="true"
+            transparent-background="true"
+            outlined="true"
+            coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near"
+            initial-currency="usd"
+          >
+          </gecko-coin-price-marquee-widget>
+        </div>
+      </div>
+
       {/* Settings Modal lives here so it’s available app-wide */}
       <SettingsModal open={open} onClose={() => setOpen(false)} />
 
@@ -136,7 +162,7 @@ export default function Navbar() {
               borderRadius: 8,
               padding: '6px 10px',
               cursor: 'pointer',
-              zIndex: 9999
+              zIndex: 9999,
             }}
             onClick={() => setShowDebug((s) => !s)}
           >
@@ -153,9 +179,3 @@ export default function Navbar() {
     </>
   )
 }
-
-
-
-
-
-
