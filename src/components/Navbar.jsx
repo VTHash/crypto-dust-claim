@@ -117,8 +117,9 @@ export default function Navbar() {
             </button>
           )}
         </div>
-        
-        {/* Coingecko ticker row inside navbar */}
+      </nav>
+
+ {/* Coingecko ticker row inside navbar */}
         <div className="coin-marquee">
         <gecko-coin-price-marquee-widget
           locale="en"
@@ -129,8 +130,7 @@ export default function Navbar() {
           initial-currency="usd">
         </gecko-coin-price-marquee-widget>
       </div>
-      </nav>
-
+      
       {/* Settings Modal lives here so it’s available app-wide */}
       <SettingsModal open={open} onClose={() => setOpen(false)} />
 
