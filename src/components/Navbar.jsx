@@ -117,6 +117,7 @@ export default function Navbar() {
             </button>
           )}
         </div>
+        
         <div className="coin-marquee">
         <gecko-coin-price-marquee-widget
           locale="en"
