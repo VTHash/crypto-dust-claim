@@ -65,7 +65,7 @@ const WalletScreen = () => {
             <div className="feature-card">
               <div className="feature-icon">🔍</div>
               <h3>Multi-Chain Scan</h3>
-              <p>Scan 8+ chains(more chains upcoming) for native & ERC-20 balances.</p>
+              <p>Scan 20+ chains for native & ERC-20 balances.</p>
             </div>
             <div className="feature-card">
               <div className="feature-icon">💱</div>
@@ -168,7 +168,7 @@ const WalletScreen = () => {
           {/* Same 4 cards still available after connect */}
           <div className="info-cards">
             <InfoCard icon="🧠" title="What DustClaim does (recap)" defaultOpen>
-              <p>Scan, optionally swap (“mini-exchange”), and claim small balances across 15+ chains — fully non-custodial.</p>
+              <p>Scan, optionally swap (“mini-exchange”), and claim small balances across 20+ chains — fully non-custodial.</p>
             </InfoCard>
             <InfoCard icon="✨" title="Dust thresholds & claimability">
               <p>Defaults: native &lt; 0.001, small ERC-20s by USD value. Tweak anytime in ⚙️ Settings.</p>
