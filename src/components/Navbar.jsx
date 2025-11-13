@@ -118,6 +118,7 @@ export default function Navbar() {
           )}
         </div>
         
+        {/* Coingecko ticker row inside navbar */}
         <div className="coin-marquee">
         <gecko-coin-price-marquee-widget
           locale="en"
