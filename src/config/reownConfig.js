@@ -176,14 +176,6 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/zksync.jpg",
 },
 
-388: {
-  name: "Cronos zkEVM Mainnet",
-  symbol: "zkCRO",
-  rpcUrl: "https://rpc-zkevm.cronos.org",
-  explorer: "https://zkevm.cronos.org/explorer",
-  logo: "/logo/cronos.png",
-},
-
 9745: {
   name: "Plasma Mainnet",
   symbol: "XPL",
