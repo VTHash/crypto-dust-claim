@@ -383,16 +383,31 @@
 }
 .btn-settings:hover { filter: brightness(1.1); }}
 
-/* Secondary navbar bar under the main one */
+/* Wrapper that keeps BOTH navbars stuck to the top */
+.navbar-wrapper {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  /* Make sure it has a background so content doesn't show through */
+  background: var(--navbar-bg, #020617);
+}
+
+/* If your old CSS had .navbar { position: sticky; top: 0; } 
+   this puts it back to normal so the wrapper controls stickiness */
+.navbar {
+  position: static;
+}
+
+/* Secondary navbar just under the main one */
 .navbar-secondary {
   width: 100%;
-  background: var(--navbar-bg, #020617); /* or same as .navbar */
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--navbar-bg, #020617); /* same as main nav */
 }
 
 .navbar-secondary-inner {
-  max-width: 1200px; /* match your main container width if you have one */
+  max-width: 1200px; /* match your main layout width if you have one */
   margin: 0 auto;
   padding: 4px 12px;
 }

@@ -57,93 +57,96 @@ export default function Navbar() {
 
   return (
     <>
-      {/* Primary navbar */}
-      <nav className="navbar">
-        {/* Brand */}
-        <div className="navbar-center">
-          <Link to="/" className="brand-link">
-            <span className="brand-icon">🧹</span>
-            <span className="brand-text">DustClaim</span>
-          </Link>
-        </div>
-
-        {/* Middle: nav links + settings + theme + wallet */}
-        <div className="navbar-middle">
-          <Link
-            to="/dashboard"
-            className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
-          >
-            Dashboard
-          </Link>
-          <Link
-            to="/scanner"
-            className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}
-          >
-            Dust Scanner
-          </Link>
-          <Link
-            to="/claim"
-            className={`nav-link ${isActive('/claim') ? 'active' : ''}`}
-          >
-            Claim
-          </Link>
-
-          {/* Settings button (opens modal) */}
-          <button
-            type="button"
-            className="btn-settings"
-            title="Settings"
-            aria-label="Open settings"
-            onClick={() => setOpen(true)}
-          >
-            ⚙️ Settings
-          </button>
-
-          <div className="theme-toggle-wrapper">
-            <ThemeToggle />
+      {/* Sticky wrapper that holds BOTH navbars */}
+      <header className="navbar-wrapper">
+        {/* Primary navbar */}
+        <nav className="navbar">
+          {/* Brand */}
+          <div className="navbar-center">
+            <Link to="/" className="brand-link">
+              <span className="brand-icon">🧹</span>
+              <span className="brand-text">DustClaim</span>
+            </Link>
           </div>
 
-          {isConnected ? (
-            <div className="wallet-chip">
-              <span className="wallet-address" title={address}>
-                {shorten(address)}
-              </span>
-              <button
-                onClick={handleDisconnect}
-                className="btn-disconnect"
-                disabled={loading}
-                aria-label="Disconnect wallet"
-              >
-                {loading ? '...' : 'Disconnect'}
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={handleConnect}
-              className="btn-connect"
-              disabled={loading}
-              aria-label="Connect wallet"
+          {/* Middle: nav links + settings + theme + wallet */}
+          <div className="navbar-middle">
+            <Link
+              to="/dashboard"
+              className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
             >
-              {loading ? 'Connecting…' : 'Connect'}
-            </button>
-          )}
-        </div>
-      </nav>
+              Dashboard
+            </Link>
+            <Link
+              to="/scanner"
+              className={`nav-link ${isActive('/scanner') ? 'active' : ''}`}
+            >
+              Dust Scanner
+            </Link>
+            <Link
+              to="/claim"
+              className={`nav-link ${isActive('/claim') ? 'active' : ''}`}
+            >
+              Claim
+            </Link>
 
-      {/* Secondary navbar: price marquee directly under the main navbar */}
-      <div className="navbar-secondary">
-        <div className="navbar-secondary-inner">
-          <gecko-coin-price-marquee-widget
-            locale="en"
-            dark-mode="true"
-            transparent-background="true"
-            outlined="true"
-            coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near"
-            initial-currency="usd"
-          >
-          </gecko-coin-price-marquee-widget>
+            {/* Settings button (opens modal) */}
+            <button
+              type="button"
+              className="btn-settings"
+              title="Settings"
+              aria-label="Open settings"
+              onClick={() => setOpen(true)}
+            >
+              ⚙️ Settings
+            </button>
+
+            <div className="theme-toggle-wrapper">
+              <ThemeToggle />
+            </div>
+
+            {isConnected ? (
+              <div className="wallet-chip">
+                <span className="wallet-address" title={address}>
+                  {shorten(address)}
+                </span>
+                <button
+                  onClick={handleDisconnect}
+                  className="btn-disconnect"
+                  disabled={loading}
+                  aria-label="Disconnect wallet"
+                >
+                  {loading ? '...' : 'Disconnect'}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleConnect}
+                className="btn-connect"
+                disabled={loading}
+                aria-label="Connect wallet"
+              >
+                {loading ? 'Connecting…' : 'Connect'}
+              </button>
+            )}
+          </div>
+        </nav>
+
+        {/* Secondary navbar: CoinGecko marquee directly under the main navbar */}
+        <div className="navbar-secondary">
+          <div className="navbar-secondary-inner">
+            <gecko-coin-price-marquee-widget
+              locale="en"
+              dark-mode="true"
+              transparent-background="true"
+              outlined="true"
+              coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near"
+              initial-currency="usd"
+            >
+            </gecko-coin-price-marquee-widget>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* Settings Modal lives here so it’s available app-wide */}
       <SettingsModal open={open} onClose={() => setOpen(false)} />
