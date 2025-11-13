@@ -382,3 +382,13 @@
   cursor: pointer;
 }
 .btn-settings:hover { filter: brightness(1.1); }}
+
+.navbar-marquee {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.navbar-marquee gecko-coin-price-marquee-widget {
+  width: 100%;
+  display: block;
+}
