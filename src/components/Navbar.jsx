@@ -119,18 +119,6 @@ export default function Navbar() {
         </div>
       </nav>
 
- {/* Coingecko ticker row inside navbar */}
-        <div className="coin-marquee">
-        <gecko-coin-price-marquee-widget
-          locale="en"
-          dark-mode="true"
-          transparent-background="true"
-          outlined="true"
-          coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near"
-          initial-currency="usd">
-        </gecko-coin-price-marquee-widget>
-      </div>
-      
       {/* Settings Modal lives here so it’s available app-wide */}
       <SettingsModal open={open} onClose={() => setOpen(false)} />
 
