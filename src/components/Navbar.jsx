@@ -140,7 +140,7 @@ export default function Navbar() {
               dark-mode="true"
               transparent-background="true"
               outlined="true"
-              coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near"
+              coin-ids="bitcoin,ethereum,binancecoin,optimism,gnosis,uniswap,polygon-ecosystem-token,okx-beth,fantom,zksync,moonbeam,moonriver,sei-network,mantle,l2-standard-bridged-weth-base,plasma,mode,arbitrum,celo,avalanche-2,linea,berachain-bera,zora,aurora-near,flare-networks"
               initial-currency="usd"
             >
             </gecko-coin-price-marquee-widget>
