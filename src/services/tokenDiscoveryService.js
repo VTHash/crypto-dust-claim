@@ -30,22 +30,75 @@ const ERC20_ABI = [
 // Public tokenlist sources per chain (best effort). You can add more.
 const TOKENLIST_SOURCES = {
   1: [
-    // Uniswap default + 1inch mainnet
     'https://tokens.uniswap.org',
-    'https://api.1inch.io/v5.0/1/tokens',
+    'https://api.1inch.io/v5.0/1/tokens'
   ],
+
   10: ['https://api.1inch.io/v5.0/10/tokens'],
   56: ['https://api.1inch.io/v5.0/56/tokens'],
-  100:['https://tokens.coingecko.com/xdai/all.json'],
-  137:['https://api.1inch.io/v5.0/137/tokens'],
-  42161:['https://api.1inch.io/v5.0/42161/tokens'],
-  8453:['https://api.1inch.io/v5.0/8453/tokens'],
-  43114:['https://tokens.coingecko.com/avalanche/all.json'],
+
+  100: ['https://tokens.coingecko.com/xdai/all.json'],
+
+  137: ['https://api.1inch.io/v5.0/137/tokens'],
+
   250: ['https://tokens.coingecko.com/fantom/all.json'],
-  34443:['https://raw.githubusercontent.com/mode-network/asset-list/main/list.json'],
-  59144:['https://raw.githubusercontent.com/Consensys/linea-token-list/main/build/linea-mainnet.json'],
-  7777777:['https://raw.githubusercontent.com/zora-community/token-list/main/zora.tokenlist.json'],
-  // fallbacks for chains without good lists: 195 (X1), 1329 (Sei), 80094 (Bera)
+
+  34443: ['https://raw.githubusercontent.com/mode-network/asset-list/main/list.json'],
+
+  42161: ['https://api.1inch.io/v5.0/42161/tokens'],
+
+  43114: ['https://tokens.coingecko.com/avalanche/all.json'],
+
+  8453: ['https://api.1inch.io/v5.0/8453/tokens'],
+
+  59144: [
+    'https://raw.githubusercontent.com/Consensys/linea-token-list/main/build/linea-mainnet.json'
+  ],
+
+  7777777: [
+    'https://raw.githubusercontent.com/zora-community/token-list/main/zora.tokenlist.json'
+  ],
+
+  80094: [
+    'https://raw.githubusercontent.com/Berachain/token-list/main/bera.tokenlist.json'
+  ],
+
+  130: [
+    'https://raw.githubusercontent.com/unichain/token-list/main/unichain.tokenlist.json'
+  ],
+
+  42220: [
+    'https://tokens.coingecko.com/celo/all.json'
+  ],
+
+  1313161554: [
+    'https://raw.githubusercontent.com/aurora-is-near/bridge-assets/master/aurora.tokenlist.json'
+  ],
+
+  1284: [
+    'https://raw.githubusercontent.com/moonbeam-foundation/moonbeam-token-list/main/tokens/moonbeam.json'
+  ],
+
+  1285: [
+    'https://raw.githubusercontent.com/moonbeam-foundation/moonbeam-token-list/main/tokens/moonriver.json'
+  ],
+
+  5000: [
+    'https://raw.githubusercontent.com/mantlenetworkio/mantle-token-list/main/mantle.tokenlist.json'
+  ],
+
+  1329: [
+    'https://raw.githubusercontent.com/sei-protocol/token-list/main/sei.tokenlist.json'
+  ],
+
+  9745: [
+    'https://raw.githubusercontent.com/plasma-network/token-list/main/plasma.tokenlist.json'
+  ],
+
+  // === NEW: FLARE SUPPORT (chainId 14) ===
+  14: [
+    'https://raw.githubusercontent.com/flare-labs/token-list/main/flare.tokenlist.json'
+  ],
 };
 
 // Map Covalent chain id (or alias) for each EVM chain we support
