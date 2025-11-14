@@ -200,8 +200,19 @@ export const DEPLOYMENTS = {
     weth: '0xC9BdeEd33CD01541e1eeD10f90519d2C06Fe3feB',
     oneInchRouter: '0x1111111254EEB25477B68fb85Ed929f73A960582',
     uniswapV3Router: null
-  }
+  },
+
+  14: {
+  chainId: 14,
+  name: 'Flare',
+  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46', // placeholder per your pattern
+  weth: '0x1D80c49bBbCd1c0911346656B529dF9E5c2F783d', // WFLR (native wrapper)
+  oneInchRouter: '0x0000000000000000000000000000000000000000', // as you specified
+  uniswapV3Router: '0x8a1E35F5c98C4E85B36B7B253222eE17773b2781' // Flare v3 router
 }
+
+  }
+
 
 export function getDeployment(chainId) {
   return DEPLOYMENTS[Number(chainId)] || null
