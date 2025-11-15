@@ -209,7 +209,46 @@ export const DEPLOYMENTS = {
   weth: '0x1D80c49bBbCd1c0911346656B529dF9E5c2F783d', // WFLR (native wrapper)
   oneInchRouter: '0x0000000000000000000000000000000000000000', 
   uniswapV3Router: '0x8a1E35F5c98C4E85B36B7B253222eE17773b2781' // Flare v3 router
-}
+},
+
+58: {
+  chainId: 58,
+  name: 'Ontology',
+  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
+  weth: '0x6F6754160dF85d41Bfac1aA8609E5A909cB3E78F', // WONT wrapped native
+  oneInchRouter: null, // not supported
+  uniswapV3Router: null // no Uni v3 router
+},
+
+
+40: {
+  chainId: 40,
+  name: 'Telos',
+  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
+  weth: '0xB6C53431608E626AC81a9776ac3e999c5556717c', // WTLOS
+  oneInchRouter: null, // 1inch not on Telos
+  uniswapV3Router: null // no Uniswap v3
+},
+
+
+57: {
+  chainId: 57,
+  name: 'Syscoin',
+  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
+  weth: '0x27fE1F0aBdDFD2AAdb2411AF6B4070bC9B655F6A', // WSYS wrapped native
+  oneInchRouter: null, // 1inch not deployed
+  uniswapV3Router: null // no Uni v3 router
+},
+
+
+50: {
+  chainId: 50,
+  name: 'XDC Network',
+  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
+  weth: '0xE7C9C6dc2A1FDB7B70950f0bA27be11Cbb9dBa1D', // WXDC
+  oneInchRouter: null, // not supported on XDC
+  uniswapV3Router: null // no Uni v3 deployment
+},
 
   }
 

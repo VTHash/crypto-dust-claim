@@ -236,6 +236,38 @@ export const SUPPORTED_CHAINS = {
     logo: "/logo/flare.png"
   },
 
+  58: {
+  name: "Ontology",
+  symbol: "ONT",
+  rpcUrl: "https://rpc.ont.io",
+  explorer: "https://explorer.ont.io",
+  logo: "/logo/ont.png"
+},
+
+40: {
+  name: "Telos",
+  symbol: "TLOS",
+  rpcUrl: "https://mainnet.telos.net/evm",
+  explorer: "https://teloscan.io",
+  logo: "/logo/telos.png"
+},
+
+57: {
+  name: "Syscoin",
+  symbol: "SYS",
+  rpcUrl: "https://rpc.syscoin.org",
+  explorer: "https://explorer.syscoin.org",
+  logo: "/logo/sys.jpg"
+},
+
+50: {
+  name: "XDC Network",
+  symbol: "XDC",
+  rpcUrl: "https://rpc.xinfin.network",
+  explorer: "https://explorer.xinfin.network",
+  logo: "/logo/xdc.png"
+},
+
 
 };
 // -------------------------------
