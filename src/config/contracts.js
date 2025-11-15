@@ -47,7 +47,8 @@ export const DUSTCLAIM_ADDRESS = {
   9745: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Plasma
   14: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Flare
   40: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Telos
-  57: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" //Syscoin
+  57: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Syscoin
+  61: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // ETC
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
