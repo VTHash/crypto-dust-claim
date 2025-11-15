@@ -45,7 +45,8 @@ export const DUSTCLAIM_ADDRESS = {
   1285: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Moonriver
   5000: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Mantle
   9745: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Plasma
-  14: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Flare
+  14: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Flare
+  40: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Telos
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
