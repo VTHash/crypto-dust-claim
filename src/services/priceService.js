@@ -82,7 +82,13 @@ const PLATFORM_BY_CHAIN = {
   170: 'unichain', // Unichain (when listed)
   7777777: 'zora',
   5000: 'mantle',
-  14: 'flare'
+  14: 'flare',
+  40: 'telos',
+  50: 'xdc',
+  57: 'syscoin',
+  61: 'ethereum-classic',
+  57073:'inkonchain',
+
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them
 }

@@ -243,5 +243,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/ethereum-classic.png"
 },
 
+57073: {
+  name: "Inkonchain",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.inkonchain.com", // adjust if you use a different RPC endpoint
+  explorer: "https://explorer.inkonchain.com", // or your preferred explorer URL
+  logo: "/logo/ink.png" 
+},
+
 };
 

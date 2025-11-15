@@ -252,6 +252,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // no Uni v2/v3
 },
 
+57073: {
+  chainId: 57073,
+  name: "Inkonchain",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006", // WETH on Ink
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // no 1inch on Ink
+  uniswapV3Router: "0x177778F19E89dD1012BdBe603F144088A95C4B53" // SwapRouter02 (exactInputSingle)
+},
+
   }
 
 
