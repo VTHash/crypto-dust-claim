@@ -35,7 +35,6 @@ const WRAPPED_NATIVE_BY_CHAIN = {
   40: "0xD102cE6A4dB07D247fcc28F366A623Df0938CA9E", // Telos WTLOS
   50: "0x951857744785E80e2De051c32EE7b25f9c458c42", // XDC WXDC
   57: "0xd3e822f3Ef011Ca5F17D82C956D952D8d7C3A1BB", // Syscoin WSYS
-  58: "0x219CC8e994EA6B35CdCFFB5d44E229325D5aD02A" // Ontology WONT
 }
 /** Normalize any input into a wei-decimal string (no 0x). */
 const toAmountStr = (x) =>

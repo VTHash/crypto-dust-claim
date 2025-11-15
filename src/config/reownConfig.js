@@ -209,13 +209,7 @@ export const SUPPORTED_CHAINS = {
     logo: "/logo/flare.png"
   },
 
-  58: {
-  name: "Ontology",
-  symbol: "ONT",
-  rpcUrl: "https://rpc.ont.io",
-  explorer: "https://explorer.ont.io",
-  logo: "/logo/ont.png"
-},
+  
 
 40: {
   name: "Telos",

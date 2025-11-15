@@ -211,14 +211,7 @@ export const DEPLOYMENTS = {
   uniswapV3Router: '0x8a1E35F5c98C4E85B36B7B253222eE17773b2781' // Flare v3 router
 },
 
-58: {
-  chainId: 58,
-  name: 'Ontology',
-  dustclaim: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
-  weth: '0x6F6754160dF85d41Bfac1aA8609E5A909cB3E78F', // WONT wrapped native
-  oneInchRouter: null, // not supported
-  uniswapV3Router: null // no Uni v3 router
-},
+
 
 
 40: {
