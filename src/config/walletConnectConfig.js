@@ -260,6 +260,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/xdc.png"
 },
 
+61: {
+  name: "Ethereum Classic",
+  symbol: "ETC",
+  rpcUrl: "https://etc.rivet.link", // reliable public RPC
+  explorer: "https://blockscout.com/etc/mainnet",
+  logo: "/logo/ethereum-classic.png"
+},
 
 };
 // -------------------------------
