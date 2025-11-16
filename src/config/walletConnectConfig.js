@@ -147,13 +147,7 @@ export const SUPPORTED_CHAINS = {
     logo: "/logo/bera.png",
   },
 
-  195: {
-    name: "X1",
-    symbol: "OKB",
-    rpcUrl: "https://rpc.ankr.com/xlayer",
-    explorer: "https://www.oklink.com/x1",
-    logo: "/logo/okb.png",
-  },
+ 
 
   42220: {
     name: "Celo Mainnet",
@@ -315,6 +309,14 @@ export const SUPPORTED_CHAINS = {
   rpcUrl: "https://rpc.api.lisk.com",
   explorer: "https://blockscout.lisk.com",
   logo: "/logo/lisk.png"
+},
+
+1923: {
+  name: "Swellchain",
+  symbol: "ETH",
+  rpcUrl: "https://swell-mainnet.alt.technology",
+  explorer: "https://explorer.swellnetwork.io",
+  logo: "/logo/swell.png"
 },
 
 };

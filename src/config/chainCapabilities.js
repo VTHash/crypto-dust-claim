@@ -17,7 +17,7 @@ export const CHAIN_CAPS = {
   34443: { directSwap: false, uniV3Path: false }, // Mode
   1329: { directSwap: false, uniV3Path: false }, // Sei
   80094: { directSwap: false, uniV3Path: false }, // Berachain
-  195: { directSwap: false, uniV3Path: false }, // X1
+ 
 };
 
 // Optional helpers (non-breaking)

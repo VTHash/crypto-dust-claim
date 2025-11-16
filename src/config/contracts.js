@@ -56,7 +56,7 @@ export const DUSTCLAIM_ADDRESS = {
  1868:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Soneium
  480:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Worldcoin
  1135:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Lisk
- 
+ 1923: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Swellchain
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----

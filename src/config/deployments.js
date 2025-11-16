@@ -58,14 +58,6 @@ export const DEPLOYMENTS = {
     uniswapV3Router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45'
   },
 
-  195: {
-    chainId: 195,
-    name: 'X1',
-    dustclaim: '',
-    weth: '0x4200000000000000000000000000000000000006',
-    oneInchRouter: null,
-    uniswapV3Router: null
-  },
 
   250: {
     chainId: 250,
@@ -313,6 +305,15 @@ export const DEPLOYMENTS = {
   weth: "0x4200000000000000000000000000000000000006",
   oneInchRouter: "0x0000000000000000000000000000000000000000", // 1inch not confirmed
   uniswapV3Router: null // Uni v3 router not confirmed
+},
+
+1923: {
+  chainId: 1923,
+  name: "Swellchain",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006",
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // 1inch not confirmed
+  uniswapV3Router: null // Uniswap v2/v3 router not confirmed
 },
 
   }

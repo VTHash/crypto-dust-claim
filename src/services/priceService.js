@@ -66,7 +66,6 @@ const PLATFORM_BY_CHAIN = {
   56: 'binance-smart-chain', // BNB Smart Chain
   100: 'xdai', // Gnosis (xDAI)
   137: 'polygon-pos', // Polygon PoS
-  195: 'okex-chain', // X1 (OKX base) – approximate
   250: 'fantom', // Fantom Opera
   8453: 'base', // Base
   59144: 'linea', // Linea
@@ -94,6 +93,8 @@ const PLATFORM_BY_CHAIN = {
   1868: 'soneium',
   480: 'worldcoin',
   1135: 'Lisk',
+  1923: 'Swellchain'
+
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them
 }
