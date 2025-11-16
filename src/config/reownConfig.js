@@ -267,5 +267,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/blast.jpeg"
 },
 
+1868: {
+  name: "Soneium",
+  symbol: "ETH",
+  rpcUrl: "https://mainnet-rpc.soneium.org",
+  explorer: "https://mainnet-explorer.soneium.org",
+  logo: "/logo/soneium.jpg"
+},
+
 };
 

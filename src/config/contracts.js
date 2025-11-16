@@ -53,7 +53,7 @@ export const DUSTCLAIM_ADDRESS = {
   122: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Fuse
   60808: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Bob
   81457:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Blast
- 122: "0x5622F6dC93e08a8b717B149677930C38d5d50682", // WFUSE
+ 1868:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Soneium
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
