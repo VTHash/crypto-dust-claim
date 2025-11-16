@@ -297,6 +297,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // not yet confirmed
 },
 
+480: {
+  chainId: 480,
+  name: "World Chain",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006",
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // 1inch not yet confirmed
+  uniswapV3Router: " 0x091AD9e2e6e5eD44c1c66dB50e49A601F9f36cF6"
+},
+
   }
 
 

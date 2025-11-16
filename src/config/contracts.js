@@ -54,6 +54,8 @@ export const DUSTCLAIM_ADDRESS = {
   60808: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Bob
   81457:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Blast
  1868:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Soneium
+ 480:  "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Worldcoin
+ 
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----

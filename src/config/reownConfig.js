@@ -160,13 +160,7 @@ export const SUPPORTED_CHAINS = {
     logo: "/logo/moonriver.png",
   },
 
-  1666600000: {
-    name: "Harmony Mainnet Shard 0",
-    symbol: "ONE",
-    rpcUrl: "https://api.harmony.one",
-    explorer: "https://explorer.harmony.one",
-    logo: "/logo/harmony.png",
-  },
+  
 
   324: {
   name: "zkSync Mainnet",
@@ -273,6 +267,14 @@ export const SUPPORTED_CHAINS = {
   rpcUrl: "https://mainnet-rpc.soneium.org",
   explorer: "https://mainnet-explorer.soneium.org",
   logo: "/logo/soneium.jpg"
+},
+
+480: {
+  name: "World Chain",
+  symbol: "ETH",
+  rpcUrl: "https://worldchain-mainnet.g.alchemy.com/public",
+  explorer: "https://worldchain-mainnet.explorer.alchemy.com",
+  logo: "/logo/worldcoin.png"
 },
 
 };
