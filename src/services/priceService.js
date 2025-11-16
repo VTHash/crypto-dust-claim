@@ -89,6 +89,8 @@ const PLATFORM_BY_CHAIN = {
   61: 'ethereum-classic',
   57073:'inkonchain',
   122: 'fuse',
+  60808: 'bob',
+  81457:  'blast',
 
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them

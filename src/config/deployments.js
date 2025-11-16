@@ -279,6 +279,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // assume none for now
 },
 
+81457: {
+  chainId: 81457,
+  name: "Blast Mainnet",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth:"0x4300000000000000000000000000000000000004",
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // not yet confirmed
+  uniswapV3Router: null // not yet confirmed
+},
+
   }
 
 

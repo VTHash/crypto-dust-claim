@@ -292,6 +292,14 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/bob.jpg"
 },
 
+81457: {
+  name: "Blast Mainnet",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.blast.io",
+  explorer: "https://blastscan.io",
+  logo: "/logo/blast.jpeg"
+},
+
 };
 // -------------------------------
 // 4) Convert to Reown CAIP networks
