@@ -270,6 +270,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: "0x0000000000000000000000000000000000000000" // no Uni v2/v3
 },
 
+60808: {
+  chainId: 60808,
+  name: "BOB Mainnet",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006", // wrapped native 
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // assume none for now
+  uniswapV3Router: null // assume none for now
+},
+
   }
 
 

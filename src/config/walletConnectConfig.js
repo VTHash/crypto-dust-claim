@@ -284,6 +284,14 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/fuse.png"
 },
 
+60808: {
+  name: "BOB Mainnet",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.gobob.xyz/",
+  explorer: "https://explorer.gobob.xyz/",
+  logo: "/logo/bob.jpg"
+},
+
 };
 // -------------------------------
 // 4) Convert to Reown CAIP networks

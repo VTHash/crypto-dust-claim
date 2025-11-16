@@ -256,7 +256,7 @@ export const SUPPORTED_CHAINS = {
   symbol: "FUSE",
   rpcUrl: "https://rpc.fuse.io",
   explorer: "https://explorer.fuse.io",
-  logo: "/logo/fuse.png"
+  logo: "/logo/fuse.jpg"
 },
 
 };
