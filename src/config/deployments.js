@@ -238,7 +238,7 @@ export const DEPLOYMENTS = {
 61: {
   chainId: 61,
   name: "Ethereum Classic",
-  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  dustclaim: "0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d",
   weth: "0x82A618305706B14e7bcf2592D4B9324A366b6dAd", // WETC
   oneInchRouter: "0x0000000000000000000000000000000000000000", // no 1inch
   uniswapV3Router: null // no Uni v2/v3
