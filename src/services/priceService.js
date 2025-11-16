@@ -93,8 +93,9 @@ const PLATFORM_BY_CHAIN = {
   1868: 'soneium',
   480: 'worldcoin',
   1135: 'Lisk',
-  1923: 'Swellchain'
-
+  1923: 'Swellchain',
+  2741: 'Abstract',
+  
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them
 }

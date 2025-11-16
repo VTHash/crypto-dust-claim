@@ -285,7 +285,16 @@ export const SUPPORTED_CHAINS = {
   rpcUrl: "https://swell-mainnet.alt.technology",
   explorer: "https://explorer.swellnetwork.io",
   logo: "/logo/swell.png"
-
 },
+
+2741: {
+  name: "Abstract",
+  symbol: "ETH",
+  rpcUrl: "https://api.mainnet.abs.xyz",
+  explorer: "https://abscan.org/",
+  logo: "/logo/abstract.png"
+},
+
+
 };
 
