@@ -91,12 +91,7 @@ export const DUSTCLAIM_CONTRACTS = {
     address: '0xYourBerachainAddress',
     abi: commonAbi
   },
-  195: {
-    key: 'x1',
-    name: 'X1',
-    address: '0xYourX1Address',
-    abi: commonAbi
-  }
+ 
 }
 
 // Helper

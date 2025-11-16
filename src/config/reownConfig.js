@@ -295,6 +295,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/abstract.png"
 },
 
+747474: {
+  name: "Katana",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.katana.network",
+  explorer: "https://explorer.katanarpc.com",
+  logo: "/logo/katana.png"
+},
 
 };
 

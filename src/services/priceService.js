@@ -95,6 +95,7 @@ const PLATFORM_BY_CHAIN = {
   1135: 'Lisk',
   1923: 'Swellchain',
   2741: 'Abstract',
+  747474: 'Katana',
   
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them

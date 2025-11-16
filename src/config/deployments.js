@@ -325,6 +325,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // No Uni v3 router yet
 },
 
+747474: {
+  chainId: 747474,
+  name: "Katana",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006",
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // 1inch not confirmed
+  uniswapV3Router: null // Uniswap v3 router not confirmed
+},
+
   }
 
 
