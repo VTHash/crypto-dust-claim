@@ -49,7 +49,8 @@ export const DUSTCLAIM_ADDRESS = {
   40: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Telos
   57: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Syscoin
   61: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // ETC
-  57073: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Inkonchain
+  57073: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Inkonchain
+  122: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46" // Fuse
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----

@@ -276,6 +276,14 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/ink.png" 
 },
 
+122: {
+  name: "Fuse Network",
+  symbol: "FUSE",
+  rpcUrl: "https://rpc.fuse.io",
+  explorer: "https://explorer.fuse.io",
+  logo: "/logo/fuse.png"
+},
+
 };
 // -------------------------------
 // 4) Convert to Reown CAIP networks

@@ -261,6 +261,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: "0x177778F19E89dD1012BdBe603F144088A95C4B53" // SwapRouter02 (exactInputSingle)
 },
 
+122: {
+  chainId: 122,
+  name: "Fuse Network",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x5622F6dC93e08a8b717B149677930C38d5d50682", // WFUSE
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // no 1inch
+  uniswapV3Router: "0x0000000000000000000000000000000000000000" // no Uni v2/v3
+},
+
   }
 
 
