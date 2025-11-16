@@ -277,5 +277,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/worldcoin.png"
 },
 
+1135: {
+  name: "Lisk",
+  symbol: "ETH",
+  rpcUrl: "https://rpc.api.lisk.com",
+  explorer: "https://blockscout.lisk.com",
+  logo: "/logo/lisk.png"
+},
+
 };
 
