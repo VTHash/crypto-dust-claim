@@ -334,6 +334,16 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // Uniswap v3 router not confirmed
 },
 
+146: {
+  chainId: 146,
+  name: "Sonic",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  // Native wrapper on Sonic (wS), not bridged WETH
+  weth: "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38", // Wrapped S (wS)
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // no 1inch on Sonic
+  uniswapV3Router: null // no confirmed Uni v2/v3 router address yet
+},
+
   }
 
 

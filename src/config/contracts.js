@@ -59,6 +59,7 @@ export const DUSTCLAIM_ADDRESS = {
  1923: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Swellchain
  2741: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Abstract
  747474: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Katana
+ 146: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46", // Sonic
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----

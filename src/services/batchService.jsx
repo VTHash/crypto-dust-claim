@@ -46,6 +46,8 @@ const WRAPPED_NATIVE_BY_CHAIN = {
   1923:  "0x4200000000000000000000000000000000000006", // Swellchain
   2741: "0x4200000000000000000000000000000000000006", // Abstract
   747474: "0x4200000000000000000000000000000000000006", // Katana
+  146: "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38", // Sonic native wrapper
+  
 }
 /** Normalize any input into a wei-decimal string (no 0x). */
 const toAmountStr = (x) =>

@@ -303,5 +303,13 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/katana.png"
 },
 
+146: {
+  name: "Sonic",
+  symbol: "S",
+  rpcUrl: "https://rpc.soniclabs.com",
+  explorer: "https://sonicscan.org",
+  logo: "/logo/sonic.jpg"
+},
+
 };
 
