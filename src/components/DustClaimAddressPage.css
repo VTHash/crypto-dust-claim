@@ -1,343 +1,309 @@
-/* DustClaim Address Page — scoped to dustclaim-* and uses global theme vars */
+/* === DustClaim Address Page – Card Layout === */
 
-/* PAGE SHELL */
-.dustclaim-page {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  padding-block: 1.25rem;
-  animation: fadeIn 0.4s ease forwards;
+.address-page {
+  max-width: 960px;
+  margin: 24px auto 48px;
+  padding: 0 16px;
+  box-sizing: border-box;
 }
 
-/* HEADER */
-.dustclaim-header {
+/* Card sections share the same base style */
+.address-hero,
+.address-qr-section,
+.address-body {
+  background: var(--card-bg, #f9fafb);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+
+/* Slight gradient on the main hero card */
+.address-hero {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  align-items: flex-start;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  background: linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.04),
+    rgba(79, 70, 229, 0.06)
+  );
 }
 
-.dustclaim-title {
-  margin: 0 0 0.25rem;
-  font-size: clamp(1.25rem, 3.6vw, 1.6rem);
+/* Left side: logo + title + address text */
+.address-hero-left {
+  display: flex;
+  gap: 16px;
+}
+
+/* Small circular Ethereum badge */
+.address-logo-badge {
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(
+    circle at 30% 0%,
+    rgba(59, 130, 246, 0.7),
+    rgba(15, 23, 42, 0.9)
+  );
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.4),
+    0 18px 45px rgba(15, 23, 42, 0.65);
+  flex-shrink: 0;
+}
+
+.address-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+/* Titles */
+.address-title {
+  margin: 0 0 4px;
+  font-size: 1.3rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--fg-1);
+  color: #0f172a;
 }
 
-.dustclaim-subtitle {
-  margin: 0;
+.address-subtitle {
+  margin: 0 0 10px;
   font-size: 0.9rem;
-  color: var(--fg-3);
+  color: #64748b;
 }
 
-/* address pill */
-.dustclaim-address-pill {
-  align-self: stretch;
+/* Address row */
+.address-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.address-label {
+  font-weight: 600;
+  color: #475569;
+}
+
+.address-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.12);
+  color: #0f172a;
+}
+
+/* Copy + Etherscan link */
+.address-copy-btn,
+.address-etherscan-link {
+  font-size: 0.8rem;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: white;
+  color: #0f172a;
+  cursor: pointer;
+  text-decoration: none;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.5rem 0.85rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  box-shadow: var(--shadow);
-  font-size: 0.8rem;
+  gap: 4px;
 }
 
-.dustclaim-address-label {
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-weight: 600;
-  color: var(--fg-3);
+.address-copy-btn:hover,
+.address-etherscan-link:hover {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #1d4ed8;
 }
 
-.dustclaim-address-value {
-  font-family: var(--font-mono);
-  color: var(--accent);
-  max-width: 60%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* META BANNERS */
-.dustclaim-meta {
-  margin-top: 0.25rem;
-}
-
-.dustclaim-banner {
-  border-radius: 14px;
-  padding: 0.6rem 0.85rem;
-  font-size: 0.8rem;
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-/* info */
-.dustclaim-banner--info {
-  background: color-mix(in oklab, var(--accent) 7%, var(--bg-2));
-  color: var(--fg-2);
-}
-
-/* error */
-.dustclaim-banner--error {
-  background: color-mix(in oklab, var(--danger) 10%, var(--bg-2));
-  border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
-  color: var(--danger);
-}
-
-/* success */
-.dustclaim-banner--success {
-  background: color-mix(in oklab, var(--success) 7%, var(--bg-2));
-  border-color: color-mix(in oklab, var(--success) 40%, var(--border));
-  color: var(--fg-2);
-}
-
-.dustclaim-meta-time {
-  font-size: 0.78rem;
-  color: var(--fg-3);
-}
-
-/* MAIN LAYOUT */
-.dustclaim-main {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-/* CARDS (use your card style as base) */
-.dustclaim-card {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  padding: 1rem 1rem 1.2rem;
-}
-
-.dustclaim-card h2 {
-  margin: 0 0 0.4rem;
-  font-size: 0.95rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--fg-1);
-}
-
-.dustclaim-card h3 {
-  margin: 0.9rem 0 0.3rem;
-  font-size: 0.9rem;
-  color: var(--fg-1);
-}
-
-.dustclaim-note {
-  margin: 0 0 0.75rem;
-  font-size: 0.82rem;
-  color: var(--fg-3);
-}
-
-.dustclaim-empty {
-  margin: 0.2rem 0 0.6rem;
-  font-size: 0.85rem;
-  color: var(--fg-3);
-}
-
-/* CHAINS & TOKENS */
-.dustclaim-chain-block {
-  margin-bottom: 0.75rem;
-  padding: 0.7rem 0.75rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-}
-
-.dustclaim-chain-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-
-.dustclaim-chain-header h3 {
-  margin: 0;
-  font-size: 0.9rem;
-}
-
-.dustclaim-chain-tag {
-  padding: 0.15rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--accent-2) 60%, var(--border));
-  font-size: 0.7rem;
-  color: var(--accent-2);
-  background: color-mix(in oklab, var(--accent-2) 10%, var(--bg-2));
-}
-
-/* token list */
-.dustclaim-token-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.dustclaim-token-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.35rem 0;
-  border-bottom: 1px dashed rgba(0, 0, 0, 0.06);
-}
-
-[data-theme="dark"] .dustclaim-token-list li {
-  border-bottom-color: rgba(255, 255, 255, 0.06);
-}
-
-.dustclaim-token-list li:last-child {
-  border-bottom: none;
-}
-
-.dustclaim-token-left {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-}
-
-.dustclaim-token-logo {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 1px solid var(--border);
-}
-
-.dustclaim-token-symbol {
-  font-size: 0.86rem;
-  font-weight: 600;
-}
-
-.dustclaim-token-name {
-  font-size: 0.76rem;
-  color: var(--fg-3);
-}
-
-.dustclaim-token-right {
-  text-align: right;
-}
-
-.dustclaim-token-amount {
-  font-size: 0.82rem;
-}
-
-.dustclaim-token-usd {
+/* Meta line (views etc.) */
+.address-meta {
+  margin: 4px 0 0;
   font-size: 0.75rem;
-  color: var(--fg-3);
+  color: #94a3b8;
 }
 
-/* ACTIONS */
-.dustclaim-actions {
+/* Right side: big action buttons */
+.address-hero-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin: 0.7rem 0 0.9rem;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.dustclaim-btn {
-  flex: 1 1 130px;
-  padding: 0.55rem 0.9rem;
-  border-radius: 12px;
-  border: 1px solid var(--accent);
-  background: color-mix(in oklab, var(--accent) 14%, var(--bg-2));
-  color: var(--fg-1);
-  font-size: 0.82rem;
+/* Generic button styles reused */
+.btn {
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 0.85rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  border: 1px solid transparent;
   cursor: pointer;
-  box-shadow: var(--shadow);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.08s ease,
+    box-shadow 0.1s ease;
 }
 
-.dustclaim-btn:hover:not(:disabled) {
+.btn-primary {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #f9fafb;
+  box-shadow: 0 10px 25px rgba(37, 99, 235, 0.45);
+}
+
+.btn-primary:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
   transform: translateY(-1px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.55);
 }
 
-.dustclaim-btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: var(--shadow);
+.btn-secondary {
+  background: white;
+  border-color: rgba(148, 163, 184, 0.8);
+  color: #0f172a;
 }
 
-.dustclaim-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.btn-secondary:hover {
+  background: #f8fafc;
+  border-color: #64748b;
 }
 
-/* secondary button */
-.dustclaim-btn--secondary {
-  background: var(--bg-2);
-  color: var(--accent);
-  border-color: color-mix(in oklab, var(--accent) 70%, var(--border));
+/* QR card */
+.address-qr-section {
+  text-align: center;
+  background: radial-gradient(
+    circle at top,
+    rgba(37, 99, 235, 0.06),
+    #f9fafb 55%
+  );
 }
 
-/* LISTS */
-.dustclaim-list {
-  list-style: disc;
-  padding-left: 1.1rem;
-  margin: 0.35rem 0;
-  font-size: 0.82rem;
-  color: var(--fg-3);
+.address-qr-image {
+  border-radius: 12px;
+  padding: 10px;
+  background: white;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
 }
 
-.dustclaim-list li + li {
-  margin-top: 0.25rem;
+.address-qr-caption {
+  margin-top: 8px;
+  font-size: 0.8rem;
+  color: #64748b;
 }
 
-/* FAQ DETAILS */
-.dustclaim-card details {
+/* Body section content */
+.address-body h2 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 1.05rem;
+  color: #0f172a;
+}
+
+.address-body p {
+  margin: 0 0 10px;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.address-body ul {
+  margin: 6px 0 10px 18px;
+  padding: 0;
+  font-size: 0.9rem;
+  color: #475569;
+}
+
+.address-body li {
+  margin-bottom: 4px;
+}
+
+.address-empty-note {
+  font-style: italic;
+  color: #94a3b8;
+}
+
+/* FAQ details */
+.address-body details {
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  padding: 0.55rem 0.7rem;
-  margin-top: 0.45rem;
-  font-size: 0.82rem;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: white;
 }
 
-.dustclaim-card details summary {
+.address-body summary {
   cursor: pointer;
   font-weight: 600;
-  outline: none;
+  font-size: 0.9rem;
+  color: #0f172a;
 }
 
-.dustclaim-card details[open] summary {
-  color: var(--accent);
+.address-body details[open] {
+  background: #f8fafc;
 }
 
-.dustclaim-card details p {
-  margin: 0.45rem 0 0;
-  color: var(--fg-3);
-}
+/* ===== Responsive tweaks ===== */
 
-/* RESPONSIVE */
-@media (min-width: 768px) {
-  .dustclaim-header {
+@media (max-width: 768px) {
+  .address-page {
+    margin-top: 16px;
+  }
+
+  .address-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .address-hero-left {
+    align-items: flex-start;
+  }
+
+  .address-hero-actions {
     flex-direction: row;
-    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
-  .dustclaim-address-pill {
-    flex: 0 0 auto;
-    max-width: 55%;
+  .btn {
+    flex: 1 1 45%;
   }
 
-  .dustclaim-card {
-    padding: 1.1rem 1.25rem 1.3rem;
+  .address-line {
+    flex-direction: row;
+  }
+}
+
+@media (max-width: 480px) {
+  .address-hero,
+  .address-qr-section,
+  .address-body {
+    padding: 16px 14px;
+    border-radius: 14px;
+  }
+
+  .address-title {
+    font-size: 1.1rem;
+  }
+
+  .address-subtitle {
+    font-size: 0.82rem;
+  }
+
+  .btn {
+    font-size: 0.8rem;
+    padding: 7px 12px;
   }
 }
