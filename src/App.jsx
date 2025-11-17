@@ -15,7 +15,7 @@ import ClaimScreen from './pages/ClaimScreen'
 // Styles
 import './App.css'
 
-// Wrapper to read :address and pass it to your real DustClaimAddressPage
+// Wrapper to read :address and pass it to the DustClaimAddressPage
 const DustClaimAddressRoute = () => {
   const { address } = useParams()
 
@@ -23,7 +23,7 @@ const DustClaimAddressRoute = () => {
   const targetAddress =
     address || '0xC73E2EE769b3CDc5c843093470b5Cc17d89D9640'
 
-  // DustClaimAddressPage internally uses YOUR real dust scanner hooks
+  // DustClaimAddressPage is responsible for using your real dust scanner
   return <DustClaimAddressPage address={targetAddress} />
 }
 
@@ -32,6 +32,7 @@ const App = () => {
 
   return (
     <div className="app">
+      {/* Always show navbar so ThemeToggle & wallet connect are available */}
       <Navbar />
 
       <main className="main-content">
@@ -42,7 +43,7 @@ const App = () => {
             element={isConnected ? <Dashboard /> : <WalletScreen />}
           />
 
-          {/* Protected pages */}
+          {/* Protected pages (require wallet connection) */}
           <Route
             path="/dashboard"
             element={isConnected ? <Dashboard /> : <Navigate to="/" replace />}
@@ -58,19 +59,10 @@ const App = () => {
             element={isConnected ? <ClaimScreen /> : <Navigate to="/" replace />}
           />
 
-          {/* NEW: DustClaim address link (for Etherscan card) */}
-          <Route
-            path="/address/:address"
-            element={
-              isConnected ? (
-                <DustClaimAddressRoute />
-              ) : (
-                <Navigate to="/" replace />
-              )
-            }
-          />
+          {/* NEW: DustClaim address view – ALWAYS accessible for Etherscan card */}
+          <Route path="/address/:address" element={<DustClaimAddressRoute />} />
 
-          {/* Fallback */}
+          {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
