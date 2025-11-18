@@ -332,7 +332,7 @@ export const SUPPORTED_CHAINS = {
   symbol: "ETH",
   rpcUrl: "https://rpc.katana.network",
   explorer: "https://explorer.katanarpc.com",
-  logo: "/logo/katana.png"
+  logo: "/logo/katana.jpg"
 },
 
 146: {
