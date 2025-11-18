@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { useWallet } from './contexts/WalletContext'
 
@@ -30,6 +30,12 @@ const DustClaimAddressRoute = () => {
 const App = () => {
   const { isConnected } = useWallet()
 
+  // Count a "view" whenever the app loads
+  useEffect(() => { fetch('/.netlify/functions/stats-view').catch(() => { 
+    // ignore failures so the app never breaks
+  })
+  }, [])
+  
   return (
     <div className="app">
       {/* Always show navbar so ThemeToggle & wallet connect are available */}

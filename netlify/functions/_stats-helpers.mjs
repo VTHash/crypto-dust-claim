@@ -48,4 +48,4 @@ export async function writeStats(stats) {
   await store.set(KEY, stats);
 }
 
-export { CHAIN_LABELS };
+export { CHAIN_LABELS }; 
