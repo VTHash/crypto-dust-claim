@@ -1,6 +1,6 @@
-import React from 'react'
+// src/components/GlobalStatsWidget.jsx
+import React, { useEffect, useState } from 'react'
 import './GlobalStatsWidget.css'
-
 // Optional: basic labels for common chains (fallback to "Chain #id")
 const CHAIN_LABELS = {
   1: 'Ethereum',
@@ -41,135 +41,161 @@ const CHAIN_LABELS = {
  146: 'Sonic',
  
 }
-
-
-
 const GlobalStatsWidget = () => {
-  const [stats, setStats] = React.useState({
-    totalViews: 0,
-    totalScans: 0,
-    perChainScans: {}
-  })
-  const [isLoading, setIsLoading] = React.useState(true)
-  const [error, setError] = React.useState(null)
-  const [showDetails, setShowDetails] = React.useState(false)
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [stats, setStats] = useState(null)
 
-  React.useEffect(() => {
+  // Helper: safe number -> short format
+  const fmt = (n) => {
+    const num = Number(n || 0)
+    if (!Number.isFinite(num)) return '0'
+    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
+    if (num >= 1_000) return (num / 1_000).toFixed(1) + 'k'
+    return num.toString()
+  }
+
+  useEffect(() => {
     let cancelled = false
 
-    const load = async () => {
+    const fetchStats = async () => {
       try {
-        const res = await fetch('/.netlify/functions/stats-get')
-        if (!res.ok) throw new Error('Failed to load stats')
-        const data = await res.json()
-
+        setLoading(true)
+        const res = await fetch('/.netlify/functions/stats-view')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const json = await res.json()
         if (!cancelled) {
-          setStats({
-            totalViews: data.totalViews || 0,
-            totalScans: data.totalScans || 0,
-            perChainScans: data.perChainScans || {}
-          })
-          setIsLoading(false)
+          setStats(json)
+          setError(null)
         }
-      } catch (err) {
+      } catch (e) {
         if (!cancelled) {
-          setError('Could not load global stats')
-          setIsLoading(false)
+          setError(e.message || 'Unable to load stats')
         }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
 
-    load()
+    fetchStats()
+
+    // Refresh every 60s so it feels “live”
+    const id = setInterval(fetchStats, 60_000)
     return () => {
       cancelled = true
+      clearInterval(id)
     }
   }, [])
 
-  const activeChains = Object.keys(stats.perChainScans || {}).length
+  // --- Normalise shapes from the Netlify function -------------------------
 
-  // Top chains by scans (max 5)
-  const topChains = React.useMemo(() => {
-    const entries = Object.entries(stats.perChainScans || {})
-    return entries
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([id, count]) => ({
-        id,
-        count,
-        label: CHAIN_LABELS[id] || `Chain #${id}`
-      }))
-  }, [stats.perChainScans])
+  // totals might be at root or under .totals
+  const totals = stats?.totals || stats || {}
+  const totalScans = totals.totalScans ?? totals.scans ?? 0
+  const totalAddresses = totals.totalAddresses ?? totals.addresses ?? 0
+  const totalChains = totals.totalChains ?? totals.chains ?? 0
+
+  // chains may be: `chains`, `topChains`, or `chainBreakdown` object
+  let chains = []
+
+  if (Array.isArray(stats?.chains)) {
+    chains = stats.chains
+  } else if (Array.isArray(stats?.topChains)) {
+    chains = stats.topChains
+  } else if (
+    stats?.chainBreakdown &&
+    typeof stats.chainBreakdown === 'object'
+  ) {
+    chains = Object.entries(stats.chainBreakdown).map(([chainId, info]) => ({
+      chainId: Number(chainId),
+      ...(info || {})
+    }))
+  }
+
+  // Sort by scans desc and take top 3
+  chains.sort((a, b) => (b.scans || 0) - (a.scans || 0))
+  const topChains = chains.slice(0, 3)
+
+  const hasData =
+    (totalScans || totalAddresses || totalChains) && !loading && !error
 
   return (
-    <div className="global-stats-card">
-      <div className="global-stats-main">
-        <div className="global-stats-header">
-          <span className="global-stats-dot" />
-          <span className="global-stats-title">DustClaim global activity</span>
-        </div>
+    <section className="global-stats-shell">
+      <button
+        type="button"
+        className={`global-stats-bar ${open ? 'open' : ''}`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="stats-label">📊 Network stats</span>
 
-        {isLoading && (
-          <p className="global-stats-text">Loading stats…</p>
-        )}
+        <span className="stats-summary">
+          {loading && <span className="stats-pill">Loading…</span>}
+          {!loading && error && (
+            <span className="stats-pill stats-pill-error">Stats offline</span>
+          )}
+          {!loading && !error && (
+            <>
+              <span className="stats-pill">
+                {fmt(totalScans)} scans
+              </span>
+              <span className="stats-pill">
+                {fmt(totalAddresses)} addresses
+              </span>
+              {totalChains ? (
+                <span className="stats-pill">
+                  {fmt(totalChains)} chains
+                </span>
+              ) : null}
+            </>
+          )}
+        </span>
 
-        {error && !isLoading && (
-          <p className="global-stats-text global-stats-error">{error}</p>
-        )}
+        <span className="stats-toggle">{open ? '▾' : '▸'}</span>
+      </button>
 
-        {!isLoading && !error && (
-          <>
-            <p className="global-stats-text">
-              <strong>{stats.totalViews}</strong> address views ·{' '}
-              <strong>{stats.totalScans}</strong> scans
-            </p>
-            <p className="global-stats-sub">
-              Active chains: <strong>{activeChains}</strong>
-            </p>
-          </>
-        )}
-      </div>
-
-      {/* Toggle button */}
-      {!isLoading && !error && (
-        <button
-          type="button"
-          className="global-stats-toggle"
-          onClick={() => setShowDetails(v => !v)}
-        >
-          {showDetails ? 'Hide details' : 'View top chains'}
-          <span className={`global-stats-chevron ${showDetails ? 'open' : ''}`}>
-            ▾
-          </span>
-        </button>
-      )}
-
-      {/* Mini stats panel */}
-      {showDetails && !isLoading && !error && (
+      {open && hasData && (
         <div className="global-stats-panel">
-          {topChains.length === 0 ? (
-            <p className="global-stats-panel-empty">
-              No chain activity recorded yet.
-            </p>
-          ) : (
-            <ul className="global-stats-panel-list">
-              {topChains.map((chain) => (
-                <li key={chain.id} className="global-stats-panel-item">
-                  <span className="global-stats-panel-name">
-                    {chain.label}
-                    <span className="global-stats-panel-id">
-                      ({chain.id})
+          <div className="panel-header">
+            <span>Top chains by scans</span>
+            <span className="panel-note">Last 24h / rolling total</span>
+          </div>
+
+          {topChains.length === 0 && (
+            <div className="panel-empty">
+              Stats are still warming up. Run a scan to be the first one here.
+            </div>
+          )}
+
+          {topChains.length > 0 && (
+            <ul className="panel-list">
+              {topChains.map((c) => (
+                <li key={c.chainId || c.name} className="panel-row">
+                  <div className="panel-row-main">
+                    <span className="panel-chain-name">
+                      {c.name || `Chain ${c.chainId}`}
                     </span>
-                  </span>
-                  <span className="global-stats-panel-count">
-                    {chain.count} scans
-                  </span>
+                    {c.symbol && (
+                      <span className="panel-chain-symbol">
+                        {c.symbol}
+                      </span>
+                    )}
+                  </div>
+                  <div className="panel-row-meta">
+                    <span>{fmt(c.scans || 0)} scans</span>
+                    {typeof c.share === 'number' && (
+                      <span className="panel-share">
+                        {(c.share * 100).toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
