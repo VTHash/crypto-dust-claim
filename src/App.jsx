@@ -5,13 +5,13 @@ import { useWallet } from './contexts/WalletContext'
 // Components
 import Navbar from './components/Navbar'
 import DustClaimAddressPage from './components/DustClaimAddressPage'
-import GlobalStatsWidget from '../components/GlobalStatsWidget'
+
 // Pages
 import WalletScreen from './pages/WalletScreen'
 import Dashboard from './pages/Dashboard'
 import DustScanner from './pages/DustScanner'
 import ClaimScreen from './pages/ClaimScreen'
-
+import GlobalStatsWidget from './components/GlobalStatsWidget'
 // Styles
 import './App.css'
 
