@@ -8,7 +8,7 @@ import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
 import './Dashboard.css'
-import GlobalStatsWidget from './components/GlobalStatsWidget'
+import GlobalStatsWidget from '../components/GlobalStatsWidget'
 
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
@@ -312,7 +312,8 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-
+                 
+                   <GlobalStatsWidget />
                   <div className="dust-indicator">
                     🧹 {action.count} tokens matching settings
                   </div>
