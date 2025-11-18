@@ -4,7 +4,7 @@ const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 // Simple label map so top chains look nice in the widget
 const CHAIN_LABELS = {
-  1: 'Ethereum',
+   1: 'Ethereum',
   10: 'Optimism',
   56: 'BNB Smart Chain',
   137: 'Polygon PoS',
@@ -47,3 +47,5 @@ export async function writeStats(stats) {
   const store = getStore(STORE_NAME);
   await store.set(KEY, stats);
 }
+
+export { CHAIN_LABELS };
