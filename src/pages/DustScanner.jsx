@@ -304,7 +304,7 @@ const DustScanner = () => {
     <div className="dust-scanner">
       <div className="scanner-header">
         <h1>Multi-Chain Dust Scanner</h1>
-        <p>Scan across 15+ blockchains for claimable tokens & dust</p>
+        <p>Scan across 20+ blockchains for claimable tokens & dust</p>
       </div>
 
       {/* Chain selection */}
