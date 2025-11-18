@@ -5,7 +5,7 @@ import { useWallet } from './contexts/WalletContext'
 // Components
 import Navbar from './components/Navbar'
 import DustClaimAddressPage from './components/DustClaimAddressPage'
-
+import GlobalStatsWidget from '../components/GlobalStatsWidget'
 // Pages
 import WalletScreen from './pages/WalletScreen'
 import Dashboard from './pages/Dashboard'
@@ -36,6 +36,7 @@ const App = () => {
       <Navbar />
 
       <main className="main-content">
+        <GlobalStatsWidget /> {/* <-- stats bar always visible */}
         <Routes>
           {/* Default route */}
           <Route

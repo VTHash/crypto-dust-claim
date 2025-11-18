@@ -9,6 +9,7 @@ import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
 import './Dashboard.css'
 
+
 const fmt = (n) => Number(n || 0).toFixed(6)
 const usd = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))

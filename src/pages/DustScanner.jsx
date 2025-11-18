@@ -1,4 +1,3 @@
-// src/pages/DustScanner.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
@@ -60,6 +59,30 @@ const DustScanner = () => {
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
       sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
+
+      // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
+      try {
+        const usedChainIdsArray = Array.from(
+          new Set(
+            (scan || [])
+              .map((c) => Number(c.chainId))
+              .filter((id) => !Number.isNaN(id))
+          )
+        )
+
+        if (usedChainIdsArray.length > 0) {
+          await fetch('/.netlify/functions/stats-scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chains: usedChainIdsArray,
+            }),
+          }).catch(() => {})
+        }
+      } catch {
+        // stats reporting should never break the scanner
+      }
+      // --- END NEW PART ---
     } finally {
       setScanning(false)
     }
