@@ -27,8 +27,8 @@
   gap: 20px;
   background: linear-gradient(
     135deg,
-    rgba(37, 99, 235, 0.04),
-    rgba(79, 70, 229, 0.06)
+    rgba(37, 99, 235, 0.08),
+    rgba(79, 70, 229, 0.16)
   );
 }
 
@@ -73,7 +73,8 @@
 .address-subtitle {
   margin: 0 0 10px;
   font-size: 0.9rem;
-  color: #64748b;
+  /* slightly stronger for contrast */
+  color: #1e293b;
 }
 
 /* Address row */
@@ -140,15 +141,17 @@
 /* Generic button styles reused */
 .btn {
   border-radius: 999px;
-  padding: 8px 16px;
-  font-size: 0.85rem;
+  padding: 10px 18px;           /* slightly taller for mobile */
+  font-size: 0.9rem;            /* slightly larger */
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  white-space: nowrap;
+  text-align: center;
+  white-space: normal;          /* allow wrapping if needed */
+  line-height: 1.25;
   transition:
     background 0.15s ease,
     border-color 0.15s ease,
@@ -156,11 +159,20 @@
     box-shadow 0.1s ease;
 }
 
+/* PRIMARY BUTTON – make text VERY visible */
 .btn-primary {
   background: #2563eb;
   border-color: #1d4ed8;
-  color: #f9fafb;
+  color: #ffffff;
   box-shadow: 0 10px 25px rgba(37, 99, 235, 0.45);
+}
+
+/* force children (icons, spans) to inherit white */
+.btn-primary *,
+.btn-primary span,
+.btn-primary svg {
+  color: #ffffff !important;
+  fill: #ffffff !important;
 }
 
 .btn-primary:hover {
@@ -299,159 +311,11 @@
   }
 
   .address-subtitle {
-    font-size: 0.82rem;
-  }
-
-  .btn {
-    font-size: 0.8rem;
-    padding: 7px 12px;
-  }
-}
-
-.eth-card {
-  background: linear-gradient(
-    135deg,
-    rgba(37, 99, 235, 0.10),
-    rgba(79, 70, 229, 0.16)
-  );
-  padding: 20px 22px;
-  border-radius: 18px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
-  margin: 20px 0;
-}
-
-/* Top layout: ETH logo + text stack */
-.eth-card-header {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-/* Circular ETH badge */
-.eth-badge {
-  width: 54px;
-  height: 54px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(
-    circle at 30% 0%,
-    rgba(59, 130, 246, 0.75),
-    rgba(15, 23, 42, 0.85)
-  );
-  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.4),
-    0 20px 45px rgba(15, 23, 42, 0.55);
-  flex-shrink: 0;
-}
-
-.eth-badge img {
-  width: 30px;
-  height: 30px;
-  object-fit: contain;
-}
-
-/* Title + Subtitle */
-.eth-title {
-  font-size: 1.35rem;
-  font-weight: 700;
-  margin: 0 0 4px;
-  color: #0f172a;
-}
-
-.eth-subtext {
-  font-size: 0.92rem;
-  color: #070f1b;
-  margin: 0 0 12px;
-  line-height: 1.35;
-}
-
-/* Address row */
-.eth-address-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.eth-label {
-  font-weight: 600;
-  color: #475569;
-}
-
-.eth-addr {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco;
-  background: rgba(148, 163, 184, 0.13);
-  padding: 3px 8px;
-  border-radius: 8px;
-  font-size: 0.88rem;
-  color: #0f172a;
-}
-
-/* Buttons inside card */
-.eth-btn-row {
-  display: flex;
-  gap: 10px;
-  margin: 10px 0 4px;
-}
-
-.eth-btn {
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  border: 1px solid rgba(148, 163, 184, 0.7);
-  background: white;
-  color: #0f172a;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-decoration: none;
-  transition: 0.15s ease;
-}
-
-.eth-btn:hover {
-  background: #eff6ff;
-  border-color: #2563eb;
-  color: #1d4ed8;
-}
-
-/* Stats row (views etc.) */
-.eth-meta {
-  margin-top: 2px;
-  font-size: 0.78rem;
-  color: #94a3b8;
-}
-
-/* ===== Mobile tweaks ===== */
-@media (max-width: 480px) {
-  .eth-card {
-    padding: 16px 14px;
-  }
-
-  .eth-title {
-    font-size: 1.18rem;
-  }
-
-  .eth-subtext {
     font-size: 0.85rem;
   }
 
-  .eth-btn {
-    padding: 6px 12px;
-    font-size: 0.82rem;
-  }
-
-  .eth-badge {
-    width: 50px;
-    height: 50px;
-  }
-
-  .eth-badge img {
-    width: 26px;
-    height: 26px;
+  .btn {
+    font-size: 0.9rem;
+    padding: 10px 14px;
   }
 }
