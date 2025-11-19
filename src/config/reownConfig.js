@@ -79,7 +79,7 @@ export const SUPPORTED_CHAINS = {
   250: {
     name: 'Fantom',
     symbol: 'FTM',
-    rpcUrl: 'https://fantom-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: 'https://1rpc.io/ftm',
     explorer: 'https://ftmscan.com',
     logo: '/logo/fantom.png'
   },
@@ -202,7 +202,7 @@ export const SUPPORTED_CHAINS = {
 40: {
   name: "Telos",
   symbol: "TLOS",
-  rpcUrl: "https://mainnet.telos.net/evm",
+  rpcUrl: "https://1rpc.io/telos/evm",
   explorer: "https://teloscan.io",
   logo: "/logo/telos.png"
 },
@@ -234,7 +234,7 @@ export const SUPPORTED_CHAINS = {
 57073: {
   name: "Inkonchain",
   symbol: "ETH",
-  rpcUrl: "https://rpc.inkonchain.com", // adjust if you use a different RPC endpoint
+  rpcUrl: "https://ink.drpc.org", // adjust if you use a different RPC endpoint
   explorer: "https://explorer.inkonchain.com", // or your preferred explorer URL
   logo: "/logo/ink.png" 
 },
@@ -258,7 +258,7 @@ export const SUPPORTED_CHAINS = {
 1868: {
   name: "Soneium",
   symbol: "ETH",
-  rpcUrl: "https://mainnet-rpc.soneium.org",
+  rpcUrl: "https://soneium.drpc.org",
   explorer: "https://mainnet-explorer.soneium.org",
   logo: "/logo/soneium.jpg"
 },
