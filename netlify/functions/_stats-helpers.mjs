@@ -3,20 +3,28 @@ import { getStore } from "@netlify/blobs";
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
-/**
- * Get a handle to the Blobs store.
- * Using the object form is what Netlify shows in their docs.
- */
 function getStatsStore() {
+  const siteID = process.env.NETLIFY_SITE_ID;
+  const token = process.env.NETLIFY_BLOBS_TOKEN;
+
+  // Helpful log if something is still wrong with env vars
+  if (!siteID || !token) {
+    console.error(
+      "Netlify Blobs missing env vars. NETLIFY_SITE_ID or NETLIFY_BLOBS_TOKEN is not set."
+    );
+  }
+
+  // Explicit config so it works even when Netlify doesn’t auto-inject blobs context
   return getStore({
     name: STORE_NAME,
-    consistency: "strong", // safer for counters
+    siteID,
+    token,
   });
 }
 
 /**
  * Read stats from Netlify Blobs.
- * If the blob is missing or corrupted, reset to a safe default.
+ * - If blob is missing or corrupted, reset to a safe default.
  */
 export async function readStats() {
   const store = getStatsStore();
@@ -35,7 +43,7 @@ export async function readStats() {
     console.error("readStats error, resetting stats blob:", err);
   }
 
-  // Fallback: fresh defaults
+  // Fallback: if anything went wrong, reset to fresh defaults
   const fresh = {
     totalViews: 0,
     totalScans: 0,
@@ -52,7 +60,7 @@ export async function readStats() {
 }
 
 /**
- * Write stats back to the blob, keeping a clean JSON shape.
+ * Write stats back to the blob, making sure the shape is always valid JSON.
  */
 export async function writeStats(stats) {
   const store = getStatsStore();
