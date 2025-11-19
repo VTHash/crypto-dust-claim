@@ -2,50 +2,55 @@ import { getStore } from "@netlify/blobs";
 
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
-// Simple label map so top chains look nice in the widget
-const CHAIN_LABELS = {
-   1: 'Ethereum',
-  10: 'Optimism',
-  56: 'BNB Smart Chain',
-  137: 'Polygon PoS',
-  42161: 'Arbitrum One',
-  8453: 'Base',
-  130: 'Unichain',
-  5000: 'Mantle',
-  9745: 'Plasma',
-  324: 'zkSync',
-  14: 'Flare',
-  40: 'Telos',
-  57: 'Syscoin',
-  50: 'XDC Network',
-  61: 'Ethereum Classic',
-  57073: 'Inkonchain',
-  122: 'Fuse',
-  60808: 'BOB',
-  81457: 'Blast',
-  1868: 'Soneium',
-  480: 'World Chain',
-  1135: 'Lisk',
-  1923: 'Swellchain',
-  2741: 'Abstract',
-  747474: 'Katana',
-  146: 'Sonic'
-}
+
+/**
+ * Read stats from Netlify Blobs.
+ * - If blob is missing or corrupted, reset to a safe default.
+ */
 export async function readStats() {
   const store = getStore(STORE_NAME);
-  const current = await store.get(KEY, { type: "json" });
-  return (
-    current || {
-      totalViews: 0,
-      totalScans: 0,
-      perChainScans: {},
+
+  try {
+    const current = await store.get(KEY, { type: "json" });
+
+    if (current && typeof current === "object") {
+      return {
+        totalViews: Number(current.totalViews || 0),
+        totalScans: Number(current.totalScans || 0),
+        perChainScans: current.perChainScans || {},
+      };
     }
-  );
+  } catch (err) {
+    console.error("readStats error, resetting stats blob:", err);
+  }
+
+  // Fallback: if anything went wrong, reset to fresh defaults
+  const fresh = {
+    totalViews: 0,
+    totalScans: 0,
+    perChainScans: {},
+  };
+
+  try {
+    await store.set(KEY, fresh);
+  } catch (err) {
+    console.error("Failed to write fresh stats blob:", err);
+  }
+
+  return fresh;
 }
 
+/**
+ * Write stats back to the blob, making sure the shape is always valid JSON.
+ */
 export async function writeStats(stats) {
   const store = getStore(STORE_NAME);
-  await store.set(KEY, stats);
-}
 
-export { CHAIN_LABELS }; 
+  const safe = {
+    totalViews: Number(stats.totalViews || 0),
+    totalScans: Number(stats.totalScans || 0),
+    perChainScans: stats.perChainScans || {},
+  };
+
+  await store.set(KEY, safe);
+}
