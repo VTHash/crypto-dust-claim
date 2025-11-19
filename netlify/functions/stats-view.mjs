@@ -14,12 +14,18 @@ export const handler = async () => {
       body: JSON.stringify({ ok: true, totalViews: stats.totalViews }),
     };
   } catch (err) {
+    // Log full error details to Netlify logs
     console.error("stats-view ERROR:", err);
 
+    // Return structured error to client (safe for debugging, remove stack in prod)
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "stats-view failed" }),
+      body: JSON.stringify({
+        error: true,
+        message: err.message || "Unknown error",
+        stack: err.stack, // helpful while debugging, strip out later
+      }),
     };
   }
 };
