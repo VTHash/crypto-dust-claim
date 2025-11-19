@@ -4,11 +4,22 @@ const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
 /**
+ * Get a handle to the Blobs store.
+ * Using the object form is what Netlify shows in their docs.
+ */
+function getStatsStore() {
+  return getStore({
+    name: STORE_NAME,
+    consistency: "strong", // safer for counters
+  });
+}
+
+/**
  * Read stats from Netlify Blobs.
- * - If blob is missing or corrupted, reset to a safe default.
+ * If the blob is missing or corrupted, reset to a safe default.
  */
 export async function readStats() {
-  const store = getStore(STORE_NAME);
+  const store = getStatsStore();
 
   try {
     const current = await store.get(KEY, { type: "json" });
@@ -24,7 +35,7 @@ export async function readStats() {
     console.error("readStats error, resetting stats blob:", err);
   }
 
-  // Fallback: if anything went wrong, reset to fresh defaults
+  // Fallback: fresh defaults
   const fresh = {
     totalViews: 0,
     totalScans: 0,
@@ -41,10 +52,10 @@ export async function readStats() {
 }
 
 /**
- * Write stats back to the blob, making sure the shape is always valid JSON.
+ * Write stats back to the blob, keeping a clean JSON shape.
  */
 export async function writeStats(stats) {
-  const store = getStore(STORE_NAME);
+  const store = getStatsStore();
 
   const safe = {
     totalViews: Number(stats.totalViews || 0),

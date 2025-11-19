@@ -1,14 +1,13 @@
-import { readStats } from './_stats-helpers.mjs';
+import { readStats } from "./_stats-helpers.mjs";
 
 export const handler = async () => {
   try {
     const stats = await readStats();
 
-    // Ensure ALWAYS valid JSON
     const safeStats = stats || {
       totalViews: 0,
       totalScans: 0,
-      perChainScans: {}
+      perChainScans: {},
     };
 
     return {

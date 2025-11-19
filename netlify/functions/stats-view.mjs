@@ -3,7 +3,8 @@ import { readStats, writeStats } from "./_stats-helpers.mjs";
 export const handler = async () => {
   try {
     const stats = await readStats();
-    stats.totalViews = Number(stats.totalViews || 0) + 1;
+
+    stats.totalViews = (Number(stats.totalViews) || 0) + 1;
 
     await writeStats(stats);
 
