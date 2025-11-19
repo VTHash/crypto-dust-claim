@@ -32,7 +32,8 @@ const CHAIN_LABELS = {
 };
 
 const GlobalStatsWidget = () => {
-  const [status, setStatus] = useState<'loading' | 'online' | 'offline'>('loading');
+  // ✅ plain JS state, no TypeScript type annotation
+  const [status, setStatus] = useState('loading'); // 'loading' | 'online' | 'offline'
   const [expanded, setExpanded] = useState(false);
   const [stats, setStats] = useState({
     totalViews: 0,
@@ -164,4 +165,4 @@ const GlobalStatsWidget = () => {
   );
 };
 
-export default GlobalStatsWidget
+export default GlobalStatsWidget;
