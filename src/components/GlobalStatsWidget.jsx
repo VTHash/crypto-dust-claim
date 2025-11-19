@@ -1,202 +1,167 @@
-// src/components/GlobalStatsWidget.jsx
-import React, { useEffect, useState } from 'react'
-import './GlobalStatsWidget.css'
-// Optional: basic labels for common chains (fallback to "Chain #id")
+import React, { useEffect, useMemo, useState } from 'react';
+import './GlobalStatsWidget.css';
+
+// Local copy of chain labels (client should not import server files)
 const CHAIN_LABELS = {
   1: 'Ethereum',
   10: 'Optimism',
   56: 'BNB Smart Chain',
-  137: 'Polygon',
+  137: 'Polygon PoS',
   42161: 'Arbitrum One',
   8453: 'Base',
   130: 'Unichain',
   5000: 'Mantle',
   9745: 'Plasma',
-  7777777: 'Zora',
-  100: 'Gnosis',
-  250:  'Fantom',
-  1329: 'Sei',
-  34443: 'Mode',
-  43114: 'Avalanche C Chain',
-  59144: 'Linea',
-  80094: 'Berachain',
-  42220: 'Celo',
-  1313161554: 'Aurora',
-  1284: 'Moonbeam',
-  1285: 'Moonriver',
+  324: 'zkSync',
   14: 'Flare',
   40: 'Telos',
   57: 'Syscoin',
-  61: 'ETC',
+  50: 'XDC Network',
+  61: 'Ethereum Classic',
   57073: 'Inkonchain',
-  122:  'Fuse',
-  60808:  'Bob',
-  81457:  'Blast',
- 1868:  'Soneium',
- 480:  'Worldcoin',
- 1135:  'Lisk',
- 1923: 'Swellchain',
- 2741: 'Abstract',
- 747474: 'Katana',
- 146: 'Sonic',
- 
-}
+  122: 'Fuse',
+  60808: 'BOB',
+  81457: 'Blast',
+  1868: 'Soneium',
+  480: 'World Chain',
+  1135: 'Lisk',
+  1923: 'Swellchain',
+  2741: 'Abstract',
+  747474: 'Katana',
+  146: 'Sonic',
+};
+
 const GlobalStatsWidget = () => {
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [stats, setStats] = useState(null)
+  const [status, setStatus] = useState<'loading' | 'online' | 'offline'>('loading');
+  const [expanded, setExpanded] = useState(false);
+  const [stats, setStats] = useState({
+    totalViews: 0,
+    totalScans: 0,
+    perChainScans: {},
+  });
 
-  // Helper: safe number -> short format
-  const fmt = (n) => {
-    const num = Number(n || 0)
-    if (!Number.isFinite(num)) return '0'
-    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M'
-    if (num >= 1_000) return (num / 1_000).toFixed(1) + 'k'
-    return num.toString()
-  }
-
+  // Fetch global stats from Netlify on mount
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
-    const fetchStats = async () => {
+    const loadStats = async () => {
       try {
-        setLoading(true)
-        const res = await fetch('/.netlify/functions/stats-view')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const json = await res.json()
-        if (!cancelled) {
-          setStats(json)
-          setError(null)
+        const res = await fetch('/.netlify/functions/stats-get');
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
         }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e.message || 'Unable to load stats')
+
+        const data = await res.json();
+
+        // We expect the Netlify function to return:
+        // { totalViews, totalScans, perChainScans }
+        if (
+          typeof data.totalViews === 'number' &&
+          typeof data.totalScans === 'number'
+        ) {
+          if (!cancelled) {
+            setStats({
+              totalViews: data.totalViews,
+              totalScans: data.totalScans,
+              perChainScans: data.perChainScans || {},
+            });
+            setStatus('online');
+          }
+        } else {
+          if (!cancelled) setStatus('offline');
         }
-      } finally {
-        if (!cancelled) setLoading(false)
+      } catch (err) {
+        if (!cancelled) setStatus('offline');
       }
-    }
+    };
 
-    fetchStats()
+    loadStats();
 
-    // Refresh every 60s so it feels “live”
-    const id = setInterval(fetchStats, 60_000)
     return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
-  // --- Normalise shapes from the Netlify function -------------------------
+  const topChains = useMemo(() => {
+    const entries = Object.entries(stats.perChainScans || {});
+    if (!entries.length) return [];
 
-  // totals might be at root or under .totals
-  const totals = stats?.totals || stats || {}
-  const totalScans = totals.totalScans ?? totals.scans ?? 0
-  const totalAddresses = totals.totalAddresses ?? totals.addresses ?? 0
-  const totalChains = totals.totalChains ?? totals.chains ?? 0
+    return entries
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 5)
+      .map(([id, count]) => ({
+        id,
+        count,
+        label: CHAIN_LABELS[id] || `Chain ${id}`,
+      }));
+  }, [stats.perChainScans]);
 
-  // chains may be: `chains`, `topChains`, or `chainBreakdown` object
-  let chains = []
-
-  if (Array.isArray(stats?.chains)) {
-    chains = stats.chains
-  } else if (Array.isArray(stats?.topChains)) {
-    chains = stats.topChains
-  } else if (
-    stats?.chainBreakdown &&
-    typeof stats.chainBreakdown === 'object'
-  ) {
-    chains = Object.entries(stats.chainBreakdown).map(([chainId, info]) => ({
-      chainId: Number(chainId),
-      ...(info || {})
-    }))
-  }
-
-  // Sort by scans desc and take top 3
-  chains.sort((a, b) => (b.scans || 0) - (a.scans || 0))
-  const topChains = chains.slice(0, 3)
-
-  const hasData =
-    (totalScans || totalAddresses || totalChains) && !loading && !error
+  const statusLabel =
+    status === 'online'
+      ? 'Stats online'
+      : status === 'loading'
+      ? 'Loading…'
+      : 'Stats offline';
 
   return (
-    <section className="global-stats-shell">
-      <button
-        type="button"
-        className={`global-stats-bar ${open ? 'open' : ''}`}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className="stats-label">📊 Network stats</span>
+    <div className="global-stats-widget">
+      <div className="gsw-header">
+        <div className="gsw-title">
+          <span className="gsw-icon">📊</span>
+          <span>NETWORK STATS</span>
+        </div>
 
-        <span className="stats-summary">
-          {loading && <span className="stats-pill">Loading…</span>}
-          {!loading && error && (
-            <span className="stats-pill stats-pill-error">Stats offline</span>
-          )}
-          {!loading && !error && (
-            <>
-              <span className="stats-pill">
-                {fmt(totalScans)} scans
-              </span>
-              <span className="stats-pill">
-                {fmt(totalAddresses)} addresses
-              </span>
-              {totalChains ? (
-                <span className="stats-pill">
-                  {fmt(totalChains)} chains
-                </span>
-              ) : null}
-            </>
-          )}
-        </span>
+        <button
+          className={`gsw-status-pill gsw-status-${status}`}
+          type="button"
+          onClick={() => setExpanded((x) => !x)}
+        >
+          {statusLabel}
+          <span className="gsw-chevron">{expanded ? '▴' : '▾'}</span>
+        </button>
+      </div>
 
-        <span className="stats-toggle">{open ? '▾' : '▸'}</span>
-      </button>
+      {/* Always show the big number so the bar doesn't look empty */}
+      <div className="gsw-main-metric">
+        <div className="gsw-metric-label">Total scans</div>
+        <div className="gsw-metric-value">{stats.totalScans}</div>
+      </div>
 
-      {open && hasData && (
-        <div className="global-stats-panel">
-          <div className="panel-header">
-            <span>Top chains by scans</span>
-            <span className="panel-note">Last 24h / rolling total</span>
+      {expanded && (
+        <div className="gsw-panel">
+          <div className="gsw-metrics-row">
+            <div className="gsw-metric">
+              <div className="gsw-metric-label">Total views</div>
+              <div className="gsw-metric-value-sm">{stats.totalViews}</div>
+            </div>
+            <div className="gsw-metric">
+              <div className="gsw-metric-label">Unique chains scanned</div>
+              <div className="gsw-metric-value-sm">
+                {Object.keys(stats.perChainScans || {}).length}
+              </div>
+            </div>
           </div>
 
-          {topChains.length === 0 && (
-            <div className="panel-empty">
-              Stats are still warming up. Run a scan to be the first one here.
-            </div>
-          )}
-
-          {topChains.length > 0 && (
-            <ul className="panel-list">
-              {topChains.map((c) => (
-                <li key={c.chainId || c.name} className="panel-row">
-                  <div className="panel-row-main">
-                    <span className="panel-chain-name">
-                      {c.name || `Chain ${c.chainId}`}
-                    </span>
-                    {c.symbol && (
-                      <span className="panel-chain-symbol">
-                        {c.symbol}
-                      </span>
-                    )}
-                  </div>
-                  <div className="panel-row-meta">
-                    <span>{fmt(c.scans || 0)} scans</span>
-                    {typeof c.share === 'number' && (
-                      <span className="panel-share">
-                        {(c.share * 100).toFixed(1)}%
-                      </span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="gsw-top-chains">
+            <div className="gsw-top-title">Top chains this week</div>
+            {topChains.length === 0 ? (
+              <div className="gsw-empty">No scans logged yet.</div>
+            ) : (
+              <ul className="gsw-chain-list">
+                {topChains.map((c) => (
+                  <li key={c.id} className="gsw-chain-item">
+                    <span className="gsw-chain-name">{c.label}</span>
+                    <span className="gsw-chain-count">{c.count} scans</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
-    </section>
-  )
-}
+    </div>
+  );
+};
 
 export default GlobalStatsWidget
