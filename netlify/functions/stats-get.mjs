@@ -1,10 +1,28 @@
-import { readStats } from "./_stats-helpers.mjs";
+import { readStats } from './_stats-helpers.mjs';
 
-export default async () => {
-  const stats = await readStats();
+export const handler = async () => {
+  try {
+    const stats = await readStats();
 
-  return new Response(JSON.stringify(stats), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+    // Ensure ALWAYS valid JSON
+    const safeStats = stats || {
+      totalViews: 0,
+      totalScans: 0,
+      perChainScans: {}
+    };
+
+    return {
+      statusCode: 200,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(safeStats),
+    };
+  } catch (err) {
+    console.error("stats-get ERROR:", err);
+
+    return {
+      statusCode: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "stats-get failed" }),
+    };
+  }
 };
