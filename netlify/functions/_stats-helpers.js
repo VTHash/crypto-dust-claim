@@ -98,8 +98,10 @@ export async function writeStats(stats) {
   }
 
   try {
-    await store.set(KEY, safe);
-  } catch (err) {
+    await store.set(KEY, JSON.stringify(safe), {
+      contentType: "application/json",
+  });
+ } catch (err) {
     console.error("writeStats error:", err);
   }
 }
