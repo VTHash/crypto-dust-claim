@@ -2,21 +2,32 @@ import { readStats, writeStats } from "./_stats-helpers.js";
 
 export const handler = async (event) => {
   try {
-    let body = {};
-    try {
-      body = JSON.parse(event.body || "{}");
-    } catch {
-      body = {};
+    let chains = [];
+
+    // We expect a POST with JSON: { chains: [1, 10, 137, ...] }
+    if (event.httpMethod === "POST" && event.body) {
+      try {
+        const parsed = JSON.parse(event.body);
+        if (Array.isArray(parsed.chains)) {
+          chains = parsed.chains;
+        }
+      } catch (err) {
+        console.error("stats-scan JSON parse error:", err);
+      }
     }
 
-    const chains = Array.isArray(body.chains) ? body.chains : [];
-
     const stats = await readStats();
-    stats.totalScans += 1;
 
+    // Always increment totalScans, even if chains[] is empty
+    stats.totalScans = (Number(stats.totalScans) || 0) + 1;
+
+    // Increment per-chain counters
     for (const id of chains) {
       const key = String(id);
-      stats.perChainScans[key] = (stats.perChainScans[key] || 0) + 1;
+      if (!stats.perChainScans[key]) {
+        stats.perChainScans[key] = 0;
+      }
+      stats.perChainScans[key] += 1;
     }
 
     await writeStats(stats);
