@@ -3,18 +3,13 @@ import { readStats, writeStats } from "./_stats-helpers.mjs";
 export const handler = async () => {
   try {
     const stats = await readStats();
-
-    const updated = {
-      ...stats,
-      totalViews: Number(stats.totalViews || 0) + 1,
-    };
-
-    await writeStats(updated);
+    stats.totalViews += 1;
+    await writeStats(stats);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ok: true, totalViews: updated.totalViews }),
+      body: JSON.stringify({ ok: true, totalViews: stats.totalViews }),
     };
   } catch (err) {
     console.error("stats-view ERROR:", err);

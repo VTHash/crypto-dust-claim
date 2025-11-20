@@ -3,13 +3,23 @@ import { getStore } from "@netlify/blobs";
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
+// Always create the store with explicit siteID + token
 function getStatsStore() {
-  return getStore(STORE_NAME);
+  const siteID = process.env.NETLIFY_SITE_ID;
+  const token = process.env.NETLIFY_BLOBS_TOKEN;
+
+  if (!siteID || !token) {
+    console.warn(
+      "Netlify Blobs: NETLIFY_SITE_ID or NETLIFY_BLOBS_TOKEN is missing."
+    );
+  }
+
+  return getStore(STORE_NAME, { siteID, token });
 }
 
 /**
  * Read stats from Netlify Blobs.
- * If missing or corrupted, reset to a safe default.
+ * If blob is missing or corrupted, reset to safe defaults.
  */
 export async function readStats() {
   const store = getStatsStore();
@@ -28,7 +38,7 @@ export async function readStats() {
     console.error("readStats error, resetting stats blob:", err);
   }
 
-  // Fallback: if anything went wrong, reset to defaults
+  // Fallback if anything went wrong
   const fresh = {
     totalViews: 0,
     totalScans: 0,
@@ -45,7 +55,7 @@ export async function readStats() {
 }
 
 /**
- * Write stats back to the blob, making sure it’s valid JSON.
+ * Write stats back to the blob, always valid JSON.
  */
 export async function writeStats(stats) {
   const store = getStatsStore();
@@ -57,5 +67,4 @@ export async function writeStats(stats) {
   };
 
   await store.set(KEY, safe);
-  return safe;
 }
