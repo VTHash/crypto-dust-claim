@@ -1,4 +1,4 @@
-import { readStats, writeStats } from "./_stats-helpers.mjs";
+import { readStats, writeStats } from "./_stats-helpers.js";
 
 export const handler = async () => {
   try {
