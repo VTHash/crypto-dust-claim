@@ -10,7 +10,7 @@ export const handler = async () => {
       perChainScans: {},
     };
 
-    return {
+   return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(safeStats),
