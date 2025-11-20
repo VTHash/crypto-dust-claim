@@ -3,10 +3,17 @@ import { getStore } from "@netlify/blobs";
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
-// One store instance reused by all calls
-const store = getStore(STORE_NAME);
+function getStatsStore() {
+  return getStore(STORE_NAME);
+}
 
+/**
+ * Read stats from Netlify Blobs.
+ * If missing or corrupted, reset to a safe default.
+ */
 export async function readStats() {
+  const store = getStatsStore();
+
   try {
     const current = await store.get(KEY, { type: "json" });
 
@@ -18,27 +25,37 @@ export async function readStats() {
       };
     }
   } catch (err) {
-    console.error("readStats error:", err);
+    console.error("readStats error, resetting stats blob:", err);
   }
 
-  // Fallback if blob is missing or corrupted
-  return {
+  // Fallback: if anything went wrong, reset to defaults
+  const fresh = {
     totalViews: 0,
     totalScans: 0,
     perChainScans: {},
   };
+
+  try {
+    await store.set(KEY, fresh);
+  } catch (err) {
+    console.error("Failed to write fresh stats blob:", err);
+  }
+
+  return fresh;
 }
 
+/**
+ * Write stats back to the blob, making sure it’s valid JSON.
+ */
 export async function writeStats(stats) {
+  const store = getStatsStore();
+
   const safe = {
     totalViews: Number(stats.totalViews || 0),
     totalScans: Number(stats.totalScans || 0),
-    perChainScans:
-      stats.perChainScans && typeof stats.perChainScans === "object"
-        ? stats.perChainScans
-        : {},
+    perChainScans: stats.perChainScans || {},
   };
 
-  // IMPORTANT: let Netlify handle JSON encoding
-  await store.set(KEY, safe, { type: "json" });
+  await store.set(KEY, safe);
+  return safe;
 }

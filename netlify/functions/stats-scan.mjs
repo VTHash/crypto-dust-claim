@@ -2,42 +2,39 @@ import { readStats, writeStats } from "./_stats-helpers.mjs";
 
 export const handler = async (event) => {
   try {
-    let chains = [];
-
-    // Parse JSON body safely
+    let body = {};
     if (event.body) {
       try {
-        const parsed = JSON.parse(event.body);
-        if (Array.isArray(parsed.chains)) {
-          chains = parsed.chains;
-        }
-      } catch (e) {
-        console.error("stats-scan body parse error:", e);
+        body = JSON.parse(event.body);
+      } catch {
+        body = {};
       }
     }
 
+    const chains = Array.isArray(body.chains) ? body.chains : [];
+
     const stats = await readStats();
 
-    stats.totalScans = Number(stats.totalScans || 0) + 1;
-
-    if (!stats.perChainScans || typeof stats.perChainScans !== "object") {
-      stats.perChainScans = {};
-    }
+    const updated = {
+      ...stats,
+      totalScans: Number(stats.totalScans || 0) + 1,
+      perChainScans: { ...(stats.perChainScans || {}) },
+    };
 
     for (const id of chains) {
       const key = String(id);
-      stats.perChainScans[key] = (stats.perChainScans[key] || 0) + 1;
+      updated.perChainScans[key] = (updated.perChainScans[key] || 0) + 1;
     }
 
-    await writeStats(stats);
+    await writeStats(updated);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ok: true,
-        totalScans: stats.totalScans,
-        perChainScans: stats.perChainScans,
+        totalScans: updated.totalScans,
+        perChainScans: updated.perChainScans,
       }),
     };
   } catch (err) {

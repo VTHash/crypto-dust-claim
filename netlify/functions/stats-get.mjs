@@ -4,10 +4,16 @@ export const handler = async () => {
   try {
     const stats = await readStats();
 
+    const safeStats = stats || {
+      totalViews: 0,
+      totalScans: 0,
+      perChainScans: {},
+    };
+
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(stats),
+      body: JSON.stringify(safeStats),
     };
   } catch (err) {
     console.error("stats-get ERROR:", err);
