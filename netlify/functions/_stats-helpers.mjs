@@ -3,68 +3,88 @@ import { getStore } from "@netlify/blobs";
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
-// Always create the store with explicit siteID + token
-function getStatsStore() {
-  const siteID = process.env.NETLIFY_SITE_ID;
-  const token = process.env.NETLIFY_BLOBS_TOKEN;
+// Read credentials from environment (Netlify UI → Environment variables)
+const siteID = process.env.NETLIFY_SITE_ID;
 
-  if (!siteID || !token) {
-    console.warn(
-      "Netlify Blobs: NETLIFY_SITE_ID or NETLIFY_BLOBS_TOKEN is missing."
-    );
-  }
+// Try several common names for the token so you’re covered:
+const token =
+  process.env.NETLIFY_BLOBS_TOKEN ||
+  process.env.NETLIFY_API_TOKEN ||
+  process.env.NETLIFY_AUTH_TOKEN;
 
-  return getStore(STORE_NAME, { siteID, token });
+if (!siteID || !token) {
+  console.warn(
+    "Netlify Blobs: NETLIFY_SITE_ID or token (NETLIFY_BLOBS_TOKEN / NETLIFY_API_TOKEN / NETLIFY_AUTH_TOKEN) is missing."
+  );
 }
 
+// ✅ This is the **correct** signature per Netlify examples:
+// getStore(storeName, { siteID, token })
+const store = getStore(STORE_NAME, { siteID, token });
+
 /**
- * Read stats from Netlify Blobs.
- * If blob is missing or corrupted, reset to safe defaults.
+ * Safely read stats from Blobs.
+ * We store JSON as a plain string and parse it ourselves to avoid any magic.
  */
 export async function readStats() {
-  const store = getStatsStore();
-
   try {
-    const current = await store.get(KEY, { type: "json" });
+    const raw = await store.get(KEY); // no "type: 'json'" – we parse manually
 
-    if (current && typeof current === "object") {
+    if (!raw) {
+      // First-time use, nothing stored yet
       return {
-        totalViews: Number(current.totalViews || 0),
-        totalScans: Number(current.totalScans || 0),
-        perChainScans: current.perChainScans || {},
+        totalViews: 0,
+        totalScans: 0,
+        perChainScans: {},
       };
     }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      console.error("readStats: blob is not valid JSON, resetting.", err);
+      return {
+        totalViews: 0,
+        totalScans: 0,
+        perChainScans: {},
+      };
+    }
+
+    return {
+      totalViews: Number(parsed.totalViews || 0),
+      totalScans: Number(parsed.totalScans || 0),
+      perChainScans:
+        parsed.perChainScans && typeof parsed.perChainScans === "object"
+          ? parsed.perChainScans
+          : {},
+    };
   } catch (err) {
-    console.error("readStats error, resetting stats blob:", err);
+    console.error("readStats error:", err);
+    return {
+      totalViews: 0,
+      totalScans: 0,
+      perChainScans: {},
+    };
   }
-
-  // Fallback if anything went wrong
-  const fresh = {
-    totalViews: 0,
-    totalScans: 0,
-    perChainScans: {},
-  };
-
-  try {
-    await store.set(KEY, fresh);
-  } catch (err) {
-    console.error("Failed to write fresh stats blob:", err);
-  }
-
-  return fresh;
 }
 
 /**
- * Write stats back to the blob, always valid JSON.
+ * Safely write stats back to Blobs as a JSON string.
  */
 export async function writeStats(stats) {
-  const store = getStatsStore();
-
   const safe = {
     totalViews: Number(stats.totalViews || 0),
     totalScans: Number(stats.totalScans || 0),
-    perChainScans: stats.perChainScans || {},
+    perChainScans:
+      stats.perChainScans && typeof stats.perChainScans === "object"
+        ? stats.perChainScans
+        : {},
   };
 
-  await store.set(KEY, safe);
+  try {
+    await store.set(KEY, JSON.stringify(safe));
+  } catch (err) {
+    console.error("writeStats error:", err);
+  }
 }
