@@ -62,14 +62,10 @@ const DustScanner = () => {
 
       // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
       try {
-        const usedChainIdsArray = Array.from(
-        new Set(
-          (selectedIds || [])
-            .map((id) => Number(id))
+        const usedChainIdsArray = selectedIds
+            .map((c) => Number(c.chainId))
             .filter((id) => Number.isFinite(id) && id > 0)
-        )
-      )
-
+      
         if (usedChainIdsArray.length > 0) {
           await fetch('/.netlify/functions/stats-scan', {
             method: 'POST',
