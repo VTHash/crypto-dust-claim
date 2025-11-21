@@ -62,23 +62,29 @@ const DustScanner = () => {
 
       // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
       try {
-        const usedChainIdsArray = selectedIds
-            .map((id) => Number(id))
-            .filter((id) => Number.isFinite(id) && id > 0)
-      // Debugg"
-      console.log('usedChainIdsArray before stats-scan:',usedChainIdsArray)
-        if (usedChainIdsArray.length > 0) {
-          await fetch('/.netlify/functions/stats-scan', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chains: usedChainIdsArray,
-            }),
-          }).catch(() => {})
-        }
-      } catch {
-        // stats reporting should never break the scanner
-      }
+  // Extract actual scanned chain IDs from the real scan results
+  const usedChainIdsArray = Array.from(
+    new Set(
+      (scan || [])
+        .map((chain) => Number(chain.chainId))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )
+  )
+
+  console.log('stats-scan chains payload:', usedChainIdsArray)
+
+  if (usedChainIdsArray.length > 0) {
+    await fetch('/.netlify/functions/stats-scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chains: usedChainIdsArray,
+      }),
+    })
+  }
+} catch (err) {
+  console.error('stats-scan client error:', err)
+}
       // --- END NEW PART ---
     } finally {
       setScanning(false)
