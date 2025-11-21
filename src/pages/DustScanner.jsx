@@ -65,7 +65,8 @@ const DustScanner = () => {
         const usedChainIdsArray = selectedIds
             .map((c) => Number(c.chainId))
             .filter((id) => Number.isFinite(id) && id > 0)
-      
+      // Debugg"
+      console.log('usedChainIdsArray before stats-scan:',usedChainIdsArray)
         if (usedChainIdsArray.length > 0) {
           await fetch('/.netlify/functions/stats-scan', {
             method: 'POST',
