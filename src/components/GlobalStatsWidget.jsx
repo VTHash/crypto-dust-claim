@@ -154,6 +154,12 @@ const GlobalStatsWidget = () => {
         </button>
       </div>
 
+{paused && (
+  <div className="gsw-paused-badge">
+    ⏸ Stats Paused — Showing saved data (updates monthly)
+  </div>
+)}
+
       {/* Always show the big number so the bar doesn't look empty */}
       <div className="gsw-main-metric">
         <div className="gsw-metric-label">Total scans</div>

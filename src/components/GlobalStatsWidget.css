@@ -222,3 +222,18 @@
     padding-inline: 0.6rem;
   }
 }
+
+.gsw-paused-badge {
+  font-size: 10px;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.08); /* faint neon glow */
+  border: 1px solid rgba(0, 255, 136, 0.35);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 4px;
+  margin-left: 4px;
+  display: inline-block;
+  text-shadow: 0 0 4px #00ff88;
+  box-shadow: 0 0 6px rgba(0, 255, 136, 0.35);
+  user-select: none;
+}
