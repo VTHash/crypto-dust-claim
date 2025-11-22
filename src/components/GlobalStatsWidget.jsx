@@ -180,19 +180,23 @@ const GlobalStatsWidget = () => {
               <div className="gsw-empty">No scans logged yet.</div>
             ) : (
               <ul className="gsw-chain-list">
-                {topChains.map((c) => (
-           <li key={c.id} className="gsw-chain-item">
-  {SUPPORTED_CHAINS[c.id]?.logo && (
-    <img
-      src={SUPPORTED_CHAINS[c.id].logo}
-      alt={c.label}
-      className="gsw-chain-icon"
-    />
-  )}
-  <span className="gsw-chain-name">{c.label}</span>
-  <span className="gsw-chain-count">{c.count} scans</span>
-</li>
-                ))}
+                {topChains.map((c) => {
+                  const logoSrc = CHAIN_LOGOS[c.id];
+                  return (
+                    <li key={c.id} className="gsw-chain-item">
+                      {logoSrc && (
+                        <img
+                          src={logoSrc}
+                          alt={c.label}
+                          className="gsw-chain-icon"
+                        />
+                      )}
+                      <span className="gsw-chain-name">{c.label}</span>
+                      <span className="gsw-chain-count">{c.count} scans</span>
+                    </li>
+                );
+})
+              }
               </ul>
             )}
           </div>
