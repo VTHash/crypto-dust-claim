@@ -56,7 +56,11 @@ export default function Dashboard() {
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
+      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total },
+        { dustResults: scan, total },
+      (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
+    )
+  )
     } catch (e) {
       console.error('Dashboard scan error:', e)
       setResults([])
