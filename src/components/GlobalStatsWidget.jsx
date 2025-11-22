@@ -32,7 +32,7 @@ const CHAIN_LABELS = {
 };
 
 const CHAIN_LOGOS = {
-  1: '/logo/eth.png',
+  1: '/logo/ethereum.png',
   10: '/logo/optimism.png',
   56: '/logo/bnb.png',
   137: '/logo/polygon.png',
