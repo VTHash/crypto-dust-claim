@@ -1,15 +1,16 @@
+/* === Global Stats Widget – Desktop default === */
+
 .global-stats-widget {
-  position: relative;
-  max-width: 520px;
-  margin: 0 auto 1rem auto;
-  padding: 0.75rem 1rem;
-  border-radius: 999px;
-  background: radial-gradient(circle at top, #101727, #050812);
-  box-shadow: 0 0 12px rgba(0, 255, 120, 0.2);
-  border: 1px solid rgba(0, 255, 120, 0.25);
-  color: #f7f7ff;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-  overflow: hidden;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: radial-gradient(circle at top left,
+      rgba(59, 130, 246, 0.18),
+      rgba(15, 23, 42, 0.96));
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.7);
+  color: #e5e7eb;
+  font-size: 12px;
 }
 
 /* Header row */
@@ -17,118 +18,133 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 
 .gsw-title {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  gap: 6px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  opacity: 0.9;
+  font-size: 11px;
+  color: #cbd5f5;
 }
 
 .gsw-icon {
-  font-size: 0.9rem;
+  font-size: 13px;
 }
 
 /* Status pill */
 .gsw-status-pill {
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: rgba(15, 23, 42, 0.8);
+  color: #e5e7eb;
+  padding: 3px 10px;
+  font-size: 11px;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(0, 255, 120, 0.35);
-  background: rgba(0, 0, 0, 0.4);
-  color: #e7ffe7;
-  font-size: 0.7rem;
+  gap: 4px;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.gsw-status-pill:focus-visible {
-  outline: 2px solid rgba(0, 255, 120, 0.7);
-  outline-offset: 2px;
-}
-
 .gsw-status-online {
-  box-shadow: 0 0 8px rgba(0, 255, 120, 0.6);
+  border-color: rgba(34, 197, 94, 0.85);
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4);
 }
 
 .gsw-status-offline {
-  border-color: rgba(255, 80, 80, 0.6);
-  box-shadow: 0 0 8px rgba(255, 80, 80, 0.3);
+  border-color: rgba(239, 68, 68, 0.8);
 }
 
 .gsw-status-loading {
-  border-style: dashed;
+  border-color: rgba(59, 130, 246, 0.75);
 }
 
 .gsw-chevron {
-  font-size: 0.65rem;
+  font-size: 10px;
 }
 
-/* Big main metric */
+/* Paused badge (tiny, under header) */
+.gsw-paused-badge {
+  margin-top: 2px;
+  margin-bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(251, 191, 36, 0.85);
+  color: #fbbf24;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.35);
+}
+
+/* Main metric row */
 .gsw-main-metric {
-  margin-top: 0.4rem;
   display: flex;
   align-items: baseline;
-  justify-content: flex-start;
-  gap: 0.4rem;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 .gsw-metric-label {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.8;
+  font-size: 11px;
+  color: #cbd5e1;
 }
 
 .gsw-metric-value {
-  font-size: 1rem;
+  font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
-/* Panel (expanded details) */
+/* Expanded panel */
 .gsw-panel {
-  margin-top: 0.45rem;
-  padding-top: 0.45rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.5);
 }
 
-/* Small metrics row */
+/* Secondary metrics row */
 .gsw-metrics-row {
   display: flex;
-  gap: 0.75rem;
-  font-size: 0.7rem;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gsw-metric {
+  flex: 1;
 }
 
 .gsw-metric-value-sm {
-  font-size: 0.9rem;
+  font-size: 13px;
   font-weight: 600;
 }
 
 /* Top chains list */
 .gsw-top-chains {
-  margin-top: 0.4rem;
+  margin-top: 4px;
 }
 
 .gsw-top-title {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.8;
-  margin-bottom: 0.25rem;
+  font-size: 11px;
+  margin-bottom: 3px;
+  color: #cbd5e1;
 }
 
 .gsw-empty {
-  font-size: 0.68rem;
-  opacity: 0.7;
+  font-size: 11px;
+  color: #94a3b8;
 }
 
+/* Chains list */
 .gsw-chain-list {
   list-style: none;
   margin: 0;
@@ -139,110 +155,99 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.4rem;
-  font-size: 0.68rem;
-  padding: 0.1rem 0;
-}
-
-.gsw-chain-left {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
 }
 
 .gsw-chain-icon {
   width: 14px;
   height: 14px;
-  border-radius: 50%;
-  object-fit: cover;
+  border-radius: 999px;
+  margin-right: 4px;
+  flex-shrink: 0;
 }
 
 .gsw-chain-name {
-  white-space: nowrap;
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .gsw-chain-count {
-  opacity: 0.85;
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
 }
 
-/* 📱 Mobile optimisation */
-@media (max-width: 768px) {
+/* === Lite Mode: mobile-first tuning === */
+
+@media (max-width: 640px) {
   .global-stats-widget {
-    margin: 0 0.5rem 0.75rem 0.5rem;
-    padding: 0.55rem 0.75rem;
-    border-radius: 18px;
+    margin: 4px 0 10px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    font-size: 11px;
   }
 
   .gsw-header {
-    gap: 0.35rem;
+    margin-bottom: 4px;
   }
 
   .gsw-title {
-    font-size: 0.7rem;
+    font-size: 10px;
   }
 
   .gsw-status-pill {
-    padding: 0.2rem 0.5rem;
-    font-size: 0.65rem;
+    padding: 2px 8px;
+    font-size: 10px;
+  }
+
+  .gsw-paused-badge {
+    font-size: 9px;
+    padding: 2px 7px;
+    margin-bottom: 2px;
   }
 
   .gsw-main-metric {
-    margin-top: 0.25rem;
+    margin: 2px 0 4px;
+  }
+
+  .gsw-metric-label {
+    font-size: 10px;
   }
 
   .gsw-metric-value {
-    font-size: 0.9rem;
+    font-size: 17px;
   }
 
   .gsw-panel {
-    margin-top: 0.3rem;
-    padding-top: 0.3rem;
+    padding-top: 4px;
+    margin-top: 4px;
   }
 
   .gsw-metrics-row {
     flex-direction: row;
-    justify-content: space-between;
-    gap: 0.5rem;
+    gap: 6px;
   }
 
+  .gsw-metric-value-sm {
+    font-size: 11px;
+  }
+
+  /* 🔒 LITE MODE: hide top chains list on small screens
+     keeps stats compact while still useful */
   .gsw-top-chains {
-    margin-top: 0.3rem;
-  }
-
-  .gsw-chain-item {
-    padding: 0.05rem 0;
+    display: none;
   }
 }
 
-/* Extra small screens: collapse by default if you ever want that
-   (right now we leave behaviour in JS, but styling stays safe) */
 @media (max-width: 420px) {
   .global-stats-widget {
-    margin-inline: 0.4rem;
-    padding-inline: 0.6rem;
+    padding: 6px 8px;
   }
-}
 
-/* === Paused Badge (small darker neon chip) === */
-
-.gsw-paused-badge {
-  margin-top: 6px;
-  display: inline-block;
-
-  font-size: 10px;
-  font-weight: 500;
-  padding: 3px 8px;
-
-  border-radius: 999px;
-  background: rgba(11, 146, 170, 0.75);
-  color: #ffb86c;
-
-  border: 1px solid rgba(255, 184, 108, 0.5);
-  box-shadow:
-    0 0 6px rgba(255, 184, 108, 0.5),
-    0 0 12px rgba(255, 184, 108, 0.25);
-
-  /* Ensure it is visible */
-  position: relative;
-  z-index: 50;
+  .gsw-metric-value {
+    font-size: 16px;
+  }
 }
