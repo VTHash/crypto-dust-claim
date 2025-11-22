@@ -98,6 +98,7 @@ const GlobalStatsWidget = () => {
               totalViews: data.totalViews,
               totalScans: data.totalScans,
               perChainScans: data.perChainScans || {},
+              paused: !!data.paused,
             });
             setStatus('online');
           }
