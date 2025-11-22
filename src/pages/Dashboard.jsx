@@ -327,7 +327,7 @@ sessionStorage.setItem(
                     )}
                   </div>
                  
-                   <GlobalStatsWidget />
+                   
                   <div className="dust-indicator">
                     🧹 {action.count} tokens matching settings
                   </div>

@@ -59,6 +59,7 @@ const CHAIN_LOGOS = {
   747474: '/logo/katana.png',
   146: '/logo/sonic.png',
   7777777: '/logo/zora.png',
+  100: '/logo/gnosis.png',
 };
 
 const GlobalStatsWidget = () => {
