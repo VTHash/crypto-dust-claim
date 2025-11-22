@@ -1,27 +1,19 @@
 import { readStats, writeStats } from "./_stats-helpers.js";
 
-// Pause mode flag
 const PAUSED = process.env.STATS_PAUSED === "true";
 
 export const handler = async (event) => {
   try {
     let chains = [];
 
-    // Expect POST: { chains: [1, 10, 137...] }
     if (event.httpMethod === "POST" && event.body) {
-      try {
-        const parsed = JSON.parse(event.body);
-        if (Array.isArray(parsed.chains)) {
-          chains = parsed.chains;
-        }
-      } catch (err) {
-        console.error("stats-scan JSON parse error:", err);
-      }
+      const body = JSON.parse(event.body);
+      if (Array.isArray(body.chains)) chains = body.chains;
     }
 
     const stats = await readStats();
 
-    // 🔥 If PAUSED → RETURN EXISTING DATA WITHOUT INCREMENTING
+    // PAUSED → DO NOT increment anything
     if (PAUSED) {
       return {
         statusCode: 200,
@@ -29,13 +21,14 @@ export const handler = async (event) => {
         body: JSON.stringify({
           ok: true,
           paused: true,
+          totalViews: stats.totalViews,
           totalScans: stats.totalScans,
           perChainScans: stats.perChainScans,
         }),
       };
     }
 
-    // 🔥 Normal mode → increment counters
+    // LIVE mode → increment scans
     stats.totalScans = (Number(stats.totalScans) || 0) + 1;
 
     for (const id of chains) {
@@ -51,18 +44,13 @@ export const handler = async (event) => {
       body: JSON.stringify({
         ok: true,
         paused: false,
+        totalViews: stats.totalViews, // just echo
         totalScans: stats.totalScans,
         perChainScans: stats.perChainScans,
       }),
     };
-
   } catch (err) {
     console.error("stats-scan ERROR:", err);
-
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "stats-scan failed" }),
-    };
+    return { statusCode: 500, body: "stats-scan failed" };
   }
 };

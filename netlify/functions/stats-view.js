@@ -1,13 +1,12 @@
 import { readStats, writeStats } from "./_stats-helpers.js";
 
-// Read pause flag from environment
 const PAUSED = process.env.STATS_PAUSED === "true";
 
 export const handler = async () => {
   try {
     const stats = await readStats();
 
-    // 🔥 If paused → return stats WITHOUT updating
+    // PAUSED → do NOT increment views
     if (PAUSED) {
       return {
         statusCode: 200,
@@ -15,13 +14,13 @@ export const handler = async () => {
         body: JSON.stringify({
           ok: true,
           paused: true,
-          totalViews: stats.totalViews
+          totalViews: stats.totalViews,
         }),
       };
     }
 
-    // 🔥 Normal mode → increment views
-    stats.totalViews += 1;
+    // LIVE → increment view counter
+    stats.totalViews = (Number(stats.totalViews) || 0) + 1;
     await writeStats(stats);
 
     return {
@@ -30,17 +29,11 @@ export const handler = async () => {
       body: JSON.stringify({
         ok: true,
         paused: false,
-        totalViews: stats.totalViews
+        totalViews: stats.totalViews,
       }),
     };
-
   } catch (err) {
     console.error("stats-view ERROR:", err);
-
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "stats-view failed" }),
-    };
+    return { statusCode: 500, body: "stats-view failed" };
   }
 };
