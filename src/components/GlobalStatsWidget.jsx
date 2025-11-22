@@ -29,6 +29,8 @@ const CHAIN_LABELS = {
   2741: 'Abstract',
   747474: 'Katana',
   146: 'Sonic',
+  7777777: 'Zora',
+  100: 'Gnosis',
 };
 
 const CHAIN_LOGOS = {
@@ -63,7 +65,6 @@ const CHAIN_LOGOS = {
 };
 
 const GlobalStatsWidget = () => {
-  // ✅ plain JS state, no TypeScript type annotation
   const [status, setStatus] = useState('loading'); // 'loading' | 'online' | 'offline'
   const [expanded, setExpanded] = useState(false);
   const [stats, setStats] = useState({
@@ -80,33 +81,25 @@ const GlobalStatsWidget = () => {
     const loadStats = async () => {
       try {
         const res = await fetch('/.netlify/functions/stats-get');
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const data = await res.json();
+        if (cancelled) return;
 
-        // We expect the Netlify function to return:
-        // { totalViews, totalScans, perChainScans }
-        if (
-          typeof data.totalViews === 'number' &&
-          typeof data.totalScans === 'number'
-        ) {
-          if (!cancelled) {
-            setStats({
-              totalViews: data.totalViews,
-              totalScans: data.totalScans,
-              perChainScans: data.perChainScans || {},
-              paused: !!data.paused,
-            });
-            setStatus('online');
-          }
-        } else {
-          if (!cancelled) setStatus('offline');
-        }
+        setStats({
+          totalViews: Number(data.totalViews || 0),
+          totalScans: Number(data.totalScans || 0),
+          perChainScans: data.perChainScans || {},
+          paused: !!data.paused,
+        });
+
+        setStatus('online');
+        console.log('GlobalStatsWidget stats:', data); // debug
       } catch (err) {
-        if (!cancelled) setStatus('offline');
+        if (!cancelled) {
+          console.error('GlobalStatsWidget error:', err);
+          setStatus('offline');
+        }
       }
     };
 
@@ -144,6 +137,13 @@ const GlobalStatsWidget = () => {
         <div className="gsw-title">
           <span className="gsw-icon">📊</span>
           <span>NETWORK STATS</span>
+
+          {/* 🔹 tiny paused chip right in the header */}
+          {stats.paused && (
+            <span className="gsw-paused-chip">
+              ⏸ Paused
+            </span>
+          )}
         </div>
 
         <button
@@ -155,13 +155,6 @@ const GlobalStatsWidget = () => {
           <span className="gsw-chevron">{expanded ? '▴' : '▾'}</span>
         </button>
       </div>
-
-{stats.paused && (
-  <div className="gsw-paused-badge">
-    ⏸ Stats Paused — Showing saved data (updates monthly)
-  </div>
-)}
-
 
       {/* Always show the big number so the bar doesn't look empty */}
       <div className="gsw-main-metric">
@@ -191,7 +184,7 @@ const GlobalStatsWidget = () => {
             ) : (
               <ul className="gsw-chain-list">
                 {topChains.map((c) => {
-                  const logoSrc = CHAIN_LOGOS[c.id];
+                  const logoSrc = CHAIN_LOGOS[Number(c.id)];
                   return (
                     <li key={c.id} className="gsw-chain-item">
                       {logoSrc && (
@@ -204,12 +197,18 @@ const GlobalStatsWidget = () => {
                       <span className="gsw-chain-name">{c.label}</span>
                       <span className="gsw-chain-count">{c.count} scans</span>
                     </li>
-                );
-})
-              }
+                  );
+                })}
               </ul>
             )}
           </div>
+
+          {/* Optional: small explanatory line under the list */}
+          {stats.paused && (
+            <div className="gsw-paused-note">
+              ⏸ Stats collection is paused. Showing last saved global data.
+            </div>
+          )}
         </div>
       )}
     </div>
