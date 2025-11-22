@@ -31,6 +31,36 @@ const CHAIN_LABELS = {
   146: 'Sonic',
 };
 
+const CHAIN_LOGOS = {
+  1: '/logo/eth.png',
+  10: '/logo/optimism.png',
+  56: '/logo/bnb.png',
+  137: '/logo/polygon.png',
+  42161: '/logo/arbitrum.png',
+  8453: '/logo/base.png',
+  130: '/logo/unichain.png',
+  5000: '/logo/mantle.png',
+  9745: '/logo/plasma.png',
+  324: '/logo/zksync.jpg',
+  14: '/logo/flare.png',
+  40: '/logo/telos.png',
+  57: '/logo/sys.jpg',
+  50: '/logo/xdc.png',
+  61: '/logo/ethereum-classic.png',
+  57073: '/logo/ink.png',
+  122: '/logo/fuse.png',
+  60808: '/logo/bob.png',
+  81457: '/logo/blast.png',
+  1868: '/logo/soneium.jpg',
+  480: '/logo/worldcoin.png',
+  1135: '/logo/lisk.png',
+  1923: '/logo/swell.png',
+  2741: '/logo/abstract.png',
+  747474: '/logo/katana.png',
+  146: '/logo/sonic.png',
+  7777777: '/logo/zora.png',
+};
+
 const GlobalStatsWidget = () => {
   // ✅ plain JS state, no TypeScript type annotation
   const [status, setStatus] = useState('loading'); // 'loading' | 'online' | 'offline'
