@@ -151,10 +151,15 @@ const GlobalStatsWidget = () => {
             ) : (
               <ul className="gsw-chain-list">
                 {topChains.map((c) => (
-                  <li key={c.id} className="gsw-chain-item">
-                    <span className="gsw-chain-name">{c.label}</span>
-                    <span className="gsw-chain-count">{c.count} scans</span>
-                  </li>
+                  <li key={chainId} className="chain-stat-row">
+  <img
+    src={NATIVE_LOGOS[chainId] || '/logos/chains/generic.png'}
+    alt={name}
+    className="chain-stat-icon"
+  />
+  <span className="chain-name">{name}</span>
+  <span className="chain-count">{count} scans</span>
+</li>
                 ))}
               </ul>
             )}

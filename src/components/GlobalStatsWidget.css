@@ -169,3 +169,26 @@
     flex-direction: column;
   }
 }
+
+.chain-stat-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 8px;
+}
+
+.chain-stat-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+
+.chain-name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.chain-count {
+  opacity: 0.8;
+  font-size: 0.85rem;
+}
