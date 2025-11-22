@@ -70,6 +70,7 @@ const GlobalStatsWidget = () => {
     totalViews: 0,
     totalScans: 0,
     perChainScans: {},
+    paused: false,
   });
 
   // Fetch global stats from Netlify on mount
