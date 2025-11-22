@@ -180,7 +180,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* === Lite Mode: mobile-first tuning === */
+/* === Mobile tuning (keep full view, just tighter) === */
 
 @media (max-width: 640px) {
   .global-stats-widget {
@@ -235,10 +235,14 @@
     font-size: 11px;
   }
 
-  /* 🔒 LITE MODE: hide top chains list on small screens
-     keeps stats compact while still useful */
-  .gsw-top-chains {
-    display: none;
+  .gsw-chain-item {
+    padding: 2px 0;
+    font-size: 10px;
+  }
+
+  .gsw-chain-icon {
+    width: 13px;
+    height: 13px;
   }
 }
 
