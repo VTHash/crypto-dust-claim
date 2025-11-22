@@ -79,7 +79,11 @@ export default function Dashboard() {
       const scan = await web3Service.scanChains(chainIds, address, settings)
       setResults(scan)
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
+      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total },
+        { dustResults: scan, total },
+      (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
+    )
+  )
     } catch (e) {
       console.error('Price refresh error:', e)
     } finally {
