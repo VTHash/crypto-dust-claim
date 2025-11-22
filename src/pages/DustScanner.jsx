@@ -58,7 +58,19 @@ const DustScanner = () => {
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      sessionStorage.setItem('dustclaim:lastScan', JSON.stringify({ dustResults: scan, total }))
+      // BigInt-safe JSON.stringify for lastScan cache
+try {
+  sessionStorage.setItem(
+    'dustclaim:lastScan',
+    JSON.stringify(
+      { dustResults: scan, total },
+      (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
+    )
+  )
+} catch (err) {
+  console.warn('Failed to store lastScan in sessionStorage:', err)
+}
+
 
       // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
       try {
