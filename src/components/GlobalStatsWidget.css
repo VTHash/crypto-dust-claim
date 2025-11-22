@@ -255,3 +255,25 @@
     font-size: 16px;
   }
 }
+
+/* Small link under main metric */
+.gsw-analytics-button {
+  margin: 0.35rem 0 0.6rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(70, 82, 140, 0.8);
+  background: radial-gradient(circle at top left, #101626, #050813);
+  color: #c6d0ff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: border 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.gsw-analytics-button:hover {
+  border-color: rgba(42, 245, 152, 0.6);
+  color: #e9fff9;
+  transform: translateY(-1px);
+}

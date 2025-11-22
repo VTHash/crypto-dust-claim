@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './GlobalStatsWidget.css';
+import { useNavigate } from 
+'react-router-dom';
 
 // Local copy of chain labels (client should not import server files)
 const CHAIN_LABELS = {
@@ -65,6 +67,8 @@ const CHAIN_LOGOS = {
 };
 
 const GlobalStatsWidget = () => {
+  const navigate = useNavigate(); // 👈 NEW
+
   const [status, setStatus] = useState('loading'); // 'loading' | 'online' | 'offline'
   const [expanded, setExpanded] = useState(false);
   const [stats, setStats] = useState({
@@ -81,33 +85,36 @@ const GlobalStatsWidget = () => {
     const loadStats = async () => {
       try {
         const res = await fetch('/.netlify/functions/stats-get');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
 
         const data = await res.json();
-        if (cancelled) return;
 
-        setStats({
-          totalViews: Number(data.totalViews || 0),
-          totalScans: Number(data.totalScans || 0),
-          perChainScans: data.perChainScans || {},
-          paused: !!data.paused,
-        });
-
-        setStatus('online');
-        console.log('GlobalStatsWidget stats:', data); // debug
-      } catch (err) {
-        if (!cancelled) {
-          console.error('GlobalStatsWidget error:', err);
-          setStatus('offline');
+        if (
+          typeof data.totalViews === 'number' &&
+          typeof data.totalScans === 'number'
+        ) {
+          if (!cancelled) {
+            setStats({
+              totalViews: data.totalViews,
+              totalScans: data.totalScans,
+              perChainScans: data.perChainScans || {},
+              paused: !!data.paused,
+            });
+            setStatus('online');
+          }
+        } else {
+          if (!cancelled) setStatus('offline');
         }
+      } catch (err) {
+        if (!cancelled) setStatus('offline');
       }
     };
 
     loadStats();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   const topChains = useMemo(() => {
@@ -137,13 +144,6 @@ const GlobalStatsWidget = () => {
         <div className="gsw-title">
           <span className="gsw-icon">📊</span>
           <span>NETWORK STATS</span>
-
-          {/* 🔹 tiny paused chip right in the header */}
-          {stats.paused && (
-            <span className="gsw-paused-chip">
-              ⏸ Paused
-            </span>
-          )}
         </div>
 
         <button
@@ -156,11 +156,26 @@ const GlobalStatsWidget = () => {
         </button>
       </div>
 
+      {stats.paused && (
+        <div className="gsw-paused-badge">
+          ⏸ Stats paused — showing saved snapshot
+        </div>
+      )}
+
       {/* Always show the big number so the bar doesn't look empty */}
       <div className="gsw-main-metric">
         <div className="gsw-metric-label">Total scans</div>
         <div className="gsw-metric-value">{stats.totalScans}</div>
       </div>
+
+      {/* NEW: small link to full analytics page */}
+      <button
+        type="button"
+        className="gsw-analytics-button"
+        onClick={() => navigate('/analytics')}
+      >
+        See full analytics →
+      </button>
 
       {expanded && (
         <div className="gsw-panel">
@@ -184,7 +199,7 @@ const GlobalStatsWidget = () => {
             ) : (
               <ul className="gsw-chain-list">
                 {topChains.map((c) => {
-                  const logoSrc = CHAIN_LOGOS[Number(c.id)];
+                  const logoSrc = CHAIN_LOGOS[c.id];
                   return (
                     <li key={c.id} className="gsw-chain-item">
                       {logoSrc && (
@@ -202,13 +217,6 @@ const GlobalStatsWidget = () => {
               </ul>
             )}
           </div>
-
-          {/* Optional: small explanatory line under the list */}
-          {stats.paused && (
-            <div className="gsw-paused-note">
-              ⏸ Stats collection is paused. Showing last saved global data.
-            </div>
-          )}
         </div>
       )}
     </div>

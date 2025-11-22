@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard'
 import DustScanner from './pages/DustScanner'
 import ClaimScreen from './pages/ClaimScreen'
 import GlobalStatsWidget from './components/GlobalStatsWidget'
+import AnalyticsDashboard from './pages/AnalyticsDashboard'
 // Styles
 import './App.css'
 
