@@ -9,6 +9,7 @@ import dexAggregatorService from '../services/dexAggregatorService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
+import Shimmer from '../components/Shimmer.jsx'
 import './DustScanner.css'
 
 const DustScanner = () => {
@@ -404,15 +405,18 @@ try {
                     </div>
 
                     {/* Tokens with real logos */}
-                    {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
-                      <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={t} />
-                    ))}
+{(r.tokenDetails || []).slice(0, 5).map((t, i) => (
+  <TokenRow
+    key={`${r.chainId}-${t.address}-${i}`}
+    token={{ ...t, chainId: r.chainId }}
+  />
+))}
 
-                    {(r.tokenDetails?.length || 0) > 5 && (
-                      <div className="more-tokens">
-                        +{r.tokenDetails.length - 5} more tokens
-                      </div>
-                    )}
+{(r.tokenDetails?.length || 0) > 5 && (
+  <div className="more-tokens">
+    +{r.tokenDetails.length - 5} more tokens
+  </div>
+)}
                   </div>
 
                   <div className="claim-indicator">

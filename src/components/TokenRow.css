@@ -106,3 +106,7 @@
     padding: 1px 5px;
   }
 }
+
+.token-row .shimmer {
+  margin-right: 6px;
+}

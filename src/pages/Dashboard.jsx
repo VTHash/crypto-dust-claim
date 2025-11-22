@@ -317,14 +317,17 @@ sessionStorage.setItem(
                     </div>
 
                     {(r.tokenDetails || []).slice(0, 3).map((t, i) => (
-                      <TokenRow key={`${t.address}-${i}`} token={t} />
-                    ))}
+  <TokenRow
+    key={`${r.chainId}-${t.address}-${i}`}
+    token={{ ...t, chainId: r.chainId }}
+  />
+))}
 
-                    {(r.tokenDetails?.length || 0) > 3 && (
-                      <div className="price-item more">
-                        <span>+{r.tokenDetails.length - 3} more tokens</span>
-                      </div>
-                    )}
+{(r.tokenDetails?.length || 0) > 3 && (
+  <div className="price-item more">
+    <span>+{r.tokenDetails.length - 3} more tokens</span>
+  </div>
+)}
                   </div>
                  
                    

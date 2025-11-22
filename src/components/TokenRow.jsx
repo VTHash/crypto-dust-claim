@@ -1,55 +1,59 @@
-import React from 'react';
-import { getTokenLogo } from '../services/logoService';
-import './TokenRow.css';
+import React, { useEffect, useState } from "react";
+import { getTokenLogo, resolveTokenLogo } from "../services/logoService";
+import Shimmer from "./Shimmer";
+import "./TokenRow.css";
 
-/**
- * TokenRow component
- * - Displays token logo (native or ERC20)
- * - Shows symbol, balance, USD value
- * - Marks dust balances with a badge
- *
- * Props:
- * token: { address, symbol, balance, value }
- * chainId: number
- */
-const TokenRow = ({ token, chainId }) => {
+const TokenRow = ({ token }) => {
   if (!token) return null;
 
-  const symbol = token.symbol || 'UNKNOWN';
-  const balance = Number(token.balance || 0);
-  const usdValue = Number(token.value || 0);
+  const chainId = token.chainId || 1;
+  const address = token.address;
+  const symbol = token.symbol;
 
-  // Format numbers
-  const formattedBalance = balance.toFixed(balance > 1 ? 4 : 6);
-  const formattedUSD = usdValue ? `$${usdValue.toFixed(2)}` : '';
+  // Initial fast guess logo
+  const [logo, setLogo] = useState(getTokenLogo(address, symbol, chainId));
+  const [loadingLogo, setLoadingLogo] = useState(true);
 
-  // Dust condition (< $0.01 or super tiny)
-  const isDust =
-    balance > 0 &&
-    (usdValue < 0.01 || balance < 0.000001);
+  // Async real resolution
+  useEffect(() => {
+    let cancelled = false;
 
-  // Get correct logo URL
-  const logo = getTokenLogo(token.address, symbol, chainId);
+    async function loadLogo() {
+      try {
+        const url = await resolveTokenLogo(address, symbol, chainId);
+        if (!cancelled) {
+          setLogo(url);
+          setLoadingLogo(false);
+        }
+      } catch {
+        if (!cancelled) setLoadingLogo(false);
+      }
+    }
+
+    loadLogo();
+    return () => {
+      cancelled = true;
+    };
+  }, [address, symbol, chainId]);
+
+  const isDust = parseFloat(token.balance || 0) < 0.01;
+  const formattedBalance = parseFloat(token.balance || 0).toFixed(6);
+  const usd = token.value ? `$${token.value.toFixed(2)}` : "";
 
   return (
-    <div className={`token-row ${isDust ? 'dust' : ''}`}>
+    <div className={`token-row ${isDust ? "dust" : ""}`}>
       <div className="token-left">
-        <img
-          src={logo}
-          alt={symbol}
-          className="token-logo"
-          onError={(e) => {
-            e.target.onerror = null;
-            e.target.src = '/logos/tokens/generic-token.png';
-          }}
-        />
+        {loadingLogo ? (
+          <Shimmer width="28px" height="28px" radius="50%" />
+        ) : (
+          <img src={logo} alt={symbol} className="token-logo" />
+        )}
         <span className="token-symbol">{symbol}</span>
       </div>
 
       <div className="token-right">
         <span className="token-balance">{formattedBalance}</span>
-        <span className="token-value">{formattedUSD}</span>
-
+        <span className="token-value">{usd}</span>
         {isDust && <span className="dust-badge">dust</span>}
       </div>
     </div>
