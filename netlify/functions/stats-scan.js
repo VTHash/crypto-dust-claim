@@ -1,10 +1,13 @@
 import { readStats, writeStats } from "./_stats-helpers.js";
 
+// Pause mode flag
+const PAUSED = process.env.STATS_PAUSED === "true";
+
 export const handler = async (event) => {
   try {
     let chains = [];
 
-    // We expect a POST with JSON: { chains: [1, 10, 137, ...] }
+    // Expect POST: { chains: [1, 10, 137...] }
     if (event.httpMethod === "POST" && event.body) {
       try {
         const parsed = JSON.parse(event.body);
@@ -18,16 +21,26 @@ export const handler = async (event) => {
 
     const stats = await readStats();
 
-    // Always increment totalScans, even if chains[] is empty
+    // 🔥 If PAUSED → RETURN EXISTING DATA WITHOUT INCREMENTING
+    if (PAUSED) {
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: true,
+          paused: true,
+          totalScans: stats.totalScans,
+          perChainScans: stats.perChainScans,
+        }),
+      };
+    }
+
+    // 🔥 Normal mode → increment counters
     stats.totalScans = (Number(stats.totalScans) || 0) + 1;
 
-    // Increment per-chain counters
     for (const id of chains) {
       const key = String(id);
-      if (!stats.perChainScans[key]) {
-        stats.perChainScans[key] = 0;
-      }
-      stats.perChainScans[key] += 1;
+      stats.perChainScans[key] = (stats.perChainScans[key] || 0) + 1;
     }
 
     await writeStats(stats);
@@ -37,10 +50,12 @@ export const handler = async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ok: true,
+        paused: false,
         totalScans: stats.totalScans,
         perChainScans: stats.perChainScans,
       }),
     };
+
   } catch (err) {
     console.error("stats-scan ERROR:", err);
 

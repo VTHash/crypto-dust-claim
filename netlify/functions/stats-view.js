@@ -1,16 +1,39 @@
 import { readStats, writeStats } from "./_stats-helpers.js";
 
+// Read pause flag from environment
+const PAUSED = process.env.STATS_PAUSED === "true";
+
 export const handler = async () => {
   try {
     const stats = await readStats();
+
+    // 🔥 If paused → return stats WITHOUT updating
+    if (PAUSED) {
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: true,
+          paused: true,
+          totalViews: stats.totalViews
+        }),
+      };
+    }
+
+    // 🔥 Normal mode → increment views
     stats.totalViews += 1;
     await writeStats(stats);
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ok: true, totalViews: stats.totalViews }),
+      body: JSON.stringify({
+        ok: true,
+        paused: false,
+        totalViews: stats.totalViews
+      }),
     };
+
   } catch (err) {
     console.error("stats-view ERROR:", err);
 

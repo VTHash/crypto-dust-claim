@@ -3,7 +3,10 @@ import { getStore } from "@netlify/blobs";
 const STORE_NAME = "dustclaim-global-stats";
 const KEY = "global";
 
-// Fallback in-memory store (used ONLY if Blobs is truly unavailable)
+// Pause Mode Flag
+const PAUSED = process.env.STATS_PAUSED === "true";
+
+// Fallback in-memory store (only used if Blobs is unavailable)
 let memoryStats = {
   totalViews: 0,
   totalScans: 0,
@@ -12,7 +15,6 @@ let memoryStats = {
 
 /**
  * Build a Blobs store using manual credentials.
- * This completely bypasses the "environment not configured" issue.
  */
 function getStatsStore() {
   const siteID = process.env.NETLIFY_SITE_ID;
@@ -20,12 +22,11 @@ function getStatsStore() {
 
   if (!siteID || !token) {
     console.warn(
-      "Netlify Blobs manual config missing (NETLIFY_SITE_ID or NETLIFY_BLOBS_TOKEN). Falling back to in-memory stats."
+      "Netlify Blobs manual config missing (NETLIFY_SITE_ID or NETLIFY_BLOBS_TOKEN). Using in-memory stats."
     );
     return null;
   }
 
-  // IMPORTANT: use object form so we pass siteID + token explicitly
   return getStore({
     name: STORE_NAME,
     siteID,
@@ -34,15 +35,13 @@ function getStatsStore() {
 }
 
 /**
- * Read stats from Blobs, or fallback to in-memory if Blobs isn't available.
+ * Read stats from Blobs (or fallback to memory).
  */
 export async function readStats() {
   const store = getStatsStore();
 
-  // If we couldn't build a store, just return in-memory stats
-  if (!store) {
-    return memoryStats;
-  }
+  // If no Blobs available, return in-memory snapshot
+  if (!store) return memoryStats;
 
   try {
     const current = await store.get(KEY, { type: "json" });
@@ -54,14 +53,14 @@ export async function readStats() {
         perChainScans: current.perChainScans || {},
       };
 
-      memoryStats = safe; // keep memory copy in sync
+      memoryStats = safe;
       return safe;
     }
   } catch (err) {
-    console.error("readStats error, resetting stats blob:", err);
+    console.error("readStats error:", err);
   }
 
-  // If blob is missing or corrupt, reset to fresh defaults
+  // If missing or corrupted, initialize defaults
   const fresh = {
     totalViews: 0,
     totalScans: 0,
@@ -71,7 +70,7 @@ export async function readStats() {
   try {
     await store.set(KEY, fresh);
   } catch (err) {
-    console.error("Failed to write fresh stats blob:", err);
+    console.error("Failed to write initial stats:", err);
   }
 
   memoryStats = fresh;
@@ -79,29 +78,34 @@ export async function readStats() {
 }
 
 /**
- * Write stats to Blobs (and keep in-memory copy updated).
+ * Write stats to Blobs (unless paused).
  */
 export async function writeStats(stats) {
-  const store = getStatsStore();
-
   const safe = {
     totalViews: Number(stats.totalViews || 0),
     totalScans: Number(stats.totalScans || 0),
     perChainScans: stats.perChainScans || {},
   };
 
-  memoryStats = safe;
+  memoryStats = safe; // always keep memory in sync
 
+  // 🔥 PAUSE MODE: Do NOT write to Blobs
+  if (PAUSED) {
+    console.log("STATS PAUSED – skipping write to Netlify Blobs.");
+    return;
+  }
+
+  const store = getStatsStore();
   if (!store) {
-    console.warn("No Blobs store available, stats only kept in memory.");
+    console.warn("No Blobs store available, keeping stats in memory only.");
     return;
   }
 
   try {
     await store.set(KEY, JSON.stringify(safe), {
       contentType: "application/json",
-  });
- } catch (err) {
+    });
+  } catch (err) {
     console.error("writeStats error:", err);
   }
 }
