@@ -1,75 +1,95 @@
-// ✅ Base URLs for official logo sources
-const TRUSTWALLET_ASSETS = 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains'
-const GENERIC_ICON = '/logos/tokens/generic-token.png' // optional local fallback
+// ============================================================================
+// LOGO SERVICE — FINAL VERIFIED VERSION
+// - Native logos (from /public/logo)
+// - ERC20 logos (from TrustWallet repo)
+// - Auto fallback to generic icon
+// ============================================================================
 
-// ✅ Native token logos (used when address is null)
+// Base URL for TrustWallet repo (raw icons)
+const TRUSTWALLET_ASSETS =
+  'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains';
+
+// Local fallback
+const GENERIC_ICON = '/logos/tokens/generic-token.png';
+
+// ============================================================================
+// 1) Native logos from public/logo
+// ============================================================================
 export const NATIVE_LOGOS = {
-  1: '/logo/ethereum.png', // Ethereum
-  10: '/logo/optimism.png', // Optimism
-  56: '/logo/bnb.png', // BNB Smart Chain
-  137: '/logo/polygon.png', // Polygon
-  42161: '/logo/arbitrum.png', // Arbitrum
-  43114: '/logo/avalanche.png', // Avalanche
-  8453: '/logo/base.png', // Base
-  324: '/logo/zksync.png', // zkSync
-  5000: '/logo/mantle.png', // Mantle
-  59144: '/logo/linea.png', // Linea
-  81457: '/logo/blast.png', // Blast
-  250: '/logo/fantom.png', // Fantom
-  32456: '/logo/scroll.png', // Scroll
-  80085: '/logo/bera.png', // Berachain (example)
-}
+  1: '/logo/ethereum.png',
+  10: '/logo/optimism.png',
+  56: '/logo/bnb.png',
+  137: '/logo/polygon.png',
+  42161: '/logo/arbitrum.png',
+  43114: '/logo/avalanche.png',
+  8453: '/logo/base.png',
+  324: '/logo/zksync.png',
+  5000: '/logo/mantle.png',
+  59144: '/logo/linea.png',
+  81457: '/logo/blast.png',
+  250: '/logo/fantom.png',
+  32456: '/logo/scroll.png',
+  80085: '/logo/bera.png',
+};
 
-// ✅ Chain name mapping for TrustWallet repo folder paths
+// ============================================================================
+// 2) TrustWallet blockchain folder mapping
+// MUST match EXACT repo folder names to avoid 404s
+// ============================================================================
 const CHAIN_PATHS = {
   1: 'ethereum',
+  10: 'optimism',
   56: 'smartchain',
   137: 'polygon',
-  43114: 'avalanchec',
   42161: 'arbitrum',
-  250: 'fantom',
-  10: 'optimism',
+  43114: 'avalanchec',
   8453: 'base',
   324: 'zksync',
-  59144: 'linea',
   5000: 'mantle',
-  204: 'opbnb',
+  59144: 'linea',
   81457: 'blast',
+  250: 'fantom',
   32456: 'scroll',
-  80085: 'berachain'
+  80085: 'berachain',
+  204: 'opbnb',
+};
+
+// DEFAULT to Ethereum folder for unknown chains
+function getChainPath(chainId) {
+  return CHAIN_PATHS[chainId] || 'ethereum';
 }
 
-/**
- * ✅ Build a URL for a token logo.
- * Supports ERC-20 tokens and native coins.
- * Example:
- * getTokenLogo('0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', 'USDC')
- */
+// ============================================================================
+// 3) MAIN FUNCTION — resolve native / ERC20 logo
+// ============================================================================
 export function getTokenLogo(address, symbol, chainId = 1) {
+  // Native token case
   if (!address || address === 'native') {
-    return NATIVE_LOGOS[chainId] || GENERIC_ICON
+    return NATIVE_LOGOS[chainId] || GENERIC_ICON;
   }
 
+  // ERC20 case
   try {
-    const lowerAddr = address.toLowerCase()
-    const path = CHAIN_PATHS[chainId] || 'ethereum'
-    return `${TRUSTWALLET_ASSETS}/${path}/assets/${lowerAddr}/logo.png`
+    const lower = address.toLowerCase();
+    const path = getChainPath(chainId);
+
+    return `${TRUSTWALLET_ASSETS}/${path}/assets/${lower}/logo.png`;
   } catch {
-    return GENERIC_ICON
+    return GENERIC_ICON;
   }
 }
 
-/**
- * ✅ Try fetching and caching logos dynamically (optional enhancement).
- * You can extend this to check CoinGecko API for non-TrustWallet tokens.
- */
+// ============================================================================
+// 4) (Optional) Preload / verify a token logo
+// ============================================================================
 export async function preloadLogo(address, chainId = 1) {
-  const url = getTokenLogo(address, null, chainId)
+  const url = getTokenLogo(address, null, chainId);
+
   try {
-    const res = await fetch(url, { method: 'HEAD' })
-    if (!res.ok) throw new Error('Missing logo')
-    return url
+    const res = await fetch(url, { method: 'HEAD' });
+    if (!res.ok) throw new Error('Not found');
+    return url;
   } catch {
-    return GENERIC_ICON
+    return GENERIC_ICON;
   }
 }

@@ -2,68 +2,107 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: rgba(25, 255, 120, 0.05);
-  transition: background 0.2s ease, transform 0.15s ease;
+  padding: 4px 0;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  color: #0f172a;
 }
 
-.token-row:hover {
-  background: rgba(25, 255, 120, 0.1);
-  transform: translateY(-1px);
+/* Slight separator between rows (optional) */
+.token-row + .token-row {
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
 }
 
+/* Left side: logo + symbol */
 .token-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .token-logo {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  object-fit: cover;
-  box-shadow: 0 0 6px rgba(0, 255, 100, 0.4);
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  object-fit: contain;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.45);
+  background: white;
 }
 
 .token-symbol {
-  font-size: 0.95rem;
-  color: #d0ffd7;
   font-weight: 600;
-  text-transform: uppercase;
+  color: #0f172a;
+  white-space: nowrap;
 }
 
+/* Right side: value + balance, right-aligned */
 .token-right {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #caffc9;
-  font-family: 'Orbitron', sans-serif;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+  min-width: 0;
 }
 
 .token-balance {
-  font-size: 0.9rem;
-  opacity: 0.9;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 0.78rem;
+  color: #111827;
 }
 
 .token-value {
-  font-size: 0.85rem;
-  color: #9affb0;
+  font-size: 0.76rem;
+  color: #6b7280;
 }
 
+/* Dust badge – tiny pill */
 .dust-badge {
-  background: rgba(0, 255, 100, 0.15);
-  border: 1px solid rgba(0, 255, 100, 0.4);
-  border-radius: 6px;
-  padding: 1px 5px;
-  font-size: 0.7rem;
-  color: #72ff7b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.12); /* soft amber */
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #92400e;
+  text-transform: lowercase;
 }
 
-.token-row.dust .token-symbol,
+/* Optional subtle tint for dust rows */
+.token-row.dust .token-balance,
 .token-row.dust .token-value {
-  color: #7aff8a;
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+/* === Mobile tweaks === */
+@media (max-width: 480px) {
+  .token-row {
+    padding: 3px 0;
+    font-size: 0.8rem;
+  }
+
+  .token-logo {
+    width: 16px;
+    height: 16px;
+  }
+
+  .token-balance {
+    font-size: 0.76rem;
+  }
+
+  .token-value {
+    font-size: 0.72rem;
+  }
+
+  .dust-badge {
+    font-size: 0.6rem;
+    padding: 1px 5px;
+  }
 }
