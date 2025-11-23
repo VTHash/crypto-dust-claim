@@ -79,7 +79,7 @@ const AnalyticsDashboard = () => {
 
     const fetchStats = async () => {
       try {
-        const res = await fetch('/.netlify/functions/stats-get');
+        const res = await fetch('/.netlify/functions/stats-get-supabase');
         const data = await res.json();
 
         if (!cancelled) {
