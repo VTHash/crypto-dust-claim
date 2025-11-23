@@ -227,7 +227,7 @@
   border-radius: 1rem;
   border: 1px solid rgba(70, 82, 140, 0.9);
   overflow: hidden;
-  background: radial-gradient(circle at top left, #0f1524, #050813);
+  background: radial-gradient(circle at top left, #0f1524, #1c3386);
 }
 
 .analytics-table {
