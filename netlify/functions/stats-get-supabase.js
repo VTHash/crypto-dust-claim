@@ -1,28 +1,34 @@
-import { readStats } from "./_stats-supabase.js";
+// netlify/functions/stats-get-supabase.js
+import { readStatsSupabase } from "./_stats-helpers-supabase.js";
 
 const PAUSED = process.env.STATS_PAUSED === "true";
 
 export const handler = async () => {
   try {
-    const stats = await readStats();
+    const stats = await readStatsSupabase();
+
+    const safe = {
+      paused: PAUSED,
+      totalViews: Number(stats.totalViews || 0),
+      totalScans: Number(stats.totalScans || 0),
+      perChainScans: stats.perChainScans || {},
+    };
 
     return {
       statusCode: 200,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        paused: PAUSED,
-        totalViews: stats.totalViews,
-        totalScans: stats.totalScans,
-        perChainScans: stats.perChainScans,
+        ok: true,
+        ...safe,
       }),
     };
   } catch (err) {
-    console.error("stats-get ERROR:", err);
+    console.error("stats-get-supabase ERROR:", err);
 
     return {
       statusCode: 500,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: "stats-get failed" }),
+      body: JSON.stringify({ error: "stats-get-supabase failed" }),
     };
   }
 };
