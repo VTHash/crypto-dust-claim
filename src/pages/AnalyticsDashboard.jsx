@@ -30,6 +30,21 @@ const CHAIN_LABELS = {
   2741: 'Abstract',
   747474: 'Katana',
   146: 'Sonic',
+  7777777: 'Zora',
+  42220:  'Celo',
+  100: 'Gnosis',
+  250: 'Fantom',
+  1284: 'Moonbeam',
+  1285: 'Moonriver',
+  1329: 'Sei',
+  34443: 'Mode',
+  43114: 'Avalanche C',
+  59144: 'Linea',
+  80094: 'Berachain',
+  1313161554: 'Aurora',
+  
+
+
 };
 
 const CHAIN_LOGOS = {
@@ -50,17 +65,30 @@ const CHAIN_LOGOS = {
   61: '/logo/ethereum-classic.png',
   57073: '/logo/ink.png',
   122: '/logo/fuse.png',
-  60808: '/logo/bob.png',
-  81457: '/logo/blast.png',
+  60808: '/logo/bob.jpg',
+  81457: '/logo/blast.jpeg',
   1868: '/logo/soneium.jpg',
   480: '/logo/worldcoin.png',
   1135: '/logo/lisk.png',
   1923: '/logo/swell.png',
   2741: '/logo/abstract.png',
-  747474: '/logo/katana.png',
-  146: '/logo/sonic.png',
-  7777777: '/logo/zora.png',
+  747474: '/logo/katana.jpg',
+  146: '/logo/sonic.jpg',
+  7777777: '/logo/zora.jpg',
   100: '/logo/gnosis.png',
+  42220: '/logo/celo.png',
+  250: '/logo/fantom.png',
+  1284: '/logo/moonbeam.png',
+  1285: '/logo/moonriver.png',
+  1329: '/logo/sei.png',
+  34443: '/logo/mode.jpeg',
+  43114: '/logo/avalanche.png',
+  59144: '/logo/linea.png',
+  60808: '/logo/bob.jpg',
+  80094: '/logo/bera.png',
+  81457: '/logo/blast.jpeg',
+  1313161554: '/logo/aurora.png',
+
 };
 
 const AnalyticsDashboard = () => {
