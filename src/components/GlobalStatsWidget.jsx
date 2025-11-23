@@ -67,8 +67,6 @@ const CHAIN_LOGOS = {
 };
 
 const GlobalStatsWidget = () => {
-  const navigate = useNavigate(); // 👈 NEW
-
   const [status, setStatus] = useState('loading'); // 'loading' | 'online' | 'offline'
   const [expanded, setExpanded] = useState(false);
   const [stats, setStats] = useState({
@@ -78,43 +76,62 @@ const GlobalStatsWidget = () => {
     paused: false,
   });
 
-  // Fetch global stats from Netlify on mount
+  // Fetch global stats (Supabase-backed) on mount
   useEffect(() => {
     let cancelled = false;
 
     const loadStats = async () => {
       try {
-        const res = await fetch('/.netlify/functions/stats-get-supabase');
+        const res = await fetch('/.netlify/functions/stats-view-supabase');
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
 
         const data = await res.json();
+        // console.log('GlobalStatsWidget data:', data);
 
-        if (
-          typeof data.totalViews === 'number' &&
+        const totalViews =
+          typeof data.totalViews === 'number'
+            ? data.totalViews
+            : typeof data.totalviews === 'number'
+            ? data.totalviews
+            : null;
+
+        const totalScans =
           typeof data.totalScans === 'number'
-        ) {
-          if (!cancelled) {
-            setStats({
-              totalViews: data.totalViews,
-              totalScans: data.totalScans,
-              perChainScans: data.perChainScans || {},
-              paused: !!data.paused,
-            });
-            setStatus('online');
-          }
-        } else {
-          if (!cancelled) setStatus('offline');
+            ? data.totalScans
+            : typeof data.total_scans === 'number'
+            ? data.total_scans
+            : null;
+
+        const perChainScans =
+          data.perChainScans ||
+          data.per_chain_scans ||
+          {};
+
+        if (!cancelled && totalViews !== null && totalScans !== null) {
+          setStats({
+            totalViews,
+            totalScans,
+            perChainScans,
+            paused: !!data.paused,
+          });
+          setStatus('online');
+        } else if (!cancelled) {
+          setStatus('offline');
         }
       } catch (err) {
+        console.error('GlobalStatsWidget loadStats error:', err);
         if (!cancelled) setStatus('offline');
       }
     };
 
     loadStats();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const topChains = useMemo(() => {
@@ -158,7 +175,7 @@ const GlobalStatsWidget = () => {
 
       {stats.paused && (
         <div className="gsw-paused-badge">
-          ⏸ Stats paused — showing saved snapshot
+          ⏸ Stats paused — showing saved data
         </div>
       )}
 
@@ -168,11 +185,11 @@ const GlobalStatsWidget = () => {
         <div className="gsw-metric-value">{stats.totalScans}</div>
       </div>
 
-      {/* NEW: small link to full analytics page */}
+      {/* Little button to open the full Analytics page */}
       <button
         type="button"
         className="gsw-analytics-button"
-        onClick={() => navigate('/AnalyticsDashboard')}
+        onClick={() => (window.location.href = '/AnalyticsDashboard')}
       >
         See full analytics →
       </button>
