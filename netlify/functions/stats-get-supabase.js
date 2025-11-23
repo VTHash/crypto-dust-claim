@@ -1,5 +1,5 @@
 // netlify/functions/stats-get-supabase.js
-import { readStatsSupabase } from "./_stats-helpers-supabase.js";
+import { readStatsSupabase } from "./stats-helpers-supabase.js";
 
 const PAUSED = process.env.STATS_PAUSED === "true";
 
