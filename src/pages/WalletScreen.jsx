@@ -3,7 +3,7 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
-import { CryptoDustCanvas } from './components/CryptoDustCanvas'
+import { CryptoDustCanvas } from '../components/CryptoDustCanvas'
 
 const metamaskLogo = '/logo/metamask.png'
 
@@ -54,10 +54,10 @@ const WalletScreen = () => {
     <main className="container">
       {/* HERO */}
       <section className="hero">
-        <h1> <CryptoDustCanvas /> DustClaim</h1>
+        <h1> <CryptoDustCanvas /> </h1>
         <li>Claim your crypto dust across multiple blockchains.</li>
       </section>
-<CryptoDustCanvas />
+
       {/* CONNECT / INFO */}
       {!isConnected ? (
         <section>
@@ -245,6 +245,11 @@ const WalletScreen = () => {
               src="/logo/hfv-logo.png"
               alt="HFV Logo"
               className="footer-logo"
+            />
+            <img
+            src="logo/dustclaim.png"
+            alt="DustClaim Logo"
+            className="footer-logo"
             />
             <p>© 2022–2025 HFV Protocol Technologies Limited • Transparent by Design</p>
           </a>
