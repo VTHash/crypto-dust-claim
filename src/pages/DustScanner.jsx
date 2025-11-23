@@ -84,7 +84,7 @@ try {
     )
   )
 
-  console.log('stats-scan chains payload:', usedChainIdsArray)
+  console.log('stats-scan-supabase chains payload:', usedChainIdsArray)
 
   if (usedChainIdsArray.length > 0) {
     await fetch('/.netlify/functions/stats-scan-supabase', {
@@ -96,7 +96,7 @@ try {
     })
   }
 } catch (err) {
-  console.error('stats-scan client error:', err)
+  console.error('stats-scan client-supabase error:', err)
 }
       // --- END NEW PART ---
     } finally {
