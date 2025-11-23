@@ -54,9 +54,14 @@ const WalletScreen = () => {
     <main className="container">
       {/* HERO */}
       <section className="hero">
-        <h1> <CryptoDustCanvas /> </h1>
-        <li>Claim your crypto dust across multiple blockchains.</li>
-      </section>
+  <div className="hero-canvas">
+    <CryptoDustCanvas size={220} /> {/* perfect for mobile */}
+  </div>
+
+  <div className="hero-text">
+    <p>Claim your crypto dust across multiple blockchains.</p>
+  </div>
+</section>
 
       {/* CONNECT / INFO */}
       {!isConnected ? (

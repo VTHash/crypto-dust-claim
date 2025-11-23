@@ -317,36 +317,27 @@
   }
 }}
 
-h1 canvas {
-  width: 30px;
-  height: 30px;
-  margin-right: 10px;
-}
-
 .hero {
   display: flex;
+  flex-direction: column; /* stack on top of each other */
   align-items: center;
-  gap: 20px;
+  justify-content: center;
   padding: 20px;
+  text-align: center;
 }
 
-.hero-canvas-wrapper {
-  width: 50px; /* size of the animated brush */
-  height: 50px;
-}
-
-.hero-canvas-wrapper canvas {
-  width: 50%;
-  height: 50%;
-}
-
-.hero-text h1 {
-  font-size: 2rem;
+/* Canvas wrapper */
+.hero-canvas {
   display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 10px;
+  margin-bottom: 16px; /* spacing below the canvas */
 }
 
-.hero-icon {
-  font-size: 2.4rem;
+/* Responsive text */
+.hero-text p {
+  font-size: 1.1rem;
+  color: white;
+  max-width: 80%;
+  line-height: 1.4;
 }
