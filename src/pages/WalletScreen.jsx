@@ -57,7 +57,7 @@ const WalletScreen = () => {
         <h1> <CryptoDustCanvas /> DustClaim</h1>
         <li>Claim your crypto dust across multiple blockchains.</li>
       </section>
-
+<CryptoDustCanvas />
       {/* CONNECT / INFO */}
       {!isConnected ? (
         <section>
