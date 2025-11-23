@@ -1,4 +1,5 @@
-const { readStatsSupabase } = require('./stats-supabase.js');
+// netlify/functions/stats-get-supabase.js
+const { readStatsSupabase } = require('../shared/stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 

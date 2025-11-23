@@ -1,4 +1,5 @@
-const { readStatsSupabase, writeStatsSupabase } = require('./stats-supabase.js');
+// netlify/functions/stats-view-supabase.js
+const { readStatsSupabase, writeStatsSupabase } = require('../shared/stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
@@ -6,7 +7,6 @@ exports.handler = async () => {
   try {
     const stats = await readStatsSupabase();
 
-    // If paused: just return current totalViews, don't increment
     if (PAUSED) {
       return {
         statusCode: 200,
@@ -19,7 +19,6 @@ exports.handler = async () => {
       };
     }
 
-    // Normal mode: increment totalViews by 1
     const updated = {
       ...stats,
       totalViews: Number(stats.totalViews || 0) + 1,

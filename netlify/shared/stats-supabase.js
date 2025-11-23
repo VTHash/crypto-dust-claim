@@ -1,4 +1,4 @@
-// netlify/functions/stats-supabase.js
+// netlify/shared/stats-supabase.js
 // CommonJS helper used by stats-get-supabase, stats-view-supabase, stats-scan-supabase
 
 const { createClient } = require('@supabase/supabase-js');
@@ -19,24 +19,19 @@ const supabase =
       })
     : null;
 
-// Table + row config (matches your screenshot: public.global_stats)
+// Your actual table/columns from the screenshot:
+// table: global_stats
+// columns: id, totalviews, totalscans, perchainscans
 const TABLE_NAME = 'global_stats';
 const ROW_ID = 1;
 
-// Default stats shape
 const DEFAULT_STATS = {
   totalViews: 0,
   totalScans: 0,
   perChainScans: {},
 };
 
-/**
- * Read stats from Supabase.
- * Table: global_stats
- * Row id: 1
- */
 async function readStatsSupabase() {
-  // If Supabase is not configured, just return default (no crash)
   if (!supabase) {
     return { ...DEFAULT_STATS };
   }
@@ -54,7 +49,7 @@ async function readStatsSupabase() {
     }
 
     if (!data || data.length === 0) {
-      // No row yet → create one with defaults
+      // Create initial row
       const freshRow = {
         id: ROW_ID,
         totalviews: 0,
@@ -86,9 +81,6 @@ async function readStatsSupabase() {
   }
 }
 
-/**
- * Write stats back to Supabase.
- */
 async function writeStatsSupabase(stats) {
   if (!supabase) {
     console.warn('Supabase not configured, writeStatsSupabase is a no-op.');
