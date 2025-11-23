@@ -64,7 +64,11 @@ export default function Navbar() {
           {/* Brand */}
           <div className="navbar-center">
             <Link to="/" className="brand-link">
-              <span className="brand-icon">🧹</span>
+              <span className="brand-icon">
+                <img src="/logo/dustclaim.png"
+                alt="DustClaim Logo"
+                className="brand-logo" />
+                 </span>
               <span className="brand-text">DustClaim</span>
             </Link>
           </div>

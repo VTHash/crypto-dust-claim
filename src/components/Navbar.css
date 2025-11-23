@@ -416,3 +416,14 @@
   width: 100%;
   display: block;
 }
+
+.brand-logo {
+  width: 20px;
+  height: 20px;
+}
+
+.brand-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
