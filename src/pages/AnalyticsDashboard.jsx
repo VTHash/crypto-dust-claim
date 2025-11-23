@@ -81,7 +81,7 @@ const CHAIN_LOGOS = {
   1284: '/logo/moonbeam.png',
   1285: '/logo/moonriver.png',
   1329: '/logo/sei.png',
-  34443: '/logo/mode.jpeg',
+  34443: '/logo/mode.jeg',
   43114: '/logo/avalanche.png',
   59144: '/logo/linea.png',
   60808: '/logo/bob.jpg',
