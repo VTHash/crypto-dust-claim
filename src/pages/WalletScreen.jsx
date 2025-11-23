@@ -55,7 +55,7 @@ const WalletScreen = () => {
       {/* HERO */}
       <section className="hero">
   <div className="hero-canvas">
-    <CryptoDustCanvas size={220} /> {/* perfect for mobile */}
+    <CryptoDustCanvas size={320} /> {/* perfect for mobile */}
   </div>
 
   <div className="hero-text">
