@@ -84,7 +84,7 @@ const GlobalStatsWidget = () => {
 
     const loadStats = async () => {
       try {
-        const res = await fetch('/.netlify/functions/stats-get');
+        const res = await fetch('/.netlify/functions/stats-get-supabase');
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);

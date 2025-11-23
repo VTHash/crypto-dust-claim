@@ -87,7 +87,7 @@ try {
   console.log('stats-scan chains payload:', usedChainIdsArray)
 
   if (usedChainIdsArray.length > 0) {
-    await fetch('/.netlify/functions/stats-scan', {
+    await fetch('/.netlify/functions/stats-scan-supabase', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

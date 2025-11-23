@@ -32,7 +32,7 @@ const App = () => {
   const { isConnected } = useWallet()
 
   // Count a "view" whenever the app loads
-  useEffect(() => { fetch('/.netlify/functions/stats-view').catch(() => { 
+  useEffect(() => { fetch('/.netlify/functions/stats-view-supabase').catch(() => { 
     // ignore failures so the app never breaks
   })
   }, [])
