@@ -1,4 +1,4 @@
-import { readStatsSupabase, writeStatsSupabase } from './stats-helpers-supabase.js';
+import { readStatsSupabase, writeStatsSupabase } from './stats-supabase.js';
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
