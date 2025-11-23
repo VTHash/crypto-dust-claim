@@ -337,7 +337,7 @@
 /* Responsive text */
 .hero-text p {
   font-size: 1.1rem;
-  color: white;
+  color: rgb(7, 1, 1);
   max-width: 80%;
   line-height: 1.4;
 }

@@ -237,8 +237,8 @@ export function CryptoDustCanvas({ size = 160 }) {
     <canvas
       ref={canvasRef}
       style={{
-        width: `${420}px`,
-        height: `${420}px`,
+        width: `${320}px`,
+        height: `${320}px`,
         display: 'block',
         maxWidth: '100%', // shrinks nicely on small screens
       }}
