@@ -1,20 +1,12 @@
-// netlify/functions/stats-view-supabase.js
-import { readStats, writeStats } from './stats-helpers-supabase.js';
+const { readStatsSupabase, writeStatsSupabase } = require('./stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
-export const handler = async () => {
+exports.handler = async () => {
   try {
-    const stats = await readStats();
+    const stats = await readStatsSupabase();
 
-    // Normalised safe object
-    const safe = {
-      totalViews: Number(stats.totalViews || 0),
-      totalScans: Number(stats.totalScans || 0),
-      perChainScans: stats.perChainScans || {},
-    };
-
-    // 🔸 If paused: DO NOT increment, just return stored values
+    // If paused: just return current totalViews, don't increment
     if (PAUSED) {
       return {
         statusCode: 200,
@@ -22,14 +14,18 @@ export const handler = async () => {
         body: JSON.stringify({
           ok: true,
           paused: true,
-          ...safe,
+          totalViews: Number(stats.totalViews || 0),
         }),
       };
     }
 
-    // 🔹 Normal mode: increment totalViews on each page load
-    safe.totalViews += 1;
-    await writeStats(safe);
+    // Normal mode: increment totalViews by 1
+    const updated = {
+      ...stats,
+      totalViews: Number(stats.totalViews || 0) + 1,
+    };
+
+    await writeStatsSupabase(updated);
 
     return {
       statusCode: 200,
@@ -37,7 +33,7 @@ export const handler = async () => {
       body: JSON.stringify({
         ok: true,
         paused: false,
-        ...safe,
+        totalViews: updated.totalViews,
       }),
     };
   } catch (err) {

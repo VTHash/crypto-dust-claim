@@ -1,80 +1,121 @@
-import { createClient } from '@supabase/supabase-js';
+// netlify/functions/stats-supabase.js
+// CommonJS helper used by stats-get-supabase, stats-view-supabase, stats-scan-supabase
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+const { createClient } = require('@supabase/supabase-js');
 
-const TABLE = process.env.SUPABASE_STATS_TABLE || "global_stats";
-const ROW_ID = 1; // single row for all stats
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
-// Fallback for dev/offline
-let memoryStats = {
+if (!supabaseUrl || !supabaseKey) {
+  console.warn(
+    'Supabase env missing (SUPABASE_URL / SUPABASE_SERVICE_KEY). Stats will use defaults only.'
+  );
+}
+
+const supabase =
+  supabaseUrl && supabaseKey
+    ? createClient(supabaseUrl, supabaseKey, {
+        auth: { persistSession: false },
+      })
+    : null;
+
+// Table + row config (matches your screenshot: public.global_stats)
+const TABLE_NAME = 'global_stats';
+const ROW_ID = 1;
+
+// Default stats shape
+const DEFAULT_STATS = {
   totalViews: 0,
   totalScans: 0,
   perChainScans: {},
 };
 
 /**
- * Load stats from Supabase.
- * If table or row doesn't exist → automatically create it.
+ * Read stats from Supabase.
+ * Table: global_stats
+ * Row id: 1
  */
-export async function readStats() {
+async function readStatsSupabase() {
+  // If Supabase is not configured, just return default (no crash)
+  if (!supabase) {
+    return { ...DEFAULT_STATS };
+  }
+
   try {
     const { data, error } = await supabase
-      .from(TABLE)
-      .select("*")
-      .eq("id", ROW_ID)
-      .single();
+      .from(TABLE_NAME)
+      .select('id, totalviews, totalscans, perchainscans')
+      .eq('id', ROW_ID)
+      .limit(1);
 
-    if (error && error.code !== "PGRST116") {
-      console.error("Supabase read error:", error);
+    if (error) {
+      console.error('Supabase readStatsSupabase error:', error);
+      return { ...DEFAULT_STATS };
     }
 
-    // If row does not exist, initialize it
-    if (!data) {
-      const fresh = {
+    if (!data || data.length === 0) {
+      // No row yet → create one with defaults
+      const freshRow = {
         id: ROW_ID,
-        totalViews: 0,
-        totalScans: 0,
-        perChainScans: {},
+        totalviews: 0,
+        totalscans: 0,
+        perchainscans: {},
       };
 
-      await supabase.from(TABLE).upsert(fresh);
+      const { error: insertErr } = await supabase
+        .from(TABLE_NAME)
+        .insert([freshRow]);
 
-      memoryStats = fresh;
-      return fresh;
+      if (insertErr) {
+        console.error('Supabase readStatsSupabase insert error:', insertErr);
+      }
+
+      return { ...DEFAULT_STATS };
     }
 
-    memoryStats = {
-      id: ROW_ID,
-      totalViews: Number(data.totalViews || 0),
-      totalScans: Number(data.totalScans || 0),
-      perChainScans: data.perChainScans || {},
+    const row = data[0];
+
+    return {
+      totalViews: Number(row.totalviews || 0),
+      totalScans: Number(row.totalscans || 0),
+      perChainScans: row.perchainscans || {},
     };
-
-    return memoryStats;
-
   } catch (err) {
-    console.error("readStats fatal:", err);
-    return memoryStats; // fallback
+    console.error('readStatsSupabase exception:', err);
+    return { ...DEFAULT_STATS };
   }
 }
 
 /**
- * Store stats into Supabase.
+ * Write stats back to Supabase.
  */
-export async function writeStats(stats) {
-  memoryStats = {
+async function writeStatsSupabase(stats) {
+  if (!supabase) {
+    console.warn('Supabase not configured, writeStatsSupabase is a no-op.');
+    return;
+  }
+
+  const safe = {
     id: ROW_ID,
-    totalViews: Number(stats.totalViews || 0),
-    totalScans: Number(stats.totalScans || 0),
-    perChainScans: stats.perChainScans || {},
+    totalviews: Number(stats.totalViews || 0),
+    totalscans: Number(stats.totalScans || 0),
+    perchainscans: stats.perChainScans || {},
   };
 
   try {
-    await supabase.from(TABLE).upsert(memoryStats);
+    const { error } = await supabase
+      .from(TABLE_NAME)
+      .upsert([safe], { onConflict: 'id' });
+
+    if (error) {
+      console.error('Supabase writeStatsSupabase error:', error);
+    }
   } catch (err) {
-    console.error("writeStats fatal:", err);
+    console.error('writeStatsSupabase exception:', err);
   }
 }
+
+module.exports = {
+  readStatsSupabase,
+  writeStatsSupabase,
+};

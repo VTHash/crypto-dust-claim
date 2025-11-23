@@ -1,12 +1,13 @@
-import { readStats } from './stats-helpers-supabase.js';
+const { readStatsSupabase } = require('./stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
-export const handler = async () => {
+exports.handler = async () => {
   try {
-    const stats = await readStats();
+    const stats = await readStatsSupabase();
 
     const safe = {
+      paused: PAUSED,
       totalViews: Number(stats.totalViews || 0),
       totalScans: Number(stats.totalScans || 0),
       perChainScans: stats.perChainScans || {},
@@ -17,7 +18,6 @@ export const handler = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ok: true,
-        paused: PAUSED,
         ...safe,
       }),
     };
