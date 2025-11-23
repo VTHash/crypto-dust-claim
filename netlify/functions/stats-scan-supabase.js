@@ -1,8 +1,10 @@
 import { readStatsSupabase, writeStatsSupabase } from './stats-supabase.js';
 
+const { readStatsSupabase, writeStatsSupabase } = require('./stats-supabase.js');
+
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
-export const handler = async (event) => {
+exports.handler = async (event) => {
   try {
     let chains = [];
 
@@ -45,7 +47,8 @@ export const handler = async (event) => {
 
     for (const id of chains) {
       const key = String(id);
-      updated.perChainScans[key] = Number(updated.perChainScans[key] || 0) + 1;
+      updated.perChainScans[key] =
+        Number(updated.perChainScans[key] || 0) + 1;
     }
 
     await writeStatsSupabase(updated);
