@@ -1,11 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+// netlify/functions/stats-helpers-supabase.js
+import { createClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn(
-    'Supabase env missing (SUPABASE_URL / SUPABASE_SERVICE_KEY). Stats will use defaults only.'
+    "Supabase env missing (SUPABASE_URL / SUPABASE_SERVICE_KEY). Stats will use defaults only."
   );
 }
 
@@ -16,7 +17,11 @@ const supabase =
       })
     : null;
 
-// Default stats shape
+// ✅ Match your actual table + columns
+const TABLE_NAME = "global_stats";
+const ROW_ID = 1; // int4 primary key
+
+// Default stats shape used by functions
 const DEFAULT_STATS = {
   totalViews: 0,
   totalScans: 0,
@@ -25,86 +30,84 @@ const DEFAULT_STATS = {
 
 /**
  * Read stats from Supabase.
- * Table: stats_global
- * Row id: "global"
+ * Table: public.global_stats
+ * Row id: 1
  */
 export async function readStats() {
-  // If Supabase is not configured, just return default (no crash)
   if (!supabase) {
     return { ...DEFAULT_STATS };
   }
 
   try {
     const { data, error } = await supabase
-      .from('stats_global')
-      .select('total_views, total_scans, per_chain_scans')
-      .eq('id', 'global')
-      .limit(1);
+      .from(TABLE_NAME)
+      .select("id, totalviews, totalscans, perchainscans")
+      .eq("id", ROW_ID)
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.error('Supabase readStats error:', error);
+      console.error("Supabase readStats error:", error);
       return { ...DEFAULT_STATS };
     }
 
-    if (!data || data.length === 0) {
-      // No row yet → create one with defaults
+    // No row yet → create one with defaults
+    if (!data) {
       const freshRow = {
-        id: 'global',
-        total_views: 0,
-        total_scans: 0,
-        per_chain_scans: {},
+        id: ROW_ID,
+        totalviews: 0,
+        totalscans: 0,
+        perchainscans: {},
       };
 
       const { error: insertErr } = await supabase
-        .from('stats_global')
-        .insert([freshRow]);
+        .from(TABLE_NAME)
+        .upsert(freshRow, { onConflict: "id" });
 
       if (insertErr) {
-        console.error('Supabase readStats insert error:', insertErr);
+        console.error("Supabase readStats insert error:", insertErr);
       }
 
       return { ...DEFAULT_STATS };
     }
 
-    const row = data[0];
-
     return {
-      totalViews: Number(row.total_views || 0),
-      totalScans: Number(row.total_scans || 0),
-      perChainScans: row.per_chain_scans || {},
+      totalViews: Number(data.totalviews || 0),
+      totalScans: Number(data.totalscans || 0),
+      perChainScans: data.perchainscans || {},
     };
   } catch (err) {
-    console.error('readStats exception:', err);
+    console.error("readStats exception:", err);
     return { ...DEFAULT_STATS };
   }
 }
 
 /**
  * Write stats back to Supabase.
- * Keeps the same external shape so stats-view / stats-scan / stats-get don’t change.
+ * Keeps external shape: { totalViews, totalScans, perChainScans }
  */
 export async function writeStats(stats) {
   if (!supabase) {
-    console.warn('Supabase not configured, writeStats is a no-op.');
+    console.warn("Supabase not configured, writeStats is a no-op.");
     return;
   }
 
   const safe = {
-    id: 'global',
-    total_views: Number(stats.totalViews || 0),
-    total_scans: Number(stats.totalScans || 0),
-    per_chain_scans: stats.perChainScans || {},
+    id: ROW_ID,
+    totalviews: Number(stats.totalViews || 0),
+    totalscans: Number(stats.totalScans || 0),
+    perchainscans: stats.perChainScans || {},
   };
 
   try {
     const { error } = await supabase
-      .from('stats_global')
-      .upsert([safe], { onConflict: 'id' });
+      .from(TABLE_NAME)
+      .upsert(safe, { onConflict: "id" });
 
     if (error) {
-      console.error('Supabase writeStats error:', error);
+      console.error("Supabase writeStats error:", error);
     }
   } catch (err) {
-    console.error('writeStats exception:', err);
+    console.error("writeStats exception:", err);
   }
 }
