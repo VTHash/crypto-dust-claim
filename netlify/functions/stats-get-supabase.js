@@ -1,11 +1,11 @@
 // netlify/functions/stats-get-supabase.js
-const { readStatsSupabase } = require('../shared/stats-supabase.js');
+const { readStats } = require('./stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
 exports.handler = async () => {
   try {
-    const stats = await readStatsSupabase();
+    const stats = await readStats();
 
     const safe = {
       paused: PAUSED,

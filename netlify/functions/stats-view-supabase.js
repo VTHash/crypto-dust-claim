@@ -1,13 +1,14 @@
 // netlify/functions/stats-view-supabase.js
-const { readStatsSupabase, writeStatsSupabase } = require('../shared/stats-supabase.js');
+const { readStats, writeStats } = require('./stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
 exports.handler = async () => {
   try {
-    const stats = await readStatsSupabase();
+    const stats = await readStats();
 
     if (PAUSED) {
+      // Just return current values, no write
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -20,11 +21,12 @@ exports.handler = async () => {
     }
 
     const updated = {
-      ...stats,
       totalViews: Number(stats.totalViews || 0) + 1,
+      totalScans: Number(stats.totalScans || 0),
+      perChainScans: stats.perChainScans || {},
     };
 
-    await writeStatsSupabase(updated);
+    await writeStats(updated);
 
     return {
       statusCode: 200,

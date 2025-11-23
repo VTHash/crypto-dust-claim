@@ -1,5 +1,5 @@
 // netlify/functions/stats-scan-supabase.js
-const { readStatsSupabase, writeStatsSupabase } = require('../shared/stats-supabase.js');
+const { readStats, writeStats } = require('./stats-supabase.js');
 
 const PAUSED = process.env.STATS_PAUSED === 'true';
 
@@ -11,6 +11,7 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'POST' && event.body) {
       try {
         const parsed = JSON.parse(event.body);
+
         if (Array.isArray(parsed.chains)) {
           chains = parsed.chains
             .map((id) => Number(id))
@@ -21,9 +22,10 @@ exports.handler = async (event) => {
       }
     }
 
-    const stats = await readStatsSupabase();
+    const stats = await readStats();
 
     if (PAUSED) {
+      // Do NOT increment, just echo current snapshot
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -48,7 +50,7 @@ exports.handler = async (event) => {
         Number(updated.perChainScans[key] || 0) + 1;
     }
 
-    await writeStatsSupabase(updated);
+    await writeStats(updated);
 
     return {
       statusCode: 200,

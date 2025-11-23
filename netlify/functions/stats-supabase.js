@@ -1,6 +1,4 @@
-// netlify/shared/stats-supabase.js
-// CommonJS helper used by stats-get-supabase, stats-view-supabase, stats-scan-supabase
-
+// netlify/functions/stats-supabase.js
 const { createClient } = require('@supabase/supabase-js');
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -19,50 +17,44 @@ const supabase =
       })
     : null;
 
-// Your actual table/columns from the screenshot:
-// table: global_stats
-// columns: id, totalviews, totalscans, perchainscans
-const TABLE_NAME = 'global_stats';
-const ROW_ID = 1;
-
 const DEFAULT_STATS = {
   totalViews: 0,
   totalScans: 0,
   perChainScans: {},
 };
 
-async function readStatsSupabase() {
+async function readStats() {
   if (!supabase) {
     return { ...DEFAULT_STATS };
   }
 
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAME)
+      .from('global_stats')
       .select('id, totalviews, totalscans, perchainscans')
-      .eq('id', ROW_ID)
+      .eq('id', 1)
       .limit(1);
 
     if (error) {
-      console.error('Supabase readStatsSupabase error:', error);
+      console.error('Supabase readStats error:', error);
       return { ...DEFAULT_STATS };
     }
 
     if (!data || data.length === 0) {
-      // Create initial row
+      // If no row exists yet, create it
       const freshRow = {
-        id: ROW_ID,
+        id: 1,
         totalviews: 0,
         totalscans: 0,
         perchainscans: {},
       };
 
       const { error: insertErr } = await supabase
-        .from(TABLE_NAME)
+        .from('global_stats')
         .insert([freshRow]);
 
       if (insertErr) {
-        console.error('Supabase readStatsSupabase insert error:', insertErr);
+        console.error('Supabase readStats insert error:', insertErr);
       }
 
       return { ...DEFAULT_STATS };
@@ -76,19 +68,19 @@ async function readStatsSupabase() {
       perChainScans: row.perchainscans || {},
     };
   } catch (err) {
-    console.error('readStatsSupabase exception:', err);
+    console.error('readStats exception:', err);
     return { ...DEFAULT_STATS };
   }
 }
 
-async function writeStatsSupabase(stats) {
+async function writeStats(stats) {
   if (!supabase) {
-    console.warn('Supabase not configured, writeStatsSupabase is a no-op.');
+    console.warn('Supabase not configured, writeStats is a no-op.');
     return;
   }
 
   const safe = {
-    id: ROW_ID,
+    id: 1,
     totalviews: Number(stats.totalViews || 0),
     totalscans: Number(stats.totalScans || 0),
     perchainscans: stats.perChainScans || {},
@@ -96,18 +88,18 @@ async function writeStatsSupabase(stats) {
 
   try {
     const { error } = await supabase
-      .from(TABLE_NAME)
+      .from('global_stats')
       .upsert([safe], { onConflict: 'id' });
 
     if (error) {
-      console.error('Supabase writeStatsSupabase error:', error);
+      console.error('Supabase writeStats error:', error);
     }
   } catch (err) {
-    console.error('writeStatsSupabase exception:', err);
+    console.error('writeStats exception:', err);
   }
 }
 
 module.exports = {
-  readStatsSupabase,
-  writeStatsSupabase,
+  readStats,
+  writeStats,
 };
