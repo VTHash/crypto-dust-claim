@@ -41,7 +41,8 @@ const logoPaths = [
   '/logo/aurora.png',
 ];
 
-export function CryptoDustCanvas() {
+export function CryptoDustCanvas({ size = 160 }) {
+  // `size` is the CSS size in px (good default for mobile / navbar)
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -51,13 +52,11 @@ export function CryptoDustCanvas() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // HiDPI support
+    // Internal high-res canvas size (logical pixels)
     const logicalSize = 600;
     const ratio = window.devicePixelRatio || 1;
     canvas.width = logicalSize * ratio;
     canvas.height = logicalSize * ratio;
-    canvas.style.width = `${logicalSize}px`;
-    canvas.style.height = `${logicalSize}px`;
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
     const W = logicalSize;
@@ -65,13 +64,11 @@ export function CryptoDustCanvas() {
 
     const circleRadius = 180;
     const centerX = W / 2;
-    const centerY = H / 2 - 40;
+    const centerY = H / 2; // centered now (no text below)
 
-    const bgSky = '#7fd3ff';
     const darkBlue = '#003b73';
     const midBlue = '#0061b2';
     const lightBlue = '#35a7ff';
-    const white = '#ffffff';
 
     // --- Load all logos ---
     const logos = logoPaths.map((src) => {
@@ -172,7 +169,7 @@ export function CryptoDustCanvas() {
       ctx.save();
       ctx.translate(centerX, centerY);
 
-      dustItems.forEach((item, i) => {
+      dustItems.forEach((item) => {
         const angle = item.offset + time * item.speed;
         const x = Math.cos(angle) * item.radius;
         const y = Math.sin(angle) * item.radius;
@@ -203,55 +200,14 @@ export function CryptoDustCanvas() {
         const y = Math.sin(angle) * radius;
 
         const pulse = (Math.sin(time * 3 + i) + 1) / 2;
-        const size = 1 + pulse * 1.8;
+        const s = 1 + pulse * 1.8;
 
         ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.arc(x, y, s, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255,255,255,0.9)';
         ctx.fill();
       }
 
-      ctx.restore();
-    }
-
-    function drawText() {
-      ctx.save();
-      ctx.fillStyle = white;
-      ctx.textAlign = 'center';
-
-      ctx.font = 'bold 52px system-ui, sans-serif';
-      ctx.fillText('CRYPTO DUST', W / 2, H - 120);
-
-      ctx.font = 'bold 48px system-ui, sans-serif';
-      ctx.fillText('CLAIM', W / 2, H - 65);
-
-      const textWidth = 420;
-      const textHeight = 110;
-      const x = (W - textWidth) / 2;
-      const y = H - 150;
-      const r = 24;
-
-      ctx.globalCompositeOperation = 'destination-over';
-      ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.lineTo(x + textWidth - r, y);
-      ctx.quadraticCurveTo(x + textWidth, y, x + textWidth, y + r);
-      ctx.lineTo(x + textWidth, y + textHeight - r);
-      ctx.quadraticCurveTo(
-        x + textWidth,
-        y + textHeight,
-        x + textWidth - r,
-        y + textHeight
-      );
-      ctx.lineTo(x + r, y + textHeight);
-      ctx.quadraticCurveTo(x, y + textHeight, x, y + textHeight - r);
-      ctx.lineTo(x, y + r);
-      ctx.quadraticCurveTo(x, y, x + r, y);
-      ctx.closePath();
-      ctx.fillStyle = darkBlue;
-      ctx.fill();
-
-      ctx.globalCompositeOperation = 'source-over';
       ctx.restore();
     }
 
@@ -260,13 +216,12 @@ export function CryptoDustCanvas() {
     const animate = (timestamp) => {
       const t = timestamp / 1000;
 
-      ctx.fillStyle = bgSky;
-      ctx.fillRect(0, 0, W, H);
+      // Clear to transparent (no blue square)
+      ctx.clearRect(0, 0, W, H);
 
       drawCircleLogo();
       drawDust(t);
       drawBroom(t);
-      drawText();
 
       frameId = requestAnimationFrame(animate);
     };
@@ -282,11 +237,10 @@ export function CryptoDustCanvas() {
     <canvas
       ref={canvasRef}
       style={{
-        borderRadius: '24px',
-        boxShadow: '0 0 40px rgba(0, 40, 120, 0.5)',
-        background: '#7fd3ff',
-        maxWidth: '100%',
-        height: 'auto',
+        width: `${400}px`,
+        height: `${400}px`,
+        display: 'block',
+        maxWidth: '100%', // shrinks nicely on small screens
       }}
     />
   );
