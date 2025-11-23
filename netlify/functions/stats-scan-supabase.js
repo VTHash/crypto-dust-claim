@@ -1,34 +1,33 @@
 // netlify/functions/stats-scan-supabase.js
-const { readStats, writeStats } = require('./stats-supabase.js');
+import { readStats, writeStats } from "./_stats-helpers-supabase.js";
 
-const PAUSED = process.env.STATS_PAUSED === 'true';
+const PAUSED = process.env.STATS_PAUSED === "true";
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     let chains = [];
 
     // Expect POST body: { chains: [1, 10, 137, ...] }
-    if (event.httpMethod === 'POST' && event.body) {
+    if (event.httpMethod === "POST" && event.body) {
       try {
         const parsed = JSON.parse(event.body);
-
         if (Array.isArray(parsed.chains)) {
           chains = parsed.chains
             .map((id) => Number(id))
             .filter((id) => Number.isFinite(id) && id > 0);
         }
       } catch (err) {
-        console.error('stats-scan-supabase JSON parse error:', err);
+        console.error("stats-scan-supabase JSON parse error:", err);
       }
     }
 
     const stats = await readStats();
 
+    // If paused → return existing data, do NOT increment
     if (PAUSED) {
-      // Do NOT increment, just echo current snapshot
       return {
         statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ok: true,
           paused: true,
@@ -38,6 +37,7 @@ exports.handler = async (event) => {
       };
     }
 
+    // Normal mode: increment totalScans + per-chain
     const updated = {
       totalViews: Number(stats.totalViews || 0),
       totalScans: Number(stats.totalScans || 0) + 1,
@@ -46,15 +46,14 @@ exports.handler = async (event) => {
 
     for (const id of chains) {
       const key = String(id);
-      updated.perChainScans[key] =
-        Number(updated.perChainScans[key] || 0) + 1;
+      updated.perChainScans[key] = Number(updated.perChainScans[key] || 0) + 1;
     }
 
     await writeStats(updated);
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ok: true,
         paused: false,
@@ -63,12 +62,12 @@ exports.handler = async (event) => {
       }),
     };
   } catch (err) {
-    console.error('stats-scan-supabase ERROR:', err);
+    console.error("stats-scan-supabase ERROR:", err);
 
     return {
       statusCode: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'stats-scan-supabase failed' }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: "stats-scan-supabase failed" }),
     };
   }
 };
