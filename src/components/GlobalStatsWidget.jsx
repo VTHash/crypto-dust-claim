@@ -91,35 +91,33 @@ const GlobalStatsWidget = () => {
         const data = await res.json();
         // console.log('GlobalStatsWidget data:', data);
 
-        const totalViews =
-          typeof data.totalViews === 'number'
-            ? data.totalViews
-            : typeof data.totalviews === 'number'
-            ? data.totalviews
-            : null;
+        // Be super tolerant about field names and always fall back to 0
+        const rawTotalViews =
+          data.totalViews ??
+          data.totalviews ??
+          data.total_views ??
+          0;
 
-        const totalScans =
-          typeof data.totalScans === 'number'
-            ? data.totalScans
-            : typeof data.total_scans === 'number'
-            ? data.total_scans
-            : null;
+        const rawTotalScans =
+          data.totalScans ??
+          data.totalscans ??
+          data.total_scans ??
+          0;
 
         const perChainScans =
           data.perChainScans ||
+          data.perchainscans ||
           data.per_chain_scans ||
           {};
 
-        if (!cancelled && totalViews !== null && totalScans !== null) {
+        if (!cancelled) {
           setStats({
-            totalViews,
-            totalScans,
+            totalViews: Number(rawTotalViews) || 0,
+            totalScans: Number(rawTotalScans) || 0,
             perChainScans,
             paused: !!data.paused,
           });
           setStatus('online');
-        } else if (!cancelled) {
-          setStatus('offline');
         }
       } catch (err) {
         console.error('GlobalStatsWidget loadStats error:', err);
@@ -133,7 +131,6 @@ const GlobalStatsWidget = () => {
       cancelled = true;
     };
   }, []);
-
   const topChains = useMemo(() => {
     const entries = Object.entries(stats.perChainScans || {});
     if (!entries.length) return [];
