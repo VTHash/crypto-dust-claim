@@ -51,6 +51,9 @@ const App = () => {
             element={isConnected ? <Dashboard /> : <WalletScreen />}
           />
 
+<Route path="/AnalyticsDashboard"
+element={<AnalyticsDashboard />} />
+
           {/* Protected pages (require wallet connection) */}
           <Route
             path="/dashboard"

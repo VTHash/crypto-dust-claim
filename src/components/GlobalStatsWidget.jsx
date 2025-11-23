@@ -172,7 +172,7 @@ const GlobalStatsWidget = () => {
       <button
         type="button"
         className="gsw-analytics-button"
-        onClick={() => navigate('/analytics')}
+        onClick={() => navigate('/AnalyticsDashboard')}
       >
         See full analytics →
       </button>
