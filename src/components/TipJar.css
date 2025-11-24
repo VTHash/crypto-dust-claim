@@ -1,172 +1,162 @@
+/* ================================
+   TIP JAR — DustClaim HUD Theme
+   ================================ */
+
+.tipjar-overlay {
+  position: fixed;
+  inset: 0;
+  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: tipjar-fade-in 0.25s ease;
+}
+
+@keyframes tipjar-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .tipjar-card {
-  margin-top: 16px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: radial-gradient(circle at top, rgba(56, 189, 248, 0.08), #020617 70%);
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.45);
-  color: #e5e7eb;
-  font-size: 0.85rem;
+  background: linear-gradient(145deg, #2d2347, #3f2969);
+  border-radius: 20px;
+  padding: 20px 24px;
+  width: 92%;
+  max-width: 440px;
+  color: #e7e7ff;
+  box-shadow: 0 0 20px rgba(108, 0, 255, 0.4),
+              inset 0 0 12px rgba(0, 255, 198, 0.12);
+  border: 1px solid rgba(0, 255, 180, 0.25);
+  animation: tipjar-slide-up 0.25s ease;
+  position: relative;
+}
+
+@keyframes tipjar-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .tipjar-header {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 10px;
+  align-items: center;
+  gap: 12px;
 }
 
 .tipjar-emoji {
-  font-size: 1.2rem;
+  font-size: 28px;
 }
 
 .tipjar-title {
   margin: 0;
-  font-size: 0.95rem;
-  font-weight: 600;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #8affea;
+  text-shadow: 0 0 10px rgba(0, 255, 200, 0.7);
 }
 
 .tipjar-subtitle {
-  margin: 2px 0 0;
-  font-size: 0.78rem;
-  color: #94a3b8;
+  margin: 0;
+  font-size: 0.9rem;
+  color: #d8cfff;
+  opacity: 0.9;
 }
 
 .tipjar-body {
-  margin-top: 6px;
+  margin-top: 18px;
 }
 
 .tipjar-label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #64748b;
-  margin-bottom: 4px;
+  font-size: 0.85rem;
+  opacity: 0.9;
+  margin-bottom: 6px;
+  color: #c5b4ff;
 }
 
-.tipjar-address {
+.tipjar-address,
+.tipjar-input {
   display: block;
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 10px;
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    'Liberation Mono', 'Courier New', monospace;
-  font-size: 0.78rem;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 255, 198, 0.22);
+  font-family: monospace;
+  font-size: 0.95rem;
+  color: #e3e3ff;
   word-break: break-all;
-  margin-bottom: 8px;
 }
 
 .tipjar-actions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
+  gap: 12px;
+  margin: 16px 0 6px;
 }
 
 .tipjar-btn {
-  border-radius: 999px;
-  border: 1px solid transparent;
-  padding: 6px 12px;
-  font-size: 0.78rem;
-  font-weight: 500;
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: none;
+  font-size: 0.95rem;
+  font-weight: 600;
   cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  white-space: nowrap;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.08s ease,
-    box-shadow 0.1s ease;
+  transition: 0.15s ease;
 }
 
 .tipjar-btn.primary {
-  background: #22c55e;
-  border-color: #16a34a;
-  color: #022c22;
-  box-shadow: 0 10px 25px rgba(34, 197, 94, 0.35);
+  background: linear-gradient(145deg, #00ffa9, #02e166);
+  color: #0d1b1f;
+  box-shadow: 0 0 10px rgba(0, 255, 180, 0.5);
 }
 
 .tipjar-btn.primary:hover {
-  background: #16a34a;
-  transform: translateY(-1px);
-  box-shadow: 0 14px 30px rgba(34, 197, 94, 0.45);
+  box-shadow: 0 0 15px rgba(0, 255, 200, 0.8);
 }
 
 .tipjar-btn.ghost {
-  background: transparent;
-  border-color: rgba(148, 163, 184, 0.6);
-  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.1);
+  color: #c5fdf4;
+  border: 1px solid rgba(0, 255, 200, 0.2);
 }
 
 .tipjar-btn.ghost:hover {
-  border-color: #e5e7eb;
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .tipjar-footnote {
-  margin: 0;
-  font-size: 0.72rem;
-  color: #64748b;
-}
-
-.tipjar-card.premium {
-  border: 1px solid rgba(0, 255, 170, 0.35);
-  box-shadow: 0 0 24px rgba(0, 255, 170, 0.18);
-}
-
-.tipjar-chain-row {
-  margin: 12px 0 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.tipjar-chain-pills,
-.tipjar-amount-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.tipjar-chain-pill,
-.tipjar-amount-pill {
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.4);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tipjar-chain-pill.active,
-.tipjar-amount-pill.active {
-  border-color: #00f5a0;
-  background: rgba(0, 245, 160, 0.12);
-}
-
-.tipjar-btn.wide {
-  width: 100%;
   margin-top: 8px;
+  font-size: 0.75rem;
+  opacity: 0.75;
+  text-align: center;
+  color: #dcd0ff;
 }
 
-.tipjar-btn.outline {
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+/* Close button */
+.tipjar-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 20px;
+  color: #ccecff;
+  cursor: pointer;
+  transition: 0.2s;
 }
 
-.tipjar-status {
-  margin-top: 6px;
-  font-size: 12px;
+.tipjar-close:hover {
+  color: #00ffbf;
+  transform: scale(1.15);
 }
 
-.tipjar-status-ok {
-  color: #5effb3;
-}
-
-.tipjar-status-error {
-  color: #ff6b81;
+/* Network dropdown style */
+.tipjar-select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(0, 255, 180, 0.25);
+  color: #e0fdfd;
+  font-size: 0.95rem;
+  margin-bottom: 12px;
 }
