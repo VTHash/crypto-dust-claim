@@ -13,6 +13,7 @@ import DustScanner from './pages/DustScanner'
 import ClaimScreen from './pages/ClaimScreen'
 import GlobalStatsWidget from './components/GlobalStatsWidget'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
+import TipPill from './components/TipPill'
 // Styles
 import './App.css'
 
@@ -75,6 +76,7 @@ element={<AnalyticsDashboard />} />
 
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
+          <TipPill />
         </Routes>
       </main>
     </div>

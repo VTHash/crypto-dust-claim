@@ -1,0 +1,172 @@
+.tipjar-card {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: radial-gradient(circle at top, rgba(56, 189, 248, 0.08), #020617 70%);
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.45);
+  color: #e5e7eb;
+  font-size: 0.85rem;
+}
+
+.tipjar-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tipjar-emoji {
+  font-size: 1.2rem;
+}
+
+.tipjar-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tipjar-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.tipjar-body {
+  margin-top: 6px;
+}
+
+.tipjar-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.tipjar-address {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+
+.tipjar-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.tipjar-btn {
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.08s ease,
+    box-shadow 0.1s ease;
+}
+
+.tipjar-btn.primary {
+  background: #22c55e;
+  border-color: #16a34a;
+  color: #022c22;
+  box-shadow: 0 10px 25px rgba(34, 197, 94, 0.35);
+}
+
+.tipjar-btn.primary:hover {
+  background: #16a34a;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 30px rgba(34, 197, 94, 0.45);
+}
+
+.tipjar-btn.ghost {
+  background: transparent;
+  border-color: rgba(148, 163, 184, 0.6);
+  color: #e5e7eb;
+}
+
+.tipjar-btn.ghost:hover {
+  border-color: #e5e7eb;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.tipjar-footnote {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.tipjar-card.premium {
+  border: 1px solid rgba(0, 255, 170, 0.35);
+  box-shadow: 0 0 24px rgba(0, 255, 170, 0.18);
+}
+
+.tipjar-chain-row {
+  margin: 12px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tipjar-chain-pills,
+.tipjar-amount-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tipjar-chain-pill,
+.tipjar-amount-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tipjar-chain-pill.active,
+.tipjar-amount-pill.active {
+  border-color: #00f5a0;
+  background: rgba(0, 245, 160, 0.12);
+}
+
+.tipjar-btn.wide {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.tipjar-btn.outline {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.tipjar-status {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.tipjar-status-ok {
+  color: #5effb3;
+}
+
+.tipjar-status-error {
+  color: #ff6b81;
+}
