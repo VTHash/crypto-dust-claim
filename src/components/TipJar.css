@@ -160,3 +160,64 @@
   font-size: 0.95rem;
   margin-bottom: 12px;
 }
+
+.tipjar-amount-row {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0 10px;
+  flex-wrap: wrap;
+}
+
+.tipjar-amount-pill {
+  flex: 1;
+  min-width: 70px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 255, 200, 0.25);
+  background: rgba(255, 255, 255, 0.05);
+  color: #dffdfa;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.15s ease;
+}
+
+.tipjar-amount-pill:hover {
+  background: rgba(0, 255, 200, 0.18);
+}
+
+.tipjar-amount-pill.active {
+  background: linear-gradient(145deg, #00ffa9, #02e166);
+  color: #081616;
+  border-color: transparent;
+  box-shadow: 0 0 12px rgba(0, 255, 200, 0.7);
+}
+
+.tipjar-error {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #ff9b9b;
+  text-align: center;
+}
+
+.tipjar-success {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #9dffcf;
+  text-align: center;
+  word-break: break-all;
+}
+
+.tipjar-network-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.tipjar-network-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
+}

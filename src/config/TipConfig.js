@@ -1,48 +1,48 @@
 // Your universal tip address on all chains
-export const UNIVERSAL_TIP_ADDRESS =
-  "0x25b3Ea33069428dCD1f268F1c6139701F1dc0137";
+// One address on every chain
+export const TIP_UNIVERSAL_ADDRESS =
+  '0x25b3Ea33069428dCD1f268F1c6139701F1dC0137'
 
-// Full multi-chain tip support for every chain you have in DexAggregatorService
-export const TIP_CHAINS = {
-  1: { label: "Ethereum", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  10: { label: "Optimism", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  56: { label: "BNB Smart Chain", symbol: "BNB", address: UNIVERSAL_TIP_ADDRESS },
-  100: { label: "Gnosis", symbol: "xDAI", address: UNIVERSAL_TIP_ADDRESS },
-  137: { label: "Polygon", symbol: "MATIC", address: UNIVERSAL_TIP_ADDRESS },
-  195: { label: "X1", symbol: "X1", address: UNIVERSAL_TIP_ADDRESS },
-  250: { label: "Fantom", symbol: "FTM", address: UNIVERSAL_TIP_ADDRESS },
-  1329:{ label: "Sei", symbol: "SEI", address: UNIVERSAL_TIP_ADDRESS },
-  8453:{ label: "Base", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  34443:{ label:"Mode", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  42161:{ label:"Arbitrum One", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  43114:{ label:"Avalanche", symbol: "AVAX", address: UNIVERSAL_TIP_ADDRESS },
-  59144:{ label:"Linea", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  80094:{ label:"Berachain", symbol: "BERA", address: UNIVERSAL_TIP_ADDRESS },
-  7777777:{ label:"Zora", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  130:{ label:"Unichain", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  42220:{ label:"Celo", symbol: "CELO", address: UNIVERSAL_TIP_ADDRESS },
-  1313161554:{ label:"Aurora", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  1284:{ label:"Moonbeam", symbol: "GLMR", address: UNIVERSAL_TIP_ADDRESS },
-  1285:{ label:"Moonriver", symbol: "MOVR", address: UNIVERSAL_TIP_ADDRESS },
-  5000:{ label:"Mantle", symbol: "MNT", address: UNIVERSAL_TIP_ADDRESS },
-  9745:{ label:"Plasma", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  14:{ label:"Flare", symbol: "FLR", address: UNIVERSAL_TIP_ADDRESS },
-  40:{ label:"Telos", symbol: "TLOS", address: UNIVERSAL_TIP_ADDRESS },
-  50:{ label:"XDC", symbol: "XDC", address: UNIVERSAL_TIP_ADDRESS },
-  57:{ label:"Syscoin", symbol: "SYS", address: UNIVERSAL_TIP_ADDRESS },
-  61:{ label:"Ethereum Classic", symbol: "ETC", address: UNIVERSAL_TIP_ADDRESS },
-  57073:{ label:"Inkonchain", symbol: "INK", address: UNIVERSAL_TIP_ADDRESS },
-  60808:{ label:"BOB", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  81457:{ label:"Blast", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  1868:{ label:"Soneium", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  480:{ label:"Worldchain", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  1135:{ label:"Lisk", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  1923:{ label:"Swellchain", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  2741:{ label:"Abstract", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  747474:{ label:"Katana", symbol: "ETH", address: UNIVERSAL_TIP_ADDRESS },
-  146:{ label:"Sonic", symbol: "S", address: UNIVERSAL_TIP_ADDRESS },
-};
-
+// For future flexibility if you ever change a specific chain
+export const TIP_ADDRESS_BY_CHAIN = {
+  1: TIP_UNIVERSAL_ADDRESS, // Ethereum
+  10: TIP_UNIVERSAL_ADDRESS, // Optimism
+  56: TIP_UNIVERSAL_ADDRESS, // BNB
+  100: TIP_UNIVERSAL_ADDRESS, // Gnosis
+  137: TIP_UNIVERSAL_ADDRESS, // Polygon
+  195: TIP_UNIVERSAL_ADDRESS, // X1
+  250: TIP_UNIVERSAL_ADDRESS, // Fantom
+  1329: TIP_UNIVERSAL_ADDRESS, // Sei
+  8453: TIP_UNIVERSAL_ADDRESS, // Base
+  34443: TIP_UNIVERSAL_ADDRESS, // Mode
+  42161: TIP_UNIVERSAL_ADDRESS, // Arbitrum
+  43114: TIP_UNIVERSAL_ADDRESS, // Avalanche
+  59144: TIP_UNIVERSAL_ADDRESS, // Linea
+  80094: TIP_UNIVERSAL_ADDRESS, // Berachain
+  7777777: TIP_UNIVERSAL_ADDRESS, // Zora
+  130: TIP_UNIVERSAL_ADDRESS, // Unichain
+  42220: TIP_UNIVERSAL_ADDRESS, // Celo
+  1313161554: TIP_UNIVERSAL_ADDRESS, // Aurora
+  1284: TIP_UNIVERSAL_ADDRESS, // Moonbeam
+  1285: TIP_UNIVERSAL_ADDRESS, // Moonriver
+  5000: TIP_UNIVERSAL_ADDRESS, // Mantle
+  9745: TIP_UNIVERSAL_ADDRESS, // Plasma
+  14: TIP_UNIVERSAL_ADDRESS, // Flare
+  40: TIP_UNIVERSAL_ADDRESS, // Telos
+  50: TIP_UNIVERSAL_ADDRESS, // XDC
+  57: TIP_UNIVERSAL_ADDRESS, // Syscoin
+  61: TIP_UNIVERSAL_ADDRESS, // ETC
+  57073: TIP_UNIVERSAL_ADDRESS, // Inkonchain
+  60808: TIP_UNIVERSAL_ADDRESS, // BOB
+  81457: TIP_UNIVERSAL_ADDRESS, // Blast
+  1868: TIP_UNIVERSAL_ADDRESS, // Soneium
+  480: TIP_UNIVERSAL_ADDRESS, // World Chain
+  1135: TIP_UNIVERSAL_ADDRESS, // Lisk
+  1923: TIP_UNIVERSAL_ADDRESS, // Swellchain
+  2741: TIP_UNIVERSAL_ADDRESS, // Abstract
+  747474: TIP_UNIVERSAL_ADDRESS, // Katana
+  146: TIP_UNIVERSAL_ADDRESS // Sonic
+}
 export const TIP_DEFAULT_CHAIN_ID = 1;
 
 // suggested native-amount presets
