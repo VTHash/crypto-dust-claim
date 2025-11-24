@@ -1,7 +1,7 @@
 // Your universal tip address on all chains
 // One address on every chain
 export const TIP_UNIVERSAL_ADDRESS =
-  '0x25b3Ea33069428dCD1f268F1c6139701F1dC0137'
+  '0x25b3ea33069428dcd1f268f1C6139701f1dc0137'
 
 // For future flexibility if you ever change a specific chain
 export const TIP_ADDRESS_BY_CHAIN = {
