@@ -76,9 +76,10 @@ element={<AnalyticsDashboard />} />
 
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
-          <TipPill />
+                  
         </Routes>
       </main>
+      <TipPill />
     </div>
   )
 }
