@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
-  TIP_CHAINS,
+  TIP_UNIVERSAL_ADDRESS,
+  TIP_ADDRESS_BY_CHAIN,
   TIP_DEFAULT_CHAIN_ID,
   TIP_SUGGESTED_AMOUNTS,
-  UNIVERSAL_TIP_ADDRESS,
 } from '../config/TipConfig';
 import walletService from '../services/walletService'
 import './TipJar.css'
