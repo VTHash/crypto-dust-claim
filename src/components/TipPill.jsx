@@ -1,13 +1,13 @@
-import React, { useState } from "react";
-import TipJar from "./TipJar";
-import "./TipPill.css";
+import React, { useState } from 'react';
+import TipJar from './TipJar';
+import './TipPill.css';
 
 const TipPill = () => {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      {/* Floating pill */}
+      {/* Floating Pill */}
       <button
         type="button"
         className="tip-pill"
@@ -18,19 +18,25 @@ const TipPill = () => {
 
       {/* Modal */}
       {open && (
-        <div className="tip-modal-overlay" onClick={() => setOpen(false)}>
+        <div
+          className="tip-modal-overlay"
+          onClick={() => setOpen(false)} // click outside closes
+        >
           <div
             className="tip-modal"
             onClick={(e) => e.stopPropagation()} // prevent click-through
           >
+
+            {/* Close button */}
             <button
               className="tip-modal-close"
               onClick={() => setOpen(false)}
             >
-              ✕
+              ×
             </button>
 
-            <TipJar />
+            {/* Tip Jar content */}
+            <TipJar onClose={() => setOpen(false)} />
           </div>
         </div>
       )}
