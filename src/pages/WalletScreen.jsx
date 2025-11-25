@@ -240,12 +240,7 @@ const WalletScreen = () => {
       {/* FOOTER */}
       <footer className="app-footer">
         <div className="footer-content">
-          <a
-            href="https://hfvprotocol.org/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="footer-brand"
-          >
+         <a>
             <img
               src="/logo/hfv-logo.png"
               alt="HFV Logo"
