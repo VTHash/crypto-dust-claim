@@ -240,7 +240,7 @@ const WalletScreen = () => {
       {/* FOOTER */}
       <footer className="app-footer">
         <div className="footer-content">
-         <a>
+         <div className="footer-logos">
             <img
               src="/logo/hfv-logo.png"
               alt="HFV Logo"
@@ -251,8 +251,9 @@ const WalletScreen = () => {
             alt="DustClaim Logo"
             className="footer-logo"
             />
+            </div>
             <p>© 2022–2025 HFV Protocol Technologies Limited • Transparent by Design</p>
-          </a>
+        
 
           <div className="footer-links">
             <a

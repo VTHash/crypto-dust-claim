@@ -341,3 +341,19 @@
   max-width: 80%;
   line-height: 1.4;
 }
+
+.footer-logos {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px; /* spacing between logos */
+  width: 100%;
+  margin-top: 20px;
+}
+
+.footer-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 4px #00ffcc80);
+}
