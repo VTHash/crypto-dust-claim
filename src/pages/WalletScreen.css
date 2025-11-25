@@ -29,9 +29,9 @@
   font-size: 4rem;
   font-weight: bold;
   margin-bottom: 16px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: #000;
   display: flex;
   align-items: center;
   justify-content: center;
