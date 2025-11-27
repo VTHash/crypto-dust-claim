@@ -1,18 +1,13 @@
-/* ================================
-   Dashboard Layout (mobile-first)
-   ================================ */
-
 .dashboard {
-  width: 100%;
-  max-width: 1120px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 16px 16px 80px;
-  box-sizing: border-box;
+  color: #f9fafb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text',
+    'Segoe UI', sans-serif;
 }
 
-/* -----------------------------
-   Network selector (top right)
-   ----------------------------- */
+/* ---------- Network selector ---------- */
 
 .network-dropdown-wrapper {
   position: relative;
@@ -25,203 +20,199 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: radial-gradient(circle at top left,
-      rgba(92, 255, 181, 0.18),
-      rgba(15, 15, 25, 0.9));
-  color: #f7f7ff;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: radial-gradient(circle at 0% 0%, #1d4ed8, #020617 65%);
+  color: #e5eefc;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   outline: none;
-  appearance: none;
-  white-space: nowrap;
-}
-
-.network-selector:hover {
-  border-color: rgba(92, 255, 181, 0.5);
-  box-shadow: 0 0 0 1px rgba(92, 255, 181, 0.25);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.7);
 }
 
 .network-selector-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
   object-fit: cover;
+  background: #020617;
 }
 
-.chevron {
+.network-selector .chevron {
   font-size: 11px;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
-/* Dropdown panel */
+/* Dropdown menu */
 
 .network-menu {
   position: absolute;
-  top: 110%;
+  top: 40px;
   right: 0;
-  z-index: 40;
-  width: min(320px, 100vw - 24px);
+  width: 280px;
   border-radius: 18px;
-  background: rgba(14, 16, 26, 0.96);
+  background: #020617;
+  border: 1px solid rgba(148, 163, 184, 0.6);
   box-shadow:
-    0 18px 45px rgba(0, 0, 0, 0.7),
-    0 0 0 1px rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(22px);
+    0 14px 40px rgba(15, 23, 42, 0.85),
+    0 0 0 1px rgba(15, 23, 42, 0.8);
+  z-index: 40;
   overflow: hidden;
 }
 
-/* shared item style */
-
+/* “All networks” row + each chain row share base styles */
 .network-menu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   font-size: 13px;
   cursor: pointer;
-  color: #e4e7ff;
+  transition: background 0.12s ease, transform 0.08s ease;
 }
 
 .network-menu-item:first-child {
-  background: linear-gradient(
-    90deg,
-    rgba(92, 255, 181, 0.06),
-    rgba(92, 255, 181, 0)
-  );
+  border-bottom: 1px solid rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.9);
 }
 
 .network-menu-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(30, 64, 175, 0.45);
+  transform: translateY(-1px);
+}
+
+.network-menu-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Thin dark scrollbars */
+.network-menu-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.network-menu-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.network-menu-scroll::-webkit-scrollbar-thumb {
+  background: rgba(51, 65, 85, 0.9);
+  border-radius: 999px;
 }
 
 .network-menu-icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 999px;
   object-fit: cover;
-  flex-shrink: 0;
-}
-
-.network-menu-item span {
-  flex: 1;
 }
 
 .network-usd {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  opacity: 0.85;
-  text-align: right;
+  color: #e5e7eb;
 }
 
-/* Scrollable list of chains */
-
-.network-menu-scroll {
-  max-height: 260px;
-  overflow-y: auto;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* ================================
-   Summary stats cards
-   ================================ */
+/* ---------- Top stats strip (wallet summary) ---------- */
 
 .stats-row {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .stat-box {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 12px 14px;
   border-radius: 18px;
-  padding: 14px 16px;
-  background: radial-gradient(circle at top left,
-      rgba(255, 255, 255, 0.02),
-      rgba(9, 10, 18, 0.96));
-  box-shadow:
-    0 16px 30px rgba(0, 0, 0, 0.7),
-    0 0 0 1px rgba(255, 255, 255, 0.04);
-  color: #f5f7ff;
+  background: #020617;
+  border: 1px solid rgba(31, 41, 55, 0.9);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.75);
 }
 
 .stat-box.primary {
-  background: radial-gradient(circle at top left,
-      rgba(92, 255, 181, 0.16),
-      rgba(9, 10, 18, 0.96));
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(92, 255, 181, 0.3);
+  background: radial-gradient(circle at 0% 0%, #22c55e, #020617 55%);
+  border-color: rgba(74, 222, 128, 0.6);
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  opacity: 0.65;
+  color: #9ca3af;
   margin-bottom: 4px;
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
+  color: #f9fafb;
   font-variant-numeric: tabular-nums;
 }
 
-/* ================================
-   Action buttons row
-   ================================ */
+/* ---------- Action buttons row ---------- */
 
 .action-row {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 16px 0 20px;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 
 .btn-primary,
 .btn-secondary {
-  padding: 11px 14px;
   border-radius: 999px;
   border: none;
-  cursor: pointer;
-  font-size: 14px;
+  padding: 8px 14px;
+  font-size: 13px;
   font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 6px;
-  width: 100%;
-  color: #f5f8ff;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #19e392, #3b8cff);
-  box-shadow:
-    0 18px 32px rgba(0, 0, 0, 0.75),
-    0 0 0 1px rgba(0, 0, 0, 0.2);
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+  color: #02120a;
+  box-shadow: 0 10px 25px rgba(34, 197, 94, 0.45);
 }
 
-.btn-primary:hover {
-  filter: brightness(1.05);
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .btn-secondary {
-  background: rgba(17, 19, 30, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #020617;
+  color: #e5e7eb;
+  border: 1px solid rgba(55, 65, 81, 0.9);
 }
 
-.btn-secondary:hover {
-  border-color: rgba(92, 255, 181, 0.4);
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
-/* ================================
-   Chain cards list
-   ================================ */
+/* Make action row horizontally scrollable on very small screens */
+@media (max-width: 480px) {
+  .action-row {
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+  .action-row::-webkit-scrollbar {
+    height: 4px;
+  }
+  .action-row::-webkit-scrollbar-thumb {
+    background: rgba(55, 65, 81, 0.9);
+    border-radius: 999px;
+  }
+}
+
+/* ---------- Chain cards (Assets list) ---------- */
 
 .chain-list {
   display: flex;
@@ -229,149 +220,149 @@
   gap: 10px;
 }
 
-/* Single chain card */
-
+/* each card ~ Zerion asset card */
 .chain-card {
-  border-radius: 18px;
-  padding: 14px 14px 12px;
-  background: radial-gradient(circle at top left,
-      rgba(71, 86, 255, 0.12),
-      rgba(9, 10, 18, 0.98));
+  background: #020617;
+  border-radius: 22px;
+  padding: 14px 14px 10px;
+  border: 1px solid rgba(31, 41, 55, 0.95);
   box-shadow:
-    0 18px 36px rgba(0, 0, 0, 0.85),
-    0 0 0 1px rgba(255, 255, 255, 0.04);
-  color: #f5f7ff;
+    0 14px 34px rgba(15, 23, 42, 0.9),
+    0 0 0 1px rgba(15, 23, 42, 0.85);
 }
 
-/* Card header */
-
+/* Header row */
 .chain-card-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .chain-card-icon {
   width: 32px;
   height: 32px;
   border-radius: 999px;
+  background: #020617;
   object-fit: cover;
   flex-shrink: 0;
 }
 
 .chain-card-title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .chain-card-title h3 {
-  margin: 0;
   font-size: 15px;
   font-weight: 600;
+  margin: 0;
 }
 
 .chain-card-usd {
   font-size: 13px;
+  font-weight: 500;
+  color: #e5e7eb;
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
 }
 
 .chain-card-native {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #9ca3af;
   text-align: right;
-  opacity: 0.9;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Card body - tokens */
+/* Body rows (native + first few tokens) */
 
 .chain-card-body {
-  border-radius: 14px;
-  background: rgba(13, 14, 24, 0.96);
-  padding: 8px 10px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(31, 41, 55, 0.9);
+}
+
+.price-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 6px 0;
+  color: #d1d5db;
+}
+
+.price-item span:last-child {
+  font-variant-numeric: tabular-nums;
+}
+
+/* <TokenRow /> usually renders its own layout; we just ensure spacing */
+.chain-card-body .token-row {
+  padding: 5px 0;
+}
+
+.token-more {
+  margin-top: 2px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* Footer: “x tokens matching dust settings” */
+
+.dust-footer {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(55, 65, 81, 0.9);
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* ---------- Empty state ---------- */
+
+.empty-state {
+  margin-top: 40px;
+  padding: 24px 16px;
+  text-align: center;
+  background: #020617;
+  border-radius: 22px;
+  border: 1px solid rgba(31, 41, 55, 0.9);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.8);
+}
+
+.empty-icon {
+  font-size: 28px;
   margin-bottom: 8px;
 }
 
-/* "More tokens" row */
-
-.token-more {
-  margin-top: 4px;
-  font-size: 12px;
-  color: rgba(245, 247, 255, 0.75);
+.empty-state h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
 }
 
-/* Dust footer */
-
-.dust-footer {
-  font-size: 12px;
-  opacity: 0.8;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.empty-state p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #9ca3af;
 }
 
-/* ================================
-   RESPONSIVE LAYOUT
-   ================================ */
+/* ---------- Mobile tweaks ---------- */
 
-@media (min-width: 640px) {
+@media (max-width: 768px) {
+  .dashboard {
+    padding: 12px 10px 70px;
+  }
+
   .stats-row {
-    flex-direction: row;
+    flex-direction: column;
   }
 
   .stat-box {
-    flex: 1;
-  }
-
-  .action-row {
-    flex-direction: row;
-  }
-
-  .btn-primary,
-  .btn-secondary {
-    width: auto;
-    min-width: 160px;
-  }
-}
-
-@media (min-width: 900px) {
-  .dashboard {
-    padding: 20px 0 100px;
-  }
-
-  .chain-list {
-    gap: 12px;
+    padding: 10px 12px;
   }
 
   .chain-card {
-    padding: 16px 18px 14px;
+    padding: 12px 12px 9px;
   }
 
-  .chain-card-icon {
-    width: 36px;
-    height: 36px;
+  .chain-card-header {
+    align-items: flex-start;
   }
-}
-
-/* Small utility to smooth scrollbars on the menu (if browser supports it) */
-
-.network-menu-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(120, 135, 255, 0.8) transparent;
-}
-
-.network-menu-scroll::-webkit-scrollbar {
-  width: 6px;
-}
-
-.network-menu-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.network-menu-scroll::-webkit-scrollbar-thumb {
-  background: rgba(120, 135, 255, 0.8);
-  border-radius: 999px;
 }
