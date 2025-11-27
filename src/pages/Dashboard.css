@@ -220,15 +220,22 @@
   gap: 10px;
 }
 
-/* each card ~ Zerion asset card */
+/* each card asset card */
 .chain-card {
   background: #020617;
   border-radius: 22px;
   padding: 14px 14px 10px;
-  border: 1px solid rgba(31, 41, 55, 0.95);
+
+  /* neon green border */
+  border: 1px solid rgba(0, 255, 140, 0.35);
+
+  /* soft outer glow + subtle inner glow */
   box-shadow:
-    0 14px 34px rgba(15, 23, 42, 0.9),
-    0 0 0 1px rgba(15, 23, 42, 0.85);
+    0 0 18px rgba(0, 255, 140, 0.18),
+    0 0 4px rgba(0, 255, 140, 0.25) inset,
+    0 14px 34px rgba(0, 0, 0, 0.65);
+  
+  transition: all 0.25s ease;
 }
 
 /* Header row */
@@ -365,4 +372,13 @@
   .chain-card-header {
     align-items: flex-start;
   }
+}
+
+.chain-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(0, 255, 160, 0.55);
+  box-shadow:
+    0 0 25px rgba(0, 255, 160, 0.35),
+    0 0 6px rgba(0, 255, 160, 0.35) inset,
+    0 18px 40px rgba(0, 0, 0, 0.75);
 }
