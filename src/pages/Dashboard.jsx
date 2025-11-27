@@ -24,9 +24,13 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false)
   const [priceLoading, setPriceLoading] = useState(false)
 
-  // ---------------------------------------------------------------------------
-  // 1) Hydrate results from last scan if we have them
-  // ---------------------------------------------------------------------------
+  // network filter UI
+  const [filterChainId, setFilterChainId] = useState('all')
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  // -------------------------
+  // 1) Hydrate last scan
+  // -------------------------
   useEffect(() => {
     try {
       const cached = sessionStorage.getItem('dustclaim:lastScan')
@@ -37,13 +41,13 @@ export default function Dashboard() {
         }
       }
     } catch {
-      // ignore cache errors
+      // ignore
     }
   }, [setResults])
 
-  // ---------------------------------------------------------------------------
-  // 2) Auto-scan when wallet connects and no results yet
-  // ---------------------------------------------------------------------------
+  // -------------------------
+  // 2) Auto-scan on connect
+  // -------------------------
   useEffect(() => {
     if (address && results.length === 0) {
       rescanAllChains()
@@ -57,13 +61,11 @@ export default function Dashboard() {
     setPriceLoading(true)
     try {
       const chainIds = Object.keys(SUPPORTED_CHAINS).map(Number)
-
-      // pass current settings so claimableTokens matches UI
       const scan = await web3Service.scanChains(chainIds, address, settings)
+
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-
       sessionStorage.setItem(
         'dustclaim:lastScan',
         JSON.stringify(
@@ -85,12 +87,10 @@ export default function Dashboard() {
     setPriceLoading(true)
     try {
       const chainIds = results.map((r) => r.chainId)
-
       const scan = await web3Service.scanChains(chainIds, address, settings)
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-
       sessionStorage.setItem(
         'dustclaim:lastScan',
         JSON.stringify(
@@ -105,10 +105,10 @@ export default function Dashboard() {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // 3) Build "action universe" = tokens matching dust settings (for dust stats)
-  // ---------------------------------------------------------------------------
-  const buildActionUniverse = useMemo(() => {
+  // -------------------------
+  // 3) Build action universe
+  // -------------------------
+  const actionUniverse = useMemo(() => {
     const list = []
 
     for (const chain of results) {
@@ -135,7 +135,7 @@ export default function Dashboard() {
         continue
       }
 
-      // Backwards-compatible path: tokenDetails + settings thresholds
+      // fallback path based on settings thresholds
       for (const t of sourceTokens) {
         const usdValue = Number(t.value || 0)
 
@@ -172,29 +172,26 @@ export default function Dashboard() {
     return list
   }, [results, settings.includeNonDust, settings.tokenMinUSD, settings.tokenMaxUSD])
 
-  // ---------------------------------------------------------------------------
-  // 4) Aggregate dust by chain
-  // ---------------------------------------------------------------------------
+  // -------------------------
+  // 4) Aggregate by chain
+  // -------------------------
   const actionByChain = useMemo(() => {
     const m = {}
-    for (const item of buildActionUniverse) {
+    for (const item of actionUniverse) {
       const key = String(item.chainId)
       if (!m[key]) m[key] = { value: 0, count: 0 }
       m[key].value += Number(item.usd || 0)
       m[key].count += 1
     }
     return m
-  }, [buildActionUniverse])
+  }, [actionUniverse])
 
   const totalDustValue = useMemo(
     () => Object.values(actionByChain).reduce((s, x) => s + x.value, 0),
     [actionByChain]
   )
 
-  const totalTokens = useMemo(
-    () => buildActionUniverse.length,
-    [buildActionUniverse]
-  )
+  const totalTokens = useMemo(() => actionUniverse.length, [actionUniverse])
 
   const activeChains = useMemo(
     () =>
@@ -208,206 +205,249 @@ export default function Dashboard() {
     [results, actionByChain]
   )
 
-  // ---------------------------------------------------------------------------
-  // 5) NEW: full portfolio value across all chains
-  // (native + ALL tokens with USD prices)
-  // ---------------------------------------------------------------------------
-  const portfolioTotalUsd = useMemo(() => {
-    return results.reduce((sum, chain) => {
-      const nativeUsd = Number(chain.nativeValue || 0)
+  // -------------------------
+  // 5) Network list for dropdown
+  // -------------------------
+  const chainSummaries = useMemo(
+    () =>
+      results.map((r) => {
+        const meta = SUPPORTED_CHAINS[r.chainId] || {}
+        const action = actionByChain[String(r.chainId)] || { value: 0, count: 0 }
 
-      const tokensUsd = (chain.tokenDetails || []).reduce(
-        (s, t) => s + Number(t.value || 0),
-        0
-      )
+        const total =
+          action.value || r.totalValue || r.nativeValue || 0
 
-      return sum + nativeUsd + tokensUsd
-    }, 0)
-  }, [results])
+        return {
+          chainId: r.chainId,
+          name: meta.name || `Chain ${r.chainId}`,
+          symbol: meta.symbol || '',
+          logo:
+            meta.logo ||
+            NATIVE_LOGOS[r.chainId] ||
+            '/logos/chains/generic.png',
+          totalUsd: total
+        }
+      }),
+    [results, actionByChain]
+  )
 
+  const filteredResults = useMemo(
+    () =>
+      filterChainId === 'all'
+        ? results
+        : results.filter((r) => String(r.chainId) === String(filterChainId)),
+    [results, filterChainId]
+  )
+
+  const currentFilterLabel =
+    filterChainId === 'all'
+      ? 'All Networks'
+      : chainSummaries.find((c) => String(c.chainId) === String(filterChainId))
+          ?.name || 'All Networks'
+
+  const currentFilterLogo =
+    filterChainId === 'all'
+      ? '/logo/ethereum.png'
+      : chainSummaries.find((c) => String(c.chainId) === String(filterChainId))
+          ?.logo || '/logo/ethereum.png'
+
+  // -------------------------
+  // RENDER
+  // -------------------------
   return (
     <div className="dashboard">
-      {/* Header / hero */}
-      <div className="dashboard-header">
-        <h1>Dashboard</h1>
-        <p>Wallet-style overview of your dust and multi-chain balance.</p>
+      {/* Network selector (Zerion-style) */}
+      <div className="network-dropdown-wrapper">
+        <button
+          type="button"
+          className="network-selector"
+          onClick={() => setMenuOpen((x) => !x)}
+        >
+          <img
+            src={currentFilterLogo}
+            alt=""
+            className="network-selector-icon"
+          />
+          <span>{currentFilterLabel}</span>
+          <span className="chevron">{menuOpen ? '▴' : '▾'}</span>
+        </button>
 
-        <div className="price-refresh">
-          <button
-            onClick={refreshPrices}
-            disabled={priceLoading}
-            className="btn btn-outline btn-sm"
-          >
-            {priceLoading ? '🔄 Updating…' : '🔄 Refresh Prices'}
-          </button>
-        </div>
+        {menuOpen && (
+          <div className="network-menu">
+            <div
+              className="network-menu-item"
+              onClick={() => {
+                setFilterChainId('all')
+                setMenuOpen(false)
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img
+                  src="/logo/ethereum.png"
+                  alt="All networks"
+                  className="network-menu-icon"
+                />
+                <span>All Networks</span>
+              </div>
+              <span className="network-usd">{usd(totalDustValue)}</span>
+            </div>
+
+            <div className="network-menu-scroll">
+              {chainSummaries.map((c) => (
+                <div
+                  key={c.chainId}
+                  className="network-menu-item"
+                  onClick={() => {
+                    setFilterChainId(c.chainId)
+                    setMenuOpen(false)
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8
+                    }}
+                  >
+                    <img
+                      src={c.logo}
+                      alt={c.name}
+                      className="network-menu-icon"
+                    />
+                    <span>{c.name}</span>
+                  </div>
+                  <span className="network-usd">{usd(c.totalUsd)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Top stats (wallet-like overview) */}
-      <div className="stats-grid">
-        {/* Portfolio total across all chains */}
-        <div className="stat-card primary">
-          <div className="stat-icon">👛</div>
-          <div className="stat-content">
-            <h3>Total Portfolio Value</h3>
-            <div className="stat-value">{usd(portfolioTotalUsd)}</div>
-            <div className="stat-subtitle">
-              Native + tokens across every supported chain
-            </div>
-          </div>
+      {/* Summary stats */}
+      <div className="stats-row">
+        <div className="stat-box primary">
+          <div className="stat-label">Total Claimable Dust</div>
+          <div className="stat-value">{usd(totalDustValue)}</div>
         </div>
-
-        {/* Dust only (based on settings) */}
-        <div className="stat-card">
-          <div className="stat-icon">🧹</div>
-          <div className="stat-content">
-            <h3>Total Claimable Dust</h3>
-            <div className="stat-value">{usd(totalDustValue)}</div>
-            <div className="stat-subtitle">
-              Using your current dust settings (
-              {settings.includeNonDust ? 'swap everything' : 'USD window'}
-              )
-            </div>
-          </div>
+        <div className="stat-box">
+          <div className="stat-label">Active Chains</div>
+          <div className="stat-value">{activeChains}</div>
         </div>
-
-        {/* Chains / tokens */}
-        <div className="stat-card">
-          <div className="stat-icon">🔗</div>
-          <div className="stat-content">
-            <h3>Active Chains</h3>
-            <div className="stat-value">{activeChains}</div>
-            <div className="stat-subtitle">
-              {totalTokens} tokens matching your dust settings
-            </div>
-          </div>
+        <div className="stat-box">
+          <div className="stat-label">Tokens Found</div>
+          <div className="stat-value">{totalTokens}</div>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="actions-section">
+      <div className="action-row">
         <button
+          type="button"
+          className="btn-primary"
           onClick={() => navigate('/scanner')}
-          className="btn btn-primary btn-large"
         >
           🔍 Advanced Dust Scanner
         </button>
         <button
+          type="button"
+          className="btn-secondary"
           onClick={rescanAllChains}
           disabled={loading}
-          className="btn btn-secondary"
         >
-          {loading ? '🔄 Scanning…' : '🔄 Rescan All Chains'}
+          {loading ? '🔄 Scanning…' : '🔄 Rescan'}
         </button>
         <button
+          type="button"
+          className="btn-secondary"
           onClick={refreshPrices}
           disabled={priceLoading}
-          className="btn btn-outline"
         >
           {priceLoading ? '📊 Updating…' : '📊 Refresh Prices'}
         </button>
       </div>
 
       {/* Chain cards */}
-      <div className="chains-section">
-        <h2>
-          Chain Overview{' '}
-          {priceLoading && (
-            <span className="loading-badge">Updating Prices…</span>
-          )}
-        </h2>
+      {filteredResults.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">🎉</div>
+          <h3>No balances found yet</h3>
+          <p>Connect your wallet and run a scan to see your multi-chain overview.</p>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => navigate('/scanner')}
+          >
+            Run Advanced Scan
+          </button>
+        </div>
+      ) : (
+        <div className="chain-list">
+          {filteredResults.map((r) => {
+            const meta = SUPPORTED_CHAINS[r.chainId] || {}
+            const action = actionByChain[String(r.chainId)] || {
+              value: 0,
+              count: 0
+            }
+            const chainTotalUsd =
+              action.value || r.totalValue || r.nativeValue || 0
+            const logo =
+              meta.logo ||
+              NATIVE_LOGOS[r.chainId] ||
+              '/logos/chains/generic.png'
 
-        {results.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">🎉</div>
-            <h3>No balances found yet</h3>
-            <p>
-              Connect your wallet and run a scan to see your multi-chain
-              overview.
-            </p>
-            <button
-              onClick={() => navigate('/scanner')}
-              className="btn btn-primary"
-            >
-              Run Advanced Scan
-            </button>
-          </div>
-        ) : (
-          <div className="chains-grid">
-            {results.map((r) => {
-              const meta = SUPPORTED_CHAINS[r.chainId] || {}
-              const nativeLogo =
-                meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
-              const action = actionByChain[String(r.chainId)] || {
-                value: 0,
-                count: 0
-              }
-
-              // Full chain portfolio value (native + all tokens with prices)
-              const nativeUsd = Number(r.nativeValue || 0)
-              const tokensUsd = (r.tokenDetails || []).reduce(
-                (s, t) => s + Number(t.value || 0),
-                0
-              )
-              const chainPortfolioUsd = nativeUsd + tokensUsd
-
-              return (
-                <div
-                  key={r.chainId}
-                  className={`chain-card ${action.count ? 'has-dust' : ''}`}
-                >
-                  <div className="chain-header">
-                    <div className="chain-info">
-                      <img
-                        className="chain-logo"
-                        src={nativeLogo}
-                        alt={meta.name}
-                      />
-                      <div>
-                        <h3>{meta.name}</h3>
-                        <p className="chain-value">
-                          {usd(chainPortfolioUsd)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="chain-balance">
-                      <div className="native-balance">
-                        {fmt(r.nativeBalance)} {meta.symbol}
-                      </div>
-                      <div className="token-count">
-                        {action.count} tokens matching settings
-                      </div>
+            return (
+              <div key={r.chainId} className="chain-card">
+                <div className="chain-card-header">
+                  <img
+                    src={logo}
+                    alt={meta.name}
+                    className="chain-card-icon"
+                  />
+                  <div className="chain-card-title">
+                    <h3>{meta.name || `Chain ${r.chainId}`}</h3>
+                    <div className="chain-card-usd">
+                      {usd(chainTotalUsd)}
                     </div>
                   </div>
-
-                  <div className="price-details">
-                    <div className="price-item">
-                      <span>Native:</span>
-                      <span>
-                        {fmt(r.nativeBalance)} {meta.symbol}{' '}
-                        {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
-                      </span>
-                    </div>
-
-                    {(r.tokenDetails || []).map((t, i) => (
-  <TokenRow
-    key={`${r.chainId}-${t.address}-${i}`}
-    token={{ ...t, chainId: r.chainId }}
-  />
-))}
-                  </div>
-
-                  <div className="dust-indicator">
-                    🧹 {action.count} tokens matching dust settings •{' '}
-                    {usd(action.value)}
+                  <div className="chain-card-native">
+                    {fmt(r.nativeBalance)} {meta.symbol}
                   </div>
                 </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+
+                <div className="chain-card-body">
+                  <div className="price-item">
+                    <span>Native</span>
+                    <span>
+                      {fmt(r.nativeBalance)} {meta.symbol}{' '}
+                      {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
+                    </span>
+                  </div>
+
+                  {(r.tokenDetails || [])
+                    .slice(0, 3)
+                    .map((t, i) => (
+                      <TokenRow
+                        key={`${r.chainId}-${t.address}-${i}`}
+                        token={{ ...t, chainId: r.chainId }}
+                      />
+                    ))}
+
+                  {(r.tokenDetails?.length || 0) > 3 && (
+                    <div className="token-more">
+                      +{r.tokenDetails.length - 3} more tokens
+                    </div>
+                  )}
+                </div>
+
+                <div className="dust-footer">
+                  🧹 {action.count} tokens matching dust settings
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
