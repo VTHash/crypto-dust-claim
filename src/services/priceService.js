@@ -65,14 +65,14 @@ const PLATFORM_BY_CHAIN = {
   10: 'optimistic-ethereum', // Optimism
   56: 'binance-smart-chain', // BNB Smart Chain
   100: 'xdai', // Gnosis (xDAI)
-  137: 'polygon-pos', // Polygon PoS
+  137: 'polygon', // Polygon PoS
   250: 'fantom', // Fantom Opera
   8453: 'base', // Base
   59144: 'linea', // Linea
   34443: 'mode', // Mode
   42161: 'arbitrum-one', // Arbitrum One
   43114: 'avalanche', // Avalanche C
-  1329: 'sei-network', // Sei
+  1329: 'sei', // Sei
   1313161554: 'aurora', // Aurora
   42220: 'celo', // Celo
   1284: 'moonbeam', // Moonbeam
@@ -92,11 +92,11 @@ const PLATFORM_BY_CHAIN = {
   81457:  'blast',
   1868: 'soneium',
   480: 'worldcoin',
-  1135: 'Lisk',
-  1923: 'Swellchain',
-  2741: 'Abstract',
-  747474: 'Katana',
-  146: 'Sonic',
+  1135: 'lisk',
+  1923: 'swellchain',
+  2741: 'abstract',
+  747474: 'katana',
+  146: 'sonic',
   // 80094: 'berachain', // add when officially on CG
   // others (zkSync, Palm, etc.) can be added as CG lists them
 }
@@ -106,32 +106,46 @@ const PLATFORM_BY_CHAIN = {
  * If a chain is missing here, its native price will be 0 until we map it.
  */
 const NATIVE_ID_BY_CHAIN = {
-  1: 'ethereum', // ETH
-  10: 'ethereum', // Optimism uses ETH
-  56: 'binancecoin', // BNB
-  100: 'xdai', // xDAI
-  137: 'matic-network', // MATIC
-  195: 'okb', // OKB (for X1 – approximation)
-  250: 'fantom', // FTM
-  8453: 'ethereum', // Base uses ETH
-  59144: 'ethereum', // Linea uses ETH
-  34443: 'ethereum', // Mode uses ETH
-  42161: 'ethereum', // Arbitrum uses ETH
-  43114: 'avalanche-2', // AVAX
-  1329: 'sei-network', // SEI
-  1313161554: 'ethereum', // Aurora uses ETH
-  42220: 'celo', // CELO
-  1284: 'moonbeam', // GLMR
-  1285: 'moonriver', // MOVR
-  1666600000: 'harmony', // ONE
-  170: 'ethereum', // Unichain uses ETH
-  324: 'ethereum', // zkSync uses ETH
-  5000: 'mantle', // Mantle mainnet
-  // 388: 'cronos', // double-check before enabling zkCRO mapping
-  // 11297108109: 'palm', // enable once confirmed
-  // 80094: 'ethereum', // don't guess BERA price – leave 0 until listed
-  // 7777777: 'ethereum', // same for Zora
+ 1: 'ethereum', // Ethereum Mainnet
+  10: 'optimistic-ethereum', // Optimism
+  56: 'binance-smart-chain', // BNB Smart Chain
+  100: 'xdai', // Gnosis (xDAI)
+  137: 'polygon', // Polygon PoS
+  250: 'fantom', // Fantom Opera
+  8453: 'base', // Base
+  59144: 'linea', // Linea
+  34443: 'mode', // Mode
+  42161: 'arbitrum-one', // Arbitrum One
+  43114: 'avalanche', // Avalanche C
+  1329: 'sei', // Sei
+  1313161554: 'aurora', // Aurora
+  42220: 'celo', // Celo
+  1284: 'moonbeam', // Moonbeam
+  1285: 'moonriver', // Moonriver
+  1666600000: 'harmony-shard-0', // Harmony shard 0
+  170: 'unichain', // Unichain (when listed)
+  7777777: 'zora',
+  5000: 'mantle',
+  14: 'flare',
+  40: 'telos',
+  50: 'xdc',
+  57: 'syscoin',
+  61: 'ethereum-classic',
+  57073:'inkonchain',
+  122: 'fuse',
+  60808: 'bob',
+  81457:  'blast',
+  1868: 'soneium',
+  480: 'worldcoin',
+  1135: 'lisk',
+  1923: 'swellchain',
+  2741: 'abstract',
+  747474: 'katana',
+  146: 'sonic',
+  // 80094: 'berachain', // add when officially on CG
+  // others (zkSync, Palm, etc.) can be added as CG lists them
 }
+
 
 // ----------------- exported helpers -----------------
 

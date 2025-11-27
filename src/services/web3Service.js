@@ -1,7 +1,7 @@
-// src/services/web3Service.js
 import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import priceService from './priceService'
+import { discoverAllERC20s } from './tokenDiscoveryService'
 
 const toKey = (id) => String(id)
 
@@ -50,81 +50,38 @@ class Web3Service {
     }
   }
 
-  async _readErc20Balance(provider, tokenAddress, userAddress) {
-    const abi = [
-      'function balanceOf(address) view returns (uint256)',
-      'function decimals() view returns (uint8)',
-      'function symbol() view returns (string)'
-    ]
-    const c = new ethers.Contract(tokenAddress, abi, provider)
-    const [raw, decimals, symbol] = await Promise.all([
-      c.balanceOf(userAddress),
-      c.decimals(),
-      c.symbol().catch(() => '') // some tokens throw on symbol()
-    ])
-    return { amount: ethers.formatUnits(raw, decimals), decimals, symbol }
-  }
-
-  // Curated token list per chain (extend any time)
-  TOKENS = {
-    '1': {
-      USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
-      USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-      DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
-      WBTC: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
-      UNI: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984',
-      // add MODE, AAVE, SHIB, etc. by address if you want them visible too
-    },
-    '10': {
-      USDC: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607',
-      USDT: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
-    },
-    '137': {
-      USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
-      USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-      DAI: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
-    },
-    '42161': {
-      USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
-      USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
-    },
-    '56': {
-      USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
-      USDT: '0x55d398326f99059fF775485246999027B3197955'
-    }
-    // …add the rest of the chains you’ve enabled
-  }
-
+  // AUTO-DISCOVERY FOR ERC-20s (replaces manual TOKENS map)
   async getTokenBalances(chainId, address) {
-    const key = toKey(chainId)
-    const entries = Object.entries(this.TOKENS[key] || {})
-    if (!entries.length) return []
-
-    const provider = this.getProvider(key)
+    const provider = this.getProvider(chainId)
     if (!provider) return []
 
+    // discover all ERC-20s for this wallet on this chain
+    const discovered = await discoverAllERC20s({
+      provider,
+      chainId: Number(chainId),
+      owner: address
+    })
+
     const out = []
-    for (const [symbolGuess, token] of entries) {
+    for (const t of discovered) {
       try {
-        const { amount, decimals, symbol } = await this._readErc20Balance(
-          provider,
-          token,
-          address
-        )
-        const bal = parseFloat(amount)
+        const decimals = t.decimals ?? 18
+        const human = ethers.formatUnits(t.balance, decimals)
+        const bal = parseFloat(human)
         if (bal > 0) {
           out.push({
-            symbol: symbol || symbolGuess,
-            balance: amount,
-            address: token,
+            symbol: t.symbol || 'TOKEN',
+            balance: human,
+            address: t.address,
             decimals,
-            chainId: Number(key)
+            chainId: Number(chainId)
           })
         }
       } catch {
-        // ignore single token failures
+        // ignore malformed tokens
       }
     }
+
     return out
   }
 
