@@ -67,7 +67,7 @@ const WalletScreen = () => {
             <div className="feature-card">
               <div className="feature-icon">🔍</div>
               <h3>Multi-Chain Scan</h3>
-              <p>Scan 20+ chains for native & ERC-20 balances.</p>
+              <p>Scan 30+ chains for native & ERC-20 balances.</p>
             </div>
             <div className="feature-card">
               <div className="feature-icon">💱</div>
