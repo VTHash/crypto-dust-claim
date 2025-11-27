@@ -37,7 +37,7 @@ cg.interceptors.response.use((response) => {
     const cacheKey = response.config.url + JSON.stringify(response.config.params || {})
     priceCache.set(cacheKey, {
       data: response.data,
-      timestamp: Date.now(),
+      timestamp: Date.now()
     })
   }
   return response
@@ -59,93 +59,91 @@ function getFromCache(key) {
 /**
  * EVM chainId → CoinGecko "platform" for ERC-20 token prices
  * Only chains listed here will get ERC-20 USD values.
+ * (These are platform slugs used by /simple/token_price/{platform})
  */
 const PLATFORM_BY_CHAIN = {
   1: 'ethereum', // Ethereum Mainnet
   10: 'optimistic-ethereum', // Optimism
   56: 'binance-smart-chain', // BNB Smart Chain
   100: 'xdai', // Gnosis (xDAI)
-  137: 'polygon', // Polygon PoS
+  137: 'polygon-pos', // ✅ Polygon PoS (correct platform)
   250: 'fantom', // Fantom Opera
   8453: 'base', // Base
   59144: 'linea', // Linea
-  34443: 'mode', // Mode
+  34443: 'mode', // Mode (assuming this slug; if CG differs, prices will be 0)
   42161: 'arbitrum-one', // Arbitrum One
   43114: 'avalanche', // Avalanche C
-  1329: 'sei', // Sei
+  1329: 'sei-network', // Sei
   1313161554: 'aurora', // Aurora
   42220: 'celo', // Celo
   1284: 'moonbeam', // Moonbeam
   1285: 'moonriver', // Moonriver
   1666600000: 'harmony-shard-0', // Harmony shard 0
   170: 'unichain', // Unichain (when listed)
-  7777777: 'zora',
-  5000: 'mantle',
-  14: 'flare',
-  40: 'telos',
-  50: 'xdc',
-  57: 'syscoin',
-  61: 'ethereum-classic',
-  57073:'inkonchain',
-  122: 'fuse',
-  60808: 'bob',
-  81457:  'blast',
-  1868: 'soneium',
-  480: 'worldcoin',
-  1135: 'lisk',
-  1923: 'swellchain',
-  2741: 'abstract',
-  747474: 'katana',
-  146: 'sonic',
+  7777777: 'zora', // Zora
+  5000: 'mantle', // Mantle
+  14: 'flare', // Flare
+  40: 'telos', // Telos
+  50: 'xdc', // XDC
+  57: 'syscoin', // Syscoin
+  61: 'ethereum-classic', // Ethereum Classic
+  57073: 'inkonchain', // Inkonchain (if/when listed)
+  122: 'fuse', // Fuse
+  60808: 'bob', // BOB
+  81457: 'blast', // Blast
+  1868: 'soneium', // Soneium
+  480: 'worldcoin', // World Chain (Worldcoin)
+  1135: 'lisk', // Lisk
+  1923: 'swellchain', // Swellchain
+  2741: 'abstract', // Abstract
+  747474: 'katana', // Katana
+  146: 'sonic' // Sonic
   // 80094: 'berachain', // add when officially on CG
-  // others (zkSync, Palm, etc.) can be added as CG lists them
 }
 
 /**
  * EVM chainId → CoinGecko "coin id" for native gas token
- * If a chain is missing here, its native price will be 0 until we map it.
+ * These are coin IDs used with /simple/price?ids=<coinId>&vs_currencies=usd
  */
 const NATIVE_ID_BY_CHAIN = {
- 1: 'ethereum', // Ethereum Mainnet
-  10: 'optimistic-ethereum', // Optimism
-  56: 'binance-smart-chain', // BNB Smart Chain
-  100: 'xdai', // Gnosis (xDAI)
-  137: 'polygon', // Polygon PoS
-  250: 'fantom', // Fantom Opera
-  8453: 'base', // Base
-  59144: 'linea', // Linea
-  34443: 'mode', // Mode
-  42161: 'arbitrum-one', // Arbitrum One
-  43114: 'avalanche', // Avalanche C
-  1329: 'sei', // Sei
-  1313161554: 'aurora', // Aurora
-  42220: 'celo', // Celo
-  1284: 'moonbeam', // Moonbeam
-  1285: 'moonriver', // Moonriver
-  1666600000: 'harmony-shard-0', // Harmony shard 0
-  170: 'unichain', // Unichain (when listed)
-  7777777: 'zora',
-  5000: 'mantle',
-  14: 'flare',
-  40: 'telos',
-  50: 'xdc',
-  57: 'syscoin',
-  61: 'ethereum-classic',
-  57073:'inkonchain',
-  122: 'fuse',
-  60808: 'bob',
-  81457:  'blast',
-  1868: 'soneium',
-  480: 'worldcoin',
-  1135: 'lisk',
-  1923: 'swellchain',
-  2741: 'abstract',
-  747474: 'katana',
-  146: 'sonic',
+  1: 'ethereum', // ETH
+  10: 'ethereum', // Optimism uses ETH
+  56: 'binancecoin', // BNB
+  100: 'xdai', // xDAI / Gnosis
+  137: 'matic-network', // MATIC
+  250: 'fantom', // FTM
+  8453: 'ethereum', // Base uses ETH
+  59144: 'ethereum', // Linea uses ETH
+  34443: 'ethereum', // Mode uses ETH
+  42161: 'ethereum', // Arbitrum uses ETH
+  43114: 'avalanche-2', // AVAX
+  1329: 'sei-network', // SEI
+  1313161554: 'ethereum', // Aurora uses ETH
+  42220: 'celo', // CELO
+  1284: 'moonbeam', // GLMR
+  1285: 'moonriver', // MOVR
+  1666600000: 'harmony', // ONE
+  170: 'ethereum', // Unichain uses ETH
+  7777777: 'ethereum', // Zora uses ETH
+  5000: 'mantle', // MNT
+  14: 'flare-networks', // Flare (if this slug differs, native will be 0)
+  40: 'telos', // TLOS
+  50: 'xdce-crowd-sale', // XDC (coin id used by CG)
+  57: 'syscoin', // SYS
+  61: 'ethereum-classic', // ETC
+  57073: 'inkonchain', // if listed
+  122: 'fuse', // FUSE
+  60808: 'bob', // if listed
+  81457: 'blast', // if listed
+  1868: 'soneium', // if listed
+  480: 'worldcoin', // WLD / Worldchain
+  1135: 'lisk', // LSK
+  1923: 'swellchain', // if listed
+  2741: 'abstract', // if listed
+  747474: 'katana', // if listed
+  146: 'sonic' // if listed
   // 80094: 'berachain', // add when officially on CG
-  // others (zkSync, Palm, etc.) can be added as CG lists them
 }
-
 
 // ----------------- exported helpers -----------------
 
@@ -153,7 +151,7 @@ export async function ping() {
   const result = {
     ok: false,
     message: '',
-    apiKeyLoaded: !!COINGECKO_API_KEY,
+    apiKeyLoaded: !!COINGECKO_API_KEY
   }
 
   try {
@@ -187,8 +185,8 @@ export async function getNativeUsdPrice(chainId) {
       params: {
         ids: coinId,
         vs_currencies: 'usd',
-        include_last_updated_at: true,
-      },
+        include_last_updated_at: true
+      }
     })
     const price = Number(data?.[coinId]?.usd || 0)
     priceCache.set(cacheKey, { data: price, timestamp: Date.now() })
@@ -222,8 +220,8 @@ export async function getTokenUsdPrices(chainId, addresses = []) {
       params: {
         contract_addresses: normalized.join(','),
         vs_currencies: 'usd',
-        include_last_updated_at: true,
-      },
+        include_last_updated_at: true
+      }
     })
 
     const out = {}
@@ -247,8 +245,8 @@ export async function getMultipleNativePrices(chainIds = []) {
     ...new Set(
       chainIds
         .map((id) => NATIVE_ID_BY_CHAIN[id])
-        .filter(Boolean),
-    ),
+        .filter(Boolean)
+    )
   ]
   if (!coinIds.length) return {}
 
@@ -260,8 +258,8 @@ export async function getMultipleNativePrices(chainIds = []) {
     const { data } = await cg.get('/simple/price', {
       params: {
         ids: coinIds.join(','),
-        vs_currencies: 'usd',
-      },
+        vs_currencies: 'usd'
+      }
     })
 
     const prices = {}
@@ -299,9 +297,9 @@ export async function getHistoricalPrice(chainId, address, days = 7) {
       {
         params: {
           vs_currency: 'usd',
-          days,
-        },
-      },
+          days
+        }
+      }
     )
 
     const prices = data?.prices || []
@@ -332,8 +330,8 @@ export async function getTokenMetadataAndPrice(chainId, address) {
         market_data: true,
         community_data: false,
         developer_data: false,
-        sparkline: false,
-      },
+        sparkline: false
+      }
     })
 
     const meta = {
@@ -342,7 +340,7 @@ export async function getTokenMetadataAndPrice(chainId, address) {
       decimals: data?.detail_platforms?.[platform]?.decimal_place || 18,
       price: data?.market_data?.current_price?.usd || 0,
       priceChange24h: data?.market_data?.price_change_percentage_24h || 0,
-      logo: data?.image?.small,
+      logo: data?.image?.small
     }
 
     priceCache.set(cacheKey, { data: meta, timestamp: Date.now() })
@@ -408,8 +406,8 @@ export function getCacheStats() {
     size: priceCache.size,
     entries: Array.from(priceCache.entries()).map(([key, v]) => ({
       key,
-      ageMs: Date.now() - v.timestamp,
-    })),
+      ageMs: Date.now() - v.timestamp
+    }))
   }
 }
 
@@ -423,7 +421,7 @@ const priceService = {
   getTokenMetadataAndPrice,
   calculateTotalDustValue,
   clearPriceCache,
-  getCacheStats,
+  getCacheStats
 }
 
 export default priceService
