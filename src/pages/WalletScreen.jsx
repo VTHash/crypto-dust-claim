@@ -3,7 +3,6 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
-import { CryptoDustCanvas } from '../components/CryptoDustCanvas'
 
 const metamaskLogo = '/logo/metamask.png'
 
@@ -54,9 +53,6 @@ const WalletScreen = () => {
     <main className="container">
       {/* HERO */}
       <section className="hero">
-  <div className="hero-canvas">
-    <CryptoDustCanvas size={320} /> {/* perfect for mobile */}
-  </div>
 
   <div className="hero-text">
     <p>Claim your crypto dust across multiple blockchains.</p>
