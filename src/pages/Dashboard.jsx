@@ -106,7 +106,7 @@ export default function Dashboard() {
   }
 
   // -------------------------
-  // 3) Build action universe
+  // 3) Build action universe (for dust stats)
   // -------------------------
   const actionUniverse = useMemo(() => {
     const list = []
@@ -186,9 +186,20 @@ export default function Dashboard() {
     return m
   }, [actionUniverse])
 
+  // total *dust* value (only tokens matching settings)
   const totalDustValue = useMemo(
     () => Object.values(actionByChain).reduce((s, x) => s + x.value, 0),
     [actionByChain]
+  )
+
+  // total *portfolio* value across all chains (native + all tokens)
+  const totalPortfolioValue = useMemo(
+    () =>
+      results.reduce(
+        (s, r) => s + Number(r.totalValue || r.nativeValue || 0),
+        0
+      ),
+    [results]
   )
 
   const totalTokens = useMemo(() => actionUniverse.length, [actionUniverse])
@@ -214,8 +225,7 @@ export default function Dashboard() {
         const meta = SUPPORTED_CHAINS[r.chainId] || {}
         const action = actionByChain[String(r.chainId)] || { value: 0, count: 0 }
 
-        const total =
-          action.value || r.totalValue || r.nativeValue || 0
+        const total = Number(r.totalValue || r.nativeValue || action.value || 0)
 
         return {
           chainId: r.chainId,
@@ -289,7 +299,7 @@ export default function Dashboard() {
                 />
                 <span>All Networks</span>
               </div>
-              <span className="network-usd">{usd(totalDustValue)}</span>
+              <span className="network-usd">{usd(totalPortfolioValue)}</span>
             </div>
 
             <div className="network-menu-scroll">
@@ -327,15 +337,15 @@ export default function Dashboard() {
       {/* Summary stats */}
       <div className="stats-row">
         <div className="stat-box primary">
-          <div className="stat-label">Total Claimable Dust</div>
+          <div className="stat-label">Total Portfolio Value</div>
+          <div className="stat-value">{usd(totalPortfolioValue)}</div>
+        </div>
+        <div className="stat-box">
+          <div className="stat-label">Claimable Dust (by settings)</div>
           <div className="stat-value">{usd(totalDustValue)}</div>
         </div>
         <div className="stat-box">
-          <div className="stat-label">Active Chains</div>
-          <div className="stat-value">{activeChains}</div>
-        </div>
-        <div className="stat-box">
-          <div className="stat-label">Tokens Found</div>
+          <div className="stat-label">Tokens Matching Dust Settings</div>
           <div className="stat-value">{totalTokens}</div>
         </div>
       </div>
@@ -389,8 +399,12 @@ export default function Dashboard() {
               value: 0,
               count: 0
             }
-            const chainTotalUsd =
-              action.value || r.totalValue || r.nativeValue || 0
+
+            // full chain value: totalValue preferred, then native, then dust-only
+            const chainTotalUsd = Number(
+              r.totalValue || r.nativeValue || action.value || 0
+            )
+
             const logo =
               meta.logo ||
               NATIVE_LOGOS[r.chainId] ||
@@ -424,20 +438,13 @@ export default function Dashboard() {
                     </span>
                   </div>
 
-                  {(r.tokenDetails || [])
-                    .slice(0, 3)
-                    .map((t, i) => (
-                      <TokenRow
-                        key={`${r.chainId}-${t.address}-${i}`}
-                        token={{ ...t, chainId: r.chainId }}
-                      />
-                    ))}
-
-                  {(r.tokenDetails?.length || 0) > 3 && (
-                    <div className="token-more">
-                      +{r.tokenDetails.length - 3} more tokens
-                    </div>
-                  )}
+                  {/* 🔥 show ALL tokens on this chain, not just first 3 */}
+                  {(r.tokenDetails || []).map((t, i) => (
+                    <TokenRow
+                      key={`${r.chainId}-${t.address}-${i}`}
+                      token={{ ...t, chainId: r.chainId }}
+                    />
+                  ))}
                 </div>
 
                 <div className="dust-footer">
