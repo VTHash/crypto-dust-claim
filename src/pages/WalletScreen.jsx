@@ -260,7 +260,7 @@ const WalletScreen = () => {
                 alt="GitHub"
                 className="footer-icon"
               />
-            </a><span>👈✮⋆˙Rate/Like & Follow </span>
+            </a><span>👈✮⋆˙Rate/Like & Follow 👉 </span>
 
                     <a
                     href="https://x.com/DustClaimxyz"
