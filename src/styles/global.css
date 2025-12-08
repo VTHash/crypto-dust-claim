@@ -411,7 +411,7 @@ img, svg {
 }
 
 .footer-logo {
-  height: 40px;
+  height: 60px;
   width: auto;
   margin-bottom: 0.25rem;
 }
@@ -425,6 +425,9 @@ img, svg {
 .footer-icon {
   width: 28px;
   height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.8;
   transition: opacity 0.2s ease, transform 0.2s ease;
 }

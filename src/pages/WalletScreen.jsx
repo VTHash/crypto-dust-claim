@@ -252,33 +252,35 @@ const WalletScreen = () => {
               href="https://github.com/VTHash/crypto-dust-claim"
               target="_blank"
               rel="noopener noreferrer"
-              title="View Source on GitHub"
+              title="View Source on GitHub and Give a star"
             >
+              
               <img
                 src="/logo/github-mark.png"
                 alt="GitHub"
                 className="footer-icon"
               />
-            </a>
+            </a><span>👈✮⋆˙Rate/Like & Follow </span>
 
-            <a
-              href="https://x.com/DustClaimxyz"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Follow us on X (Twitter)"
-            >
-              <img
-                src="/logo/X.png"
-                alt="Twitter"
-                className="footer-icon"
-              />
-      
-<a href="/privacy" className="privacy-link">Privacy Policy</a> |
+                    <a
+                    href="https://x.com/DustClaimxyz"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Follow us on X (Twitter)"
+                    >
+                     <img
+                     src="/logo/X.png"
+                     alt="Twitter"
+                     className="footer-icon"
+                    />
+                    </a>
+                    </div>  
+<div className="footer-legal">
+  <a href="/privacy" className="privacy-link">Privacy Policy</a> |
   <a href="/terms" className="privacy-link">Terms of Service</a> |
   <a href="/cookies" className="privacy-link">Cookie Policy</a> |
   <a href="/legal" className="privacy-link">Legal</a>
-            </a>
-          </div>
+</div>
           
         </div>
       </footer>

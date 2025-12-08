@@ -418,12 +418,33 @@
 }
 
 .brand-logo {
-  width: 36px;
-  height: 36px;
+  width: 56px;
+  height: 56px;
+  
 }
 
 .brand-icon {
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 46px;
+}
+
+.navbar-center{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.navbar-wrapper {
+  padding-top: 12px;
+  padding-bottom: 6px;
+}
+
+.navbar-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
 }
