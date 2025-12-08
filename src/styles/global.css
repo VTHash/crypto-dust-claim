@@ -515,3 +515,22 @@ img, svg {
   padding-left: 20px;
   margin-top: 8px;
 }
+
+.privacy-link {
+  color: #4effb7;
+  text-decoration: none;
+  font-size: 14px;
+  margin: 0 6px;
+}
+
+.privacy-link:hover {
+  text-decoration: underline;
+  opacity: 1;
+}
+
+.footer-divider {
+  color: #4effb7;
+  opacity: 0.6;
+  font-size: 14px;
+  margin: 0 2px;
+}

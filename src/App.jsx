@@ -18,10 +18,11 @@ import TipPill from './components/TipPill'
 import PrivacyPolicy from "./legal/PrivacyPolicy";
 import TermsOfService from "./legal/TermsOfService";
 import CookiePolicy from "./legal/CookiePolicy";
-import LegalDisclaimer from "./legal/LegalDisclaimer";
+import LegalDisclaimer from "./legal/LegalDisclaimers";
 
 // Styles
 import './App.css'
+import LegalDisclaimers from './legal/LegalDisclaimers'
 
 // Wrapper to read :address and pass it to the DustClaimAddressPage
 const DustClaimAddressRoute = () => {
@@ -85,7 +86,7 @@ element={<AnalyticsDashboard />} />
            <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<TermsOfService />} />
         <Route path="/cookies" element={<CookiePolicy />} />
-        <Route path="/legal" element={<LegalDisclaimer />} />        
+        <Route path="/legal" element={<LegalDisclaimers />} />        
         </Routes>
       </main>
       <TipPill />
