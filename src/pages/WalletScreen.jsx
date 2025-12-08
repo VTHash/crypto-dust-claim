@@ -237,18 +237,14 @@ const WalletScreen = () => {
       <footer className="app-footer">
         <div className="footer-content">
          <div className="footer-logos">
-            <img
-              src="/logo/hfv-logo.png"
-              alt="HFV Logo"
-              className="footer-logo"
-            />
+            
             <img
             src="logo/dustclaim.png"
             alt="DustClaim Logo"
             className="footer-logo"
             />
             </div>
-            <p>© 2022–2025 HFV Protocol Technologies Limited • Transparent by Design</p>
+            <p>© 2025 DustClaim • Transparent by Design</p>
         
 
           <div className="footer-links">
@@ -266,7 +262,7 @@ const WalletScreen = () => {
             </a>
 
             <a
-              href="https://x.com/HFVProtocol"
+              href="https://x.com/DustClaimxyz"
               target="_blank"
               rel="noopener noreferrer"
               title="Follow us on X (Twitter)"
@@ -276,8 +272,14 @@ const WalletScreen = () => {
                 alt="Twitter"
                 className="footer-icon"
               />
+      
+<a href="/privacy" className="privacy-link">Privacy Policy</a> |
+  <a href="/terms" className="privacy-link">Terms of Service</a> |
+  <a href="/cookies" className="privacy-link">Cookie Policy</a> |
+  <a href="/legal" className="privacy-link">Legal</a>
             </a>
           </div>
+          
         </div>
       </footer>
     </main>

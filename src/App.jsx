@@ -14,6 +14,12 @@ import ClaimScreen from './pages/ClaimScreen'
 import GlobalStatsWidget from './components/GlobalStatsWidget'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import TipPill from './components/TipPill'
+// Legal pages
+import PrivacyPolicy from "./legal/PrivacyPolicy";
+import TermsOfService from "./legal/TermsOfService";
+import CookiePolicy from "./legal/CookiePolicy";
+import LegalDisclaimer from "./legal/LegalDisclaimer";
+
 // Styles
 import './App.css'
 
@@ -76,7 +82,10 @@ element={<AnalyticsDashboard />} />
 
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
-                  
+           <Route path="/privacy" element={<PrivacyPolicy />} />
+        <Route path="/terms" element={<TermsOfService />} />
+        <Route path="/cookies" element={<CookiePolicy />} />
+        <Route path="/legal" element={<LegalDisclaimer />} />        
         </Routes>
       </main>
       <TipPill />

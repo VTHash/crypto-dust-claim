@@ -461,3 +461,57 @@ img, svg {
   border-radius: 50%;
   object-fit: cover;
 }
+
+/* Shared layout for all legal pages */
+.privacy-wrapper,
+.terms-wrapper,
+.cookie-wrapper,
+.legal-wrapper {
+  width: 100%;
+  min-height: 100vh;
+  padding: 40px 16px;
+  background: #0a0f1c;
+  display: flex;
+  justify-content: center;
+}
+
+.privacy-card,
+.terms-card,
+.cookie-card,
+.legal-card {
+  max-width: 900px;
+  background: #0f172a;
+  padding: 32px;
+  border-radius: 20px;
+  border: 1px solid rgba(0, 255, 150, 0.25);
+  box-shadow: 0 0 25px rgba(0, 255, 150, 0.15);
+  color: #e2e8f0;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.privacy-card h1,
+.terms-card h1,
+.cookie-card h1,
+.legal-card h1 {
+  color: #4effb7;
+  margin-bottom: 10px;
+  font-size: 24px;
+}
+
+.privacy-card h2,
+.terms-card h2,
+.cookie-card h2,
+.legal-card h2 {
+  margin-top: 25px;
+  color: #84ffcd;
+  font-size: 18px;
+}
+
+.privacy-card ul,
+.terms-card ul,
+.cookie-card ul,
+.legal-card ul {
+  padding-left: 20px;
+  margin-top: 8px;
+}
