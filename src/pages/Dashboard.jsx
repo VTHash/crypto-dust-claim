@@ -45,15 +45,6 @@ export default function Dashboard() {
     }
   }, [setResults])
 
-  // -------------------------
-  // 2) Auto-scan on connect
-  // -------------------------
-  useEffect(() => {
-    if (address && results.length === 0) {
-      rescanAllChains()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address])
 
   async function rescanAllChains() {
     if (!address) return

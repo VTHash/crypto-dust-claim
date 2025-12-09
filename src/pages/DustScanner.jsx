@@ -42,14 +42,6 @@ const DustScanner = () => {
     } catch {}
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // auto scan when address arrives and nothing loaded
-  useEffect(() => {
-    if (address && results.length === 0) {
-      handleScan()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, settings])
-
   const handleScan = async () => {
     if (!address) return
     setScanning(true)
