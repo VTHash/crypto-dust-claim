@@ -138,8 +138,7 @@ export default function Navbar() {
 
         {/* Secondary navbar: CoinGecko marquee directly under the main navbar */}
         <div className="navbar-secondary">
-          <div className="navbar-secondary-inner">
-            <script src="https://widgets.coingecko.com/gecko-coin-price-marquee-widget.js"></script>
+          <div className="navbar-secondary-inner">            
 <gecko-coin-price-marquee-widget locale="en" dark-mode="true" outlined="true" coin-ids="ethereum,gnosis,moonriver,moonbeam,avalanche-2,optimism,fuse-network-token,sei-network,flare-networks,uniswap,mantle,linea,telos,polygon-ecosystem-token,berachain-bera,xdce-crowd-sale,plasma,zora,binancecoin,fantom,mode,aurora-near,syscoin,zksync,arbitrum,celo,ethereum-classic,okb,harmony,bitcoin" initial-currency="usd"></gecko-coin-price-marquee-widget>
           </div>
         </div>
