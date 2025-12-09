@@ -31,16 +31,21 @@ const DustScanner = () => {
     [selectedChains]
   )
 
-  // hydrate from last run for immediate Dashboard/Scanner parity
-  useEffect(() => {
-    try {
-      const cached = sessionStorage.getItem('dustclaim:lastScan')
-      if (cached) {
-        const { dustResults = [] } = JSON.parse(cached)
-        if (dustResults.length > 0) setResults(dustResults)
-      }
-    } catch {}
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // hydrate from last run ONLY if we don't already have results in context
+ useEffect(() => {
+ if (results.length > 0) return
+ try {
+ const cached = sessionStorage.getItem('dustclaim:lastScan')
+ if (cached) {
+ const { dustResults = [] } = JSON.parse(cached)
+ if (dustResults.length > 0) {
+ setResults(dustResults)
+ }
+ }
+ } catch {
+ // ignore
+ }
+ }, [results.length, setResults])
 
   const handleScan = async () => {
     if (!address) return
