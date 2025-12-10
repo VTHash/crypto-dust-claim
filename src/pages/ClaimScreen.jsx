@@ -137,7 +137,7 @@ const ClaimScreen = () => {
     SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
   // 🔒 button disabled state (no design/logic change, just moved out of JSX)
-  const executeDisabled = claiming || walletLoading
+  const executeDisabled = claiming  // <-- ONLY block clicks while a claim is running
 
   // ============================================================================
   // A) Execute optimized claim plan (preferred path)
