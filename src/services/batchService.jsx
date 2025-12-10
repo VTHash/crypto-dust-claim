@@ -2,6 +2,7 @@ import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import web3Service from './web3Service'
 import dexAggregatorService from './dexAggregatorService'
+import axios from 'axios'
 
 /**
  * Use the same wrapped-native idea as dexAggregatorService:
@@ -49,6 +50,14 @@ const WRAPPED_NATIVE_BY_CHAIN = {
   146: "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38", // Sonic native wrapper
   
 }
+
+async function getOneInchSpender(chainId) {
+  const { data } = await axios.get(
+    `https://api.1inch.io/v5.0/${chainId}/approve/spender`
+  )
+  return data.address
+}
+
 /** Normalize any input into a wei-decimal string (no 0x). */
 const toAmountStr = (x) =>
   typeof x === 'bigint' ? x.toString() : String(x ?? '0')
@@ -118,6 +127,8 @@ class BatchService {
         // skip chains not aligned with aggregator helper
         continue
       }
+     
+      const spender = await getOneInchSpender(chainId)
 
       const steps = []
 
@@ -160,6 +171,7 @@ class BatchService {
     spender,
 
     quote: quoteMeta || {},
+    slippage: 1,
   })
 }
 
@@ -356,35 +368,39 @@ class BatchService {
   // Analytics
   // ---------------------------------------------------------------------------
   calculateGasSavings(individualTxs, batchTxs) {
-    const individualGas = (individualTxs || []).reduce((sum, tx) => {
-      const isData = tx?.data && tx.data !== '0x'
-      return sum + (isData ? 65000 : 21000)
-    }, 0)
+  const individualGas = (individualTxs || []).reduce((sum, tx) => {
+    const isData = tx?.data && tx.data !== '0x'
+    return sum + (isData ? 65000 : 21000)
+  }, 0)
 
-    const batchGas = (batchTxs || []).reduce((sum, tx) => {
-      const d = tx?.data || ''
-      if (d.includes('batchTransfer')) {
-        const approxRecipients = Math.max(0, Math.floor((d.length - 138) / 64))
-        return sum + 100000 + approxRecipients * 20000
-      }
-      if (d.includes('multiSend')) {
-        const approxTransfers = Math.max(0, Math.floor((d.length - 138) / 64))
-        return sum + 150000 + approxTransfers * 5000
-      }
-      return sum + 65000
-    }, 0)
-
-    const savings = individualGas - batchGas
-    const savingsPct = individualGas > 0 ? ((savings / individualGas) * 100).toFixed(2) : '0.00'
-
-    return {
-      individualGas,
-      batchGas,
-      savings,
-      savingsPercentage: savingsPct,
-      estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
+  const batchGas = (batchTxs || []).reduce((sum, tx) => {
+    const d = tx?.data || ''
+    if (d.includes('batchTransfer')) {
+      const approxRecipients = Math.max(0, Math.floor((d.length - 138) / 64))
+      return sum + 100000 + approxRecipients * 20000
     }
+    if (d.includes('multiSend')) {
+      const approxTransfers = Math.max(0, Math.floor((d.length - 138) / 64))
+      return sum + 150000 + approxTransfers * 5000
+    }
+    return sum + 65000
+  }, 0)
+
+  const savingsRaw = individualGas - batchGas
+  const savings = savingsRaw > 0 ? savingsRaw : 0
+  const savingsPct =
+    individualGas > 0 && savings > 0
+      ? ((savings / individualGas) * 100).toFixed(2)
+      : '0.00'
+
+  return {
+    individualGas,
+    batchGas,
+    savings,
+    savingsPercentage: savingsPct,
+    estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
   }
+}
 
   estimateGasSavingsUSD(gasUnits, chainId = 1) {
     const avgGwei = {
