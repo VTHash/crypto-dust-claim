@@ -16,7 +16,7 @@ export const CHAIN_CONFIGS = {
     name: 'Ethereum',
     symbol: 'ETH',
     rpcUrls: [
-      `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_ETH_MAINNET_API_KEY}`,
+      `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
       `https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`
     ],
     explorer: 'https://etherscan.io',
@@ -26,7 +26,7 @@ export const CHAIN_CONFIGS = {
     name: 'Polygon',
     symbol: 'MATIC', 
     rpcUrls: [
-      `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_POLYGON_MAINNET_API_KEY}`,
+      `https://polygon-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
       `https://polygon-mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`
     ],
     explorer: 'https://polygonscan.com',
