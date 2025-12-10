@@ -136,46 +136,47 @@ const ClaimScreen = () => {
   const getChainInfo = (chainId) =>
     SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
+  // 🔒 button disabled state (no design/logic change, just moved out of JSX)
+  const executeDisabled = claiming || walletLoading
+
   // ============================================================================
   // A) Execute optimized claim plan (preferred path)
   // ============================================================================
   const handleExecuteClaim = async () => {
-  if (!isConnected) {
-    setError('Connect your wallet to execute the claim.')
-    return
-  }
+    if (!isConnected) {
+      setError('Connect your wallet to execute the claim.')
+      return
+    }
 
-  setClaiming(true)
-  setError(null)
-  setClaimResults([])
-  
-  
-  
+    setClaiming(true)
+    setError(null)
+    setClaimResults([])
 
     try {
       if (planAvailable) {
-  const allResults = []
-  const planToRun = claimPlan && claimPlan.length ? claimPlan : []
+        const allResults = []
+        const planToRun = claimPlan && claimPlan.length ? claimPlan : []
 
-  for (let i = 0; i < planToRun.length; i++) {
-    const chainPlan = planToRun[i]
-    setCurrentStep(i + 1)
-    try {
-      const receipts = await executeChainPlan(chainPlan, address)
-      allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
-    } catch (e) {
-      allResults.push({
-        chainId: chainPlan.chainId,
-        success: false,
-        error: e?.message || 'Execution failed'
-      })
-    }
-    await new Promise((r) => setTimeout(r, 200))
-  }
+        for (let i = 0; i < planToRun.length; i++) {
+          const chainPlan = planToRun[i]
+          setCurrentStep(i + 1)
+          try {
+            const receipts = await executeChainPlan(chainPlan, address)
+            allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
+          } catch (e) {
+            allResults.push({
+              chainId: chainPlan.chainId,
+              success: false,
+              error: e?.message || 'Execution failed'
+            })
+          }
+          await new Promise((r) => setTimeout(r, 200))
+        }
 
-  setClaimResults(allResults)
-  return
-}
+        setClaimResults(allResults)
+        return
+      }
+
       // Fallback: build contract transactions manually
       if (!dustResults || dustResults.length === 0)
         throw new Error('Nothing to execute: no dust found')
@@ -371,21 +372,19 @@ const ClaimScreen = () => {
 
       {/* Claim Actions */}
       <div className="action-section">
-        const executeDisabled = claiming || walletLoading 
-
-<button
-  onClick={handleExecuteClaim}
-  disabled={executeDisabled}
-  className="execute-button"
->
+        <button
+          onClick={handleExecuteClaim}
+          disabled={executeDisabled}
+          className="execute-button"
+        >
           {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
         </button>
 
-      {!planAvailable && (
-        <div className="hint-banner">
-          No prepared plan from the scanner. We’ll build contract calls directly for each ERC-20 dust item.
-        </div>
-      )}
+        {!planAvailable && (
+          <div className="hint-banner">
+            No prepared plan from the scanner. We’ll build contract calls directly for each ERC-20 dust item.
+          </div>
+        )}
 
         {oneInchSingle && (
           <button
