@@ -45,40 +45,47 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   // 1) Execute each step
   for (const step of chainPlan.steps) {
     // --- 1a) Approval (if needed and not using permit) ---
-    if (step.needsApproval && !step.usePermit) {
-      try {
-        const data = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [step.spender, BigInt(step.amount)]
-        })
+if (step.needsApproval && !step.usePermit) {
+  // If we don't have a spender, skip approval instead of throwing and killing the flow
+  if (!step.spender) {
+    console.warn(
+      '[executeChainPlan] step.needsApproval=true but no step.spender set – skipping approval for this step',
+      step
+    )
+  } else {
+    try {
+      const data = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [step.spender, BigInt(step.amount)]
+      })
 
-        const res = await walletService.sendTransaction({
-          to: step.tokenIn,
-          from,
-          data
-        })
+      const res = await walletService.sendTransaction({
+        to: step.tokenIn,
+        from,
+        data
+      })
 
-        receipts.push({
-          type: 'approval',
-          ok: !!res.success,
-          txHash: res.txHash,
-          error: res.error
-        })
+      receipts.push({
+        type: 'approval',
+        ok: !!res.success,
+        txHash: res.txHash,
+        error: res.error
+      })
 
-        // If approval failed, skip the swap for this step
-        if (!res.success) continue
-      } catch (err) {
-        receipts.push({
-          type: 'approval',
-          ok: false,
-          error: err?.message || 'Approval failed'
-        })
-        // Skip swap if approval failed
-        continue
-      }
+      // If approval failed, skip the swap for this step
+      if (!res.success) continue
+    } catch (err) {
+      receipts.push({
+        type: 'approval',
+        ok: false,
+        error: err?.message || 'Approval failed'
+      })
+      // Skip swap if approval failed
+      continue
     }
-
+  }
+}
     // --- 1b) Swap ---
     try {
       let tx
