@@ -537,3 +537,15 @@ img, svg {
   font-size: 14px;
   margin: 0 2px;
 }
+
+@font-face {
+  font-family: 'KHTeka';
+  src: url('https://fonts.reown.com/KHTeka-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  font-family: 'KHTeka', sans-serif;
+}
