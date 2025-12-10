@@ -15,7 +15,7 @@ export const appKitConfig = {
   ],
   events: ['chainChanged', 'accountsChanged']
 };
-const ALCHEMY_KEY = import.meta.env.VITE_ALCHEMY_API_KEY;
+const ALCHEMY_API_KEY = import.meta.env.VITE_ALCHEMY_API_KEY;
 export const SUPPORTED_CHAINS = {
   // Ethereum and Major L2s
   1: {
@@ -23,7 +23,7 @@ export const SUPPORTED_CHAINS = {
     symbol: 'ETH',
     rpcUrl: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://etherscan.io',
-    logo: '/public/logo/ethereum.png'
+    logo: '/logo/ethereum.png'
   },
   10: {
     name: 'OP Mainnet',

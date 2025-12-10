@@ -11,8 +11,8 @@ import {
 // -------------------------------
 export const projectId =
   import.meta.env.VITE_PROJECT_ID || import.meta.env.VITE_REOWN_PROJECT_ID;
-const ALCHEMY_KEY = import.meta.env.VITE_ALCHEMY_API_KEY;
-const INFURA_KEY = import.meta.env.VITE_INFURA_PROJECT_ID;
+const ALCHEMY_API_KEY = import.meta.env.VITE_ALCHEMY_API_KEY;
+const INFURA_PROJECT_ID = import.meta.env.VITE_INFURA_PROJECT_ID;
 
 // -------------------------------
 // 2) App metadata
@@ -40,7 +40,7 @@ export const SUPPORTED_CHAINS = {
     symbol: 'ETH',
     rpcUrl: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://etherscan.io',
-    logo: '/public/logo/ethereum.png'
+    logo: '/logo/ethereum.png'
   },
   10: {
     name: 'OP Mainnet',
