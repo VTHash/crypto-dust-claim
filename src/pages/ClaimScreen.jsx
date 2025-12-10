@@ -140,6 +140,17 @@ const ClaimScreen = () => {
   // A) Execute optimized claim plan (preferred path)
   // ============================================================================
   const handleExecuteClaim = async () => {
+  if (!isConnected) {
+    setError('Connect your wallet to execute the claim.')
+    return
+  }
+
+  setClaiming(true)
+  setError(null)
+  setClaimResults([])
+  …
+  }
+  const handleExecuteClaim = async () => {
     setClaiming(true)
     setError(null)
     setClaimResults([])
@@ -363,11 +374,13 @@ const ClaimScreen = () => {
 
       {/* Claim Actions */}
       <div className="action-section">
-        <button
-          onClick={handleExecuteClaim}
-          disabled={claiming || walletLoading || !isConnected}
-          className="execute-button"
-        >
+        const executeDisabled = claiming || walletLoading 
+
+<button
+  onClick={handleExecuteClaim}
+  disabled={executeDisabled}
+  className="execute-button"
+>
           {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
         </button>
 
