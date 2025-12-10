@@ -26,7 +26,7 @@ export function getReownMetadata() {
   return {
     name: "DustClaim",
     description: "Claim your crypto dust across multiple blockchains",
-    url, // MUST match the page origin
+    url, 
     icons: ["https://dustclaim.xyz/icon.png"],
   };
 }

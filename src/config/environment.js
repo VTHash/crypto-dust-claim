@@ -305,13 +305,21 @@ export const CHAIN_CONFIGS = {
   logo: "/logo/sonic.jpg"
 },
 
+534352: {
+  name: "Scroll",
+  symbol: "ETH",
+  rpcUrl: `https://scroll-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  explorer: "https://scrollscan.com/",
+  logo: "/logo/scroll.jpg"
+},
+
 };
 
 export const DEX_CONFIG = {
   ONEINCH: {
     baseURLs: {
-      1: 'https://api.1inch.io/v5.0/1',
-      137: 'https://api.1inch.io/v5.0/137',
+      1: 'https://api.1inch.io/v6.0/1',
+      137: 'https://api.1inch.io/v6.0/137',
     },
     apiKey: ONEINCH_API_KEY
   },
