@@ -127,53 +127,56 @@ class BatchService {
         // skip chains not aligned with aggregator helper
         continue
       }
-     
-      const spender = await getOneInchSpender(chainId)
+
+      // Ask 1inch who the router/spender is on this chain
+      let spender = null
+      try {
+        spender = await getOneInchSpender(chainId)
+      } catch {
+        spender = null
+      }
+      if (!spender) {
+        // if we can't get a spender, we can't build a safe plan for this chain
+        continue
+      }
 
       const steps = []
 
-      // We’ll create one step per token (not per recipient) because dust is from the user → contract
-      // Scanner already normalizes amounts per token per chain for the current user.
+      // One step per token (dust is from user → router)
       for (const it of items) {
-  const tokenIn = it.tokenAddress
-  const rawAmount = it.amount
-  const amountWeiStr = toWeiStr18(rawAmount)
+        const tokenIn = it.tokenAddress
+        const rawAmount = it.amount
+        const amountWeiStr = toWeiStr18(rawAmount)
 
-  let quoteMeta = null
-  try {
-    quoteMeta = await dexAggregatorService.quoteOneInchSingle({
-      chainId,
-      tokenIn,
-      amount: amountWeiStr,
-      slippageBps: 100
-    })
-  } catch {
-    quoteMeta = null
-  }
+        let quoteMeta = null
+        try {
+          quoteMeta = await dexAggregatorService.quoteOneInchSingle({
+            chainId,
+            tokenIn,
+            amount: amountWeiStr,
+            slippageBps: 100
+          })
+        } catch {
+          quoteMeta = null
+        }
 
-  const spender = ONEINCH_SPENDER_BY_CHAIN[chainId]
-  if (!spender) {
-    // no known router for this chain – skip this token
-    continue
-  }
+        steps.push({
+          needsApproval: true,
+          usePermit: false,
 
-  steps.push({
-    needsApproval: true,
-    usePermit: false,
+          aggregator: '1inch',
+          tokenIn,
+          tokenOut: wrappedOut,
 
-    aggregator: '1inch',
-    tokenIn,
-    tokenOut: wrappedOut,
+          amount: amountWeiStr,
 
-    amount: amountWeiStr,
+          // used by executeChainPlan() for ERC20.approve(...)
+          spender,
 
-    // 👈 NEW: required so executeChainPlan can build ERC20.approve(...)
-    spender,
-
-    quote: quoteMeta || {},
-    slippage: 1,
-  })
-}
+          quote: quoteMeta || {},
+          slippage: 1
+        })
+      }
 
       if (steps.length) {
         plan.push({ chainId, steps })
