@@ -15,41 +15,41 @@ export const appKitConfig = {
   ],
   events: ['chainChanged', 'accountsChanged']
 };
-
+const ALCHEMY_KEY = import.meta.env.VITE_ALCHEMY_API_KEY;
 export const SUPPORTED_CHAINS = {
   // Ethereum and Major L2s
   1: {
     name: 'Ethereum',
     symbol: 'ETH',
-    rpcUrl: 'https://eth-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://etherscan.io',
     logo: '/public/logo/ethereum.png'
   },
   10: {
     name: 'OP Mainnet',
     symbol: 'ETH',
-    rpcUrl: 'https://opt-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: `https://opt-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://optimistic.etherscan.io',
     logo: '/logo/optimism.png'
   },
   8453: {
     name: 'Base',
     symbol: 'ETH',
-    rpcUrl: 'https://mainnet.base.org', // Public RPC; use Alchemy for production:cite[10]
+    rpcUrl: `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, 
     explorer: 'https://basescan.org',
     logo: '/logo/base.png'
   },
   42161: {
     name: 'Arbitrum One',
     symbol: 'ETH',
-    rpcUrl: 'https://arb-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://arbiscan.io',
     logo: '/logo/arbitrum.png'
   },
   137: {
     name: 'Polygon PoS',
     symbol: 'MATIC',
-    rpcUrl: 'https://polygon-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://polygonscan.com',
     logo: '/logo/polygon.png'
   },
@@ -58,21 +58,21 @@ export const SUPPORTED_CHAINS = {
   56: {
     name: 'BNB Smart Chain',
     symbol: 'BNB',
-    rpcUrl: 'https://bsc-dataseed.binance.org/',
+    rpcUrl: `https://bnb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://bscscan.com',
     logo: '/logo/bnb.png'
   },
   43114: {
     name: 'Avalanche C-Chain',
     symbol: 'AVAX',
-    rpcUrl: 'https://avalanche-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY',
+    rpcUrl: `https://avax-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://snowscan.xyz/',
     logo: '/logo/avalanche.png'
   },
   100: {
     name: 'Gnosis',
     symbol: 'xDAI',
-    rpcUrl: 'https://rpc.gnosischain.com',
+    rpcUrl: `https://gnosis-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://gnosisscan.io',
     logo: '/logo/gnosis.png'
   },
@@ -86,7 +86,7 @@ export const SUPPORTED_CHAINS = {
   59144: {
     name: 'Linea',
     symbol: 'ETH',
-    rpcUrl: 'https://linea-mainnet.infura.io/v3/YOUR_INFURA_KEY',
+    rpcUrl: `https://linea-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://lineascan.build',
     logo: '/logo/linea.png'
   },
@@ -95,28 +95,28 @@ export const SUPPORTED_CHAINS = {
   7777777: {
     name: 'Zora',
     symbol: 'ETH',
-    rpcUrl: 'https://rpc.zora.energy',
+    rpcUrl: `https://zora-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://explorer.zora.energy',
     logo: '/logo/zora.jpg'
   },
   34443: {
     name: 'Mode',
     symbol: 'ETH',
-    rpcUrl: 'https://mainnet.mode.network',
+    rpcUrl: `https://mode-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://modescan.io',
     logo: '/logo/routescan.jpg'
   },
   1329: {
-    name: 'Sei Network', // V2 is EVM-compatible:cite[3]
+    name: 'Sei Network', 
     symbol: 'SEI',
-    rpcUrl: 'https://evm-rpc.sei-apis.com/', // Confirm the latest RPC
+    rpcUrl: `https://sei-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, 
     explorer: 'https://seitrace.com',
     logo: '/logo/sei.png'
   },
   80094: {
-    name: 'Berachain', // EVM-compatible L1:cite[3]
+    name: 'Berachain',
     symbol: 'BERA',
-    rpcUrl: 'https://rpc.berachain.com/', // Confirm the latest RPC
+    rpcUrl: `https://berachain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: 'https://berascan.com',
     logo: '/logo/bera.png'
   },
@@ -125,7 +125,7 @@ export const SUPPORTED_CHAINS = {
   42220: {
     name: "Celo Mainnet",
     symbol: "CELO",
-    rpcUrl: "https://rpc.ankr.com/celo",
+    rpcUrl: `https://celo-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: "https://celoscan.io",
     logo: "/logo/celo.png",
   },
@@ -141,7 +141,7 @@ export const SUPPORTED_CHAINS = {
   1284: {
     name: "Moonbeam",
     symbol: "GLMR",
-    rpcUrl: "https://moonbeam.drpc.org",
+    rpcUrl: `https://moonbeam-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     explorer: "https://moonscan.io",
     logo: "/logo/moonbeam.png",
   },
@@ -159,7 +159,7 @@ export const SUPPORTED_CHAINS = {
   324: {
   name: "zkSync Mainnet",
   symbol: "ETH",
-  rpcUrl: "https://rpc.ankr.com/zksync_era",
+  rpcUrl: `https://zksync-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://explorer.zksync.io",
   logo: "/logo/zksync.jpg",
 },
@@ -167,7 +167,7 @@ export const SUPPORTED_CHAINS = {
 9745: {
   name: "Plasma Mainnet",
   symbol: "XPL",
-  rpcUrl: "https://plasma.drpc.org",
+  rpcUrl: `https://plasma-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://plasmascan.to/",
   logo: "/logo/plasma.png",
 },
@@ -175,7 +175,7 @@ export const SUPPORTED_CHAINS = {
 130: {
   name: "Unichain",
   symbol: "ETH",
-  rpcUrl: "https://unichain.drpc.org",
+  rpcUrl: `https://unichain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://uniscan.xyz",
   logo: "/logo/unichain.png",
 },
@@ -183,7 +183,7 @@ export const SUPPORTED_CHAINS = {
 5000: {
   name: "Mantle",
   symbol: "MNT",
-  rpcUrl: "https://mantle.drpc.org",
+  rpcUrl: `https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://explorer.mantlenetwork.io",
   logo: "/logo/mantle.png",
 },
@@ -210,7 +210,7 @@ export const SUPPORTED_CHAINS = {
 57: {
   name: "Syscoin",
   symbol: "SYS",
-  rpcUrl: "https://rpc.syscoin.org",
+  rpcUrl: "https://syscoin-evm.publicnode.com",
   explorer: "https://explorer.syscoin.org",
   logo: "/logo/sys.jpg"
 },
@@ -234,8 +234,8 @@ export const SUPPORTED_CHAINS = {
 57073: {
   name: "Inkonchain",
   symbol: "ETH",
-  rpcUrl: "https://ink.drpc.org", // adjust if you use a different RPC endpoint
-  explorer: "https://explorer.inkonchain.com", // or your preferred explorer URL
+  rpcUrl: `https://ink-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`, // adjust if you use a different RPC endpoint
+  explorer: "https://explorer.inkonchain.com", 
   logo: "/logo/ink.png" 
 },
 
@@ -250,7 +250,7 @@ export const SUPPORTED_CHAINS = {
 81457: {
   name: "Blast Mainnet",
   symbol: "ETH",
-  rpcUrl: "https://rpc.blast.io",
+  rpcUrl: `https://blast-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://blastscan.io",
   logo: "/logo/blast.jpeg"
 },
@@ -258,7 +258,7 @@ export const SUPPORTED_CHAINS = {
 1868: {
   name: "Soneium",
   symbol: "ETH",
-  rpcUrl: "https://soneium.drpc.org",
+  rpcUrl: `https://soneium-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://mainnet-explorer.soneium.org",
   logo: "/logo/soneium.jpg"
 },
@@ -266,7 +266,7 @@ export const SUPPORTED_CHAINS = {
 480: {
   name: "World Chain",
   symbol: "ETH",
-  rpcUrl: "https://worldchain-mainnet.g.alchemy.com/public",
+  rpcUrl: `https://worldchain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://worldchain-mainnet.explorer.alchemy.com",
   logo: "/logo/worldcoin.png"
 },
@@ -290,7 +290,7 @@ export const SUPPORTED_CHAINS = {
 2741: {
   name: "Abstract",
   symbol: "ETH",
-  rpcUrl: "https://api.mainnet.abs.xyz",
+  rpcUrl: `https://abstract-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://abscan.org/",
   logo: "/logo/abstract.png"
 },
@@ -306,7 +306,7 @@ export const SUPPORTED_CHAINS = {
 146: {
   name: "Sonic",
   symbol: "S",
-  rpcUrl: "https://rpc.soniclabs.com",
+  rpcUrl: `https://sonic-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://sonicscan.org",
   logo: "/logo/sonic.jpg"
 },
