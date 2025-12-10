@@ -148,12 +148,9 @@ const ClaimScreen = () => {
   setClaiming(true)
   setError(null)
   setClaimResults([])
-  }
   
-  const handleExecuteClaim = async () => {
-    setClaiming(true)
-    setError(null)
-    setClaimResults([])
+  
+  
 
     try {
       if (planAvailable) {
