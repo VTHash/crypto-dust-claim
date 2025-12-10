@@ -143,6 +143,16 @@ const ClaimScreen = () => {
   // A) Execute optimized claim plan (preferred path)
   // ============================================================================
   const handleExecuteClaim = async () => {
+    console.log('[ClaimScreen] Execute button clicked', {
+      isConnected,
+      walletLoading,
+      claiming,
+      planAvailable,
+      claimPlanLen: claimPlan?.length || 0,
+      batchLen: batchTransactions?.length || 0,
+      dustLen: dustResults?.length || 0,
+    })
+
     if (!isConnected) {
       setError('Connect your wallet to execute the claim.')
       return
