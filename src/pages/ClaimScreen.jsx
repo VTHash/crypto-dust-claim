@@ -146,34 +146,28 @@ const ClaimScreen = () => {
 
     try {
       if (planAvailable) {
-        const allResults = []
-        const planToRun =
-          claimPlan && claimPlan.length
-            ? claimPlan
-            : batchTransactions.length
-            ? [{ chainId: batchTransactions[0]?.chainId, steps: batchTransactions }]
-            : []
+  const allResults = []
+  const planToRun = claimPlan && claimPlan.length ? claimPlan : []
 
-        for (let i = 0; i < planToRun.length; i++) {
-          const chainPlan = planToRun[i]
-          setCurrentStep(i + 1)
-          try {
-            const receipts = await executeChainPlan(chainPlan, address)
-            allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
-          } catch (e) {
-            allResults.push({
-              chainId: chainPlan.chainId,
-              success: false,
-              error: e?.message || 'Execution failed'
-            })
-          }
-          await new Promise((r) => setTimeout(r, 200))
-        }
+  for (let i = 0; i < planToRun.length; i++) {
+    const chainPlan = planToRun[i]
+    setCurrentStep(i + 1)
+    try {
+      const receipts = await executeChainPlan(chainPlan, address)
+      allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
+    } catch (e) {
+      allResults.push({
+        chainId: chainPlan.chainId,
+        success: false,
+        error: e?.message || 'Execution failed'
+      })
+    }
+    await new Promise((r) => setTimeout(r, 200))
+  }
 
-        setClaimResults(allResults)
-        return
-      }
-
+  setClaimResults(allResults)
+  return
+}
       // Fallback: build contract transactions manually
       if (!dustResults || dustResults.length === 0)
         throw new Error('Nothing to execute: no dust found')

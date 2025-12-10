@@ -124,43 +124,44 @@ class BatchService {
       // We’ll create one step per token (not per recipient) because dust is from the user → contract
       // Scanner already normalizes amounts per token per chain for the current user.
       for (const it of items) {
-        const tokenIn = it.tokenAddress
-        const rawAmount = it.amount // could be decimal or wei
-        // we don't know token decimals here; treat amount as already in wei if no dot, else parse as 18
-        const amountWeiStr = toWeiStr18(rawAmount)
+  const tokenIn = it.tokenAddress
+  const rawAmount = it.amount
+  const amountWeiStr = toWeiStr18(rawAmount)
 
-        // Ask our aggregator helper for a minOut (safe placeholder). No calldata here.
-        let quoteMeta = null
-        try {
-          quoteMeta = await dexAggregatorService.quoteOneInchSingle({
-            chainId,
-            tokenIn,
-            amount: amountWeiStr,
-            slippageBps: 100 // 1%
-          })
-        } catch {
-          quoteMeta = null
-        }
+  let quoteMeta = null
+  try {
+    quoteMeta = await dexAggregatorService.quoteOneInchSingle({
+      chainId,
+      tokenIn,
+      amount: amountWeiStr,
+      slippageBps: 100
+    })
+  } catch {
+    quoteMeta = null
+  }
 
-        steps.push({
-          // approval control – executeChainPlan will send ERC20.approve if needed
-          needsApproval: true,
-          usePermit: false,
+  const spender = ONEINCH_SPENDER_BY_CHAIN[chainId]
+  if (!spender) {
+    // no known router for this chain – skip this token
+    continue
+  }
 
-          // route
-          aggregator: '1inch',
-          tokenIn,
-          tokenOut: wrappedOut,
+  steps.push({
+    needsApproval: true,
+    usePermit: false,
 
-          // amounts
-          amount: amountWeiStr,
+    aggregator: '1inch',
+    tokenIn,
+    tokenOut: wrappedOut,
 
-          // optional pricing meta
-          quote: quoteMeta || {},
+    amount: amountWeiStr,
 
-          // (optionally you could include a preferred slippage / recipient fields)
-        })
-      }
+    // 👈 NEW: required so executeChainPlan can build ERC20.approve(...)
+    spender,
+
+    quote: quoteMeta || {},
+  })
+}
 
       if (steps.length) {
         plan.push({ chainId, steps })
