@@ -1,3 +1,4 @@
+// src/services/permissionlessContractService.js
 import { ethers } from 'ethers'
 import { DUSTCLAIM_ABI, getAddressForChain } from '../config/contracts'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
@@ -30,48 +31,23 @@ function getDustClaimContract(chainId, signerOrProvider) {
 
 class PermissionlessContractService {
   /**
-   * Single token -> ETH via 1inch router calldata
-   * @param {string} token ERC20 token address
-   * @param {bigint|string|number} minReturnWei minimum ETH out (wei)
-   * @param {string} swapDataBytes 1inch API tx.data (0x…)
+   * 🚫 DISABLED: 1inch router path
+   * Contract still has claimDustToETH, but we are not using 1inch from the app anymore.
+   * If some old UI still calls this, it will error clearly.
    */
-  async claimDust1inch(token, minReturnWei, swapDataBytes) {
-    const { signer, chainId } = await requireSignerAndChain()
-    const contract = getDustClaimContract(chainId, signer)
-
-    const tx = await contract.claimDustToETH(
-      token,
-      ethers.toBigInt(minReturnWei),
-      swapDataBytes
-    )
-    const receipt = await tx.wait()
-    return { success: true, txHash: tx.hash, receipt }
+  async claimDust1inch(_token, _minReturnWei, _swapDataBytes) {
+    throw new Error('1inch router path is disabled. Use Uniswap or a 0x swap instead.')
   }
 
   /**
-   * Batch tokens -> ETH via 1inch router calldata (up to your contract limit)
-   * @param {string[]} tokens
-   * @param {(bigint|string|number)[]} minReturnsWei
-   * @param {string[]} swapDatasBytes
+   * 🚫 DISABLED: 1inch batch router path
    */
-  async claimDustBatch1inch(tokens, minReturnsWei, swapDatasBytes) {
-    if (
-      tokens.length !== minReturnsWei.length ||
-      tokens.length !== swapDatasBytes.length
-    ) {
-      throw new Error('Array length mismatch')
-    }
-    const { signer, chainId } = await requireSignerAndChain()
-    const contract = getDustClaimContract(chainId, signer)
-
-    const minOuts = minReturnsWei.map(ethers.toBigInt)
-    const tx = await contract.claimDustBatchToETH(tokens, minOuts, swapDatasBytes)
-    const receipt = await tx.wait()
-    return { success: true, txHash: tx.hash, receipt }
+  async claimDustBatch1inch(_tokens, _minReturnsWei, _swapDatasBytes) {
+    throw new Error('1inch batch path is disabled. Use Uniswap or a 0x swap instead.')
   }
 
   /**
-   * Single token -> ETH via Uniswap V3
+   * ✅ Single token -> ETH via Uniswap V3 (DustClaim.claimDustViaUniswap)
    * @param {string} token
    * @param {number} fee 500 | 3000 | 10000, etc.
    * @param {bigint|string|number} minReturnWei
