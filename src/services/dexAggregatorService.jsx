@@ -48,14 +48,13 @@ const WRAPPED_NATIVE_BY_CHAIN = {
 
 /**
  * 0x API hosts are chain-specific. Use the correct base for each chain.
- * (These are the official public endpoints; unsupported chains should return null.)
  */
 const ZEROX_HOST_BY_CHAIN = {
   1: 'https://api.0x.org',
   10: 'https://optimism.api.0x.org',
   56: 'https://bsc.api.0x.org',
   137: 'https://polygon.api.0x.org',
-  42161:'https://arbitrum.api.0x.org',
+  42161: 'https://arbitrum.api.0x.org',
   8453: 'https://base.api.0x.org',
 }
 
@@ -65,111 +64,17 @@ const toAmountStr = (amount) =>
 
 class DexAggregatorService {
   constructor() {
-    // 1inch supported hosts we plan to use
-    this.oneInchBaseURLs = {
-      1: 'https://api.1inch.io/v5.0/1',
-      10: 'https://api.1inch.io/v5.0/10',
-      56: 'https://api.1inch.io/v5.0/56',
-      137: 'https://api.1inch.io/v5.0/137',
-      42161: 'https://api.1inch.io/v5.0/42161',
-      8453: 'https://api.1inch.io/v5.0/8453',
-    }
-
-    // Paraswap main endpoints
-    this.paraswapBaseURL = 'https://api.paraswap.io/v2'
+    // 0x only – no extra constructor state needed
   }
 
   // ---------------------------------------------------------------------------
-  // Best-quote selector across 1inch / ParaSwap / 0x
+  // Best-quote selector (0x only)
   // ---------------------------------------------------------------------------
   async getBestQuote(chainId, fromToken, toToken, amount, slippagePct = 1) {
     const amt = toAmountStr(amount)
-    try {
-      const quotes = await Promise.allSettled([
-        this.get1InchQuote(chainId, fromToken, toToken, amt),
-        this.getParaswapQuote(chainId, fromToken, toToken, amt, slippagePct),
-        this.get0xQuote(chainId, fromToken, toToken, amt, slippagePct),
-      ])
-
-      const valid = quotes
-        .filter((r) => r.status === 'fulfilled' && r.value)
-        .map((r) => r.value)
-
-      if (!valid.length) throw new Error('No quotes available from aggregators')
-
-      // Pick the highest output amount
-      valid.sort((a, b) => {
-        const A = BigInt(a.toTokenAmount || '0')
-        const B = BigInt(b.toTokenAmount || '0')
-        return B > A ? 1 : B < A ? -1 : 0
-      })
-
-      return valid[0]
-    } catch (err) {
-      console.error('Error getting best quote:', err)
-      throw err
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // 1inch
-  // ---------------------------------------------------------------------------
-  async get1InchQuote(chainId, fromToken, toToken, amount) {
-    try {
-      const base = this.oneInchBaseURLs[Number(chainId)]
-      if (!base) throw new Error(`1inch not supported on chain ${chainId}`)
-
-      // 1inch /quote is a pure quote (no slippage/tx)
-      const { data } = await axios.get(`${base}/quote`, {
-        params: {
-          fromTokenAddress: fromToken,
-          toTokenAddress: toToken,
-          amount: toAmountStr(amount),
-        },
-      })
-
-      return {
-        fromTokenAmount: toAmountStr(amount),
-        toTokenAmount: data?.toTokenAmount ?? '0',
-        estimatedGas: data?.estimatedGas ?? null,
-        transaction: null,
-        aggregator: '1inch',
-      }
-    } catch (error) {
-      console.error('1inch quote error:', error?.response?.data || error.message)
-      return null
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // ParaSwap (prices only; tx needs user address & /transactions)
-  // ---------------------------------------------------------------------------
-  async getParaswapQuote(chainId, fromToken, toToken, amount, _slippagePct = 1) {
-    try {
-      const { data } = await axios.get(`${this.paraswapBaseURL}/prices`, {
-        params: {
-          srcToken: fromToken,
-          destToken: toToken,
-          srcAmount: toAmountStr(amount),
-          side: 'SELL',
-          network: Number(chainId),
-        },
-      })
-
-      const route = data?.priceRoute
-      if (!route) return null
-
-      return {
-        fromTokenAmount: toAmountStr(amount),
-        toTokenAmount: route.destAmount ?? '0',
-        estimatedGas: route.gasCost ?? null,
-        transaction: null,
-        aggregator: 'paraswap',
-      }
-    } catch (error) {
-      console.error('Paraswap quote error:', error?.response?.data || error.message)
-      return null
-    }
+    const quote = await this.get0xQuote(chainId, fromToken, toToken, amt, slippagePct)
+    if (!quote) throw new Error('No quotes available from 0x')
+    return quote
   }
 
   // ---------------------------------------------------------------------------
@@ -203,18 +108,23 @@ class DexAggregatorService {
   }
 
   // ===========================================================================
-  // Helpers your UI expects (safe stubs — you can wire a backend later)
+  // Helpers your UI expects (still named *OneInch*/Uniswap but use 0x under hood)
   // ===========================================================================
 
   /**
-   * Quote a single-token sell → wrapped-native via 1inch, return a minOut buffer.
-   * We do NOT fabricate router calldata in the browser. Use a backend for that.
+   * Quote a single-token sell → wrapped-native via 0x, return a minOut buffer.
    */
   async quoteOneInchSingle({ chainId, tokenIn, amount, slippageBps = 100 }) {
     const wrapped = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
     if (!wrapped) return null
 
-    const q = await this.get1InchQuote(chainId, tokenIn, wrapped, toAmountStr(amount))
+    const q = await this.get0xQuote(
+      chainId,
+      tokenIn,
+      wrapped,
+      toAmountStr(amount),
+      slippageBps / 100
+    )
     if (!q?.toTokenAmount) return null
 
     const toAmt = BigInt(q.toTokenAmount)
@@ -222,12 +132,12 @@ class DexAggregatorService {
 
     return {
       quotedMinOutWei: minOutWei.toString(),
-      calldata: null, // build with backend if you want to call the contract path client-side
+      calldata: null, // build with backend if you want contract calldata
     }
   }
 
   /**
-   * Quote a batch of sells → wrapped-native via 1inch.
+   * Quote a batch of sells → wrapped-native via 0x.
    * Returns arrays aligned with tokens (datas = '0x' placeholders).
    */
   async quoteOneInchBatch(items = [], slippageBps = 100) {
@@ -255,8 +165,7 @@ class DexAggregatorService {
 
   /**
    * “Quote” Uniswap V3 single hop token → wrapped-native.
-   * Without an onchain quoter in the browser, we provide a neutral minOut (0).
-   * Your contract enforces minReturnAmount the user supplies.
+   * Kept as a neutral stub (minOutWei = 0) so existing UI doesn’t break.
    */
   async quoteUniswapSingle({ chainId, tokenIn, amount, fee = 3000, ttlSec = 900 }) {
     const wrapped = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
@@ -264,25 +173,20 @@ class DexAggregatorService {
 
     return {
       fee,
-      minOutWei: '0', // neutral; safe but no slippage protection
+      minOutWei: '0',
       ttlSec,
     }
   }
 
   // ===========================================================================
-  // Execution helpers (when an aggregator returns a ready transaction object)
+  // Execution helpers (when 0x returns a ready transaction object)
   // ===========================================================================
 
   async executeSwap(quote, signer) {
     const { aggregator, transaction } = quote || {}
     if (!signer || !transaction) throw new Error('Missing signer or transaction')
 
-    // All of these provide a tx-like object { to, data, value, gas* }
-    if (aggregator === '1inch') {
-      return this.executeDirectTx(transaction, signer, 300000n)
-    } else if (aggregator === 'paraswap') {
-      return this.executeDirectTx(transaction, signer, 350000n)
-    } else if (aggregator === '0x') {
+    if (aggregator === '0x') {
       return this.executeDirectTx(transaction, signer, 300000n)
     }
 
@@ -296,13 +200,17 @@ class DexAggregatorService {
 
     const value =
       txData.value != null
-        ? (typeof txData.value === 'string' ? BigInt(txData.value) : BigInt(txData.value))
+        ? typeof txData.value === 'string'
+          ? BigInt(txData.value)
+          : BigInt(txData.value)
         : 0n
 
     const gasLimitRaw = txData.gas ?? txData.gasLimit ?? txData.gasLimitHex ?? null
     const gasLimit =
       gasLimitRaw != null
-        ? (typeof gasLimitRaw === 'string' ? BigInt(gasLimitRaw) : BigInt(gasLimitRaw))
+        ? typeof gasLimitRaw === 'string'
+          ? BigInt(gasLimitRaw)
+          : BigInt(gasLimitRaw)
         : fallbackGas
 
     const tx = await signer.sendTransaction({ to, data, value, gasLimit })
