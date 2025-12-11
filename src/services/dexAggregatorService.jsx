@@ -70,11 +70,16 @@ class DexAggregatorService {
   // ---------------------------------------------------------------------------
   // Best-quote selector (0x only)
   // ---------------------------------------------------------------------------
-  async getBestQuote(chainId, fromToken, toToken, amount, slippagePct = 1) {
+      async getBestQuote(chainId, fromToken, toToken, amount, slippagePct = 1) {
     const amt = toAmountStr(amount)
-    const quote = await this.get0xQuote(chainId, fromToken, toToken, amt, slippagePct)
-    if (!quote) throw new Error('No quotes available from 0x')
-    return quote
+    try {
+      const quote = await this.get0xQuote(chainId, fromToken, toToken, amt, slippagePct)
+      if (!quote) throw new Error('No quotes available from 0x')
+      return quote
+    } catch (err) {
+      console.error('Error getting best quote (0x):', err)
+      throw err
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -108,64 +113,30 @@ class DexAggregatorService {
   }
 
   // ===========================================================================
-  // Helpers your UI expects (still named *OneInch*/Uniswap but use 0x under hood)
+  // Helpers your UI expects (but 1inch is now DISABLED)
   // ===========================================================================
 
   /**
-   * Quote a single-token sell → wrapped-native via 0x, return a minOut buffer.
+   * Previously: quote single-token → wrapped-native via 1inch.
+   * Now: we DISABLE this and return null so the 1inch quick button disappears.
    */
-  async quoteOneInchSingle({ chainId, tokenIn, amount, slippageBps = 100 }) {
-    const wrapped = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
-    if (!wrapped) return null
-
-    const q = await this.get0xQuote(
-      chainId,
-      tokenIn,
-      wrapped,
-      toAmountStr(amount),
-      slippageBps / 100
-    )
-    if (!q?.toTokenAmount) return null
-
-    const toAmt = BigInt(q.toTokenAmount)
-    const minOutWei = (toAmt * BigInt(10000 - Number(slippageBps))) / BigInt(10000)
-
-    return {
-      quotedMinOutWei: minOutWei.toString(),
-      calldata: null, // build with backend if you want contract calldata
-    }
+  async quoteOneInchSingle(_opts) {
+    // 1inch path disabled
+    return null
   }
 
   /**
-   * Quote a batch of sells → wrapped-native via 0x.
-   * Returns arrays aligned with tokens (datas = '0x' placeholders).
+   * Previously: quote batch via 1inch.
+   * Now: disabled, returns null.
    */
-  async quoteOneInchBatch(items = [], slippageBps = 100) {
-    const tokens = []
-    const minOutsWei = []
-    const datas = []
-
-    for (const it of items) {
-      const res = await this.quoteOneInchSingle({
-        chainId: it.chainId,
-        tokenIn: it.token,
-        amount: it.amount,
-        slippageBps,
-      })
-      if (res?.quotedMinOutWei) {
-        tokens.push(it.token)
-        minOutsWei.push(res.quotedMinOutWei)
-        datas.push('0x') // placeholder; real calldata should come from a backend
-      }
-    }
-
-    if (!tokens.length) return null
-    return { tokens, minOutsWei, datas }
+  async quoteOneInchBatch(_items = [], _slippageBps = 100) {
+    // 1inch path disabled
+    return null
   }
 
   /**
    * “Quote” Uniswap V3 single hop token → wrapped-native.
-   * Kept as a neutral stub (minOutWei = 0) so existing UI doesn’t break.
+   * Still just returns neutral minOut=0 – your contract enforces slippage via user’s minReturn.
    */
   async quoteUniswapSingle({ chainId, tokenIn, amount, fee = 3000, ttlSec = 900 }) {
     const wrapped = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
@@ -173,13 +144,13 @@ class DexAggregatorService {
 
     return {
       fee,
-      minOutWei: '0',
+      minOutWei: '0', // neutral; safe but no slippage protection
       ttlSec,
     }
   }
 
   // ===========================================================================
-  // Execution helpers (when 0x returns a ready transaction object)
+  // Execution helpers (when an aggregator returns a ready transaction object)
   // ===========================================================================
 
   async executeSwap(quote, signer) {
@@ -190,7 +161,7 @@ class DexAggregatorService {
       return this.executeDirectTx(transaction, signer, 300000n)
     }
 
-    throw new Error('Unsupported aggregator for execution')
+    throw new Error('Unsupported aggregator for execution (only 0x is enabled now)')
   }
 
   async executeDirectTx(txData, signer, fallbackGas = 300000n) {
@@ -200,17 +171,13 @@ class DexAggregatorService {
 
     const value =
       txData.value != null
-        ? typeof txData.value === 'string'
-          ? BigInt(txData.value)
-          : BigInt(txData.value)
+        ? (typeof txData.value === 'string' ? BigInt(txData.value) : BigInt(txData.value))
         : 0n
 
     const gasLimitRaw = txData.gas ?? txData.gasLimit ?? txData.gasLimitHex ?? null
     const gasLimit =
       gasLimitRaw != null
-        ? typeof gasLimitRaw === 'string'
-          ? BigInt(gasLimitRaw)
-          : BigInt(gasLimitRaw)
+        ? (typeof gasLimitRaw === 'string' ? BigInt(gasLimitRaw) : BigInt(gasLimitRaw))
         : fallbackGas
 
     const tx = await signer.sendTransaction({ to, data, value, gasLimit })
