@@ -164,7 +164,7 @@ class BatchService {
           needsApproval: true,
           usePermit: false,
 
-          aggregator: '1inch',
+          aggregator: '0x',
           tokenIn,
           tokenOut: wrappedOut,
 
