@@ -3,6 +3,16 @@ import axios from 'axios'
 import walletService from './walletService'
 import { erc20Abi, encodeFunctionData } from 'viem'
 
+// 0x API hosts per chain
+const ZEROX_HOST_BY_CHAIN = {
+  1: 'https://api.0x.org',
+  10: 'https://optimism.api.0x.org',
+  56: 'https://bsc.api.0x.org',
+  137: 'https://polygon.api.0x.org',
+  42161: 'https://arbitrum.api.0x.org',
+  8453: 'https://base.api.0x.org'
+}
+
 // -------------------------------
 // Public: execute one chain plan
 // -------------------------------
@@ -45,57 +55,55 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   // 1) Execute each step
   for (const step of chainPlan.steps) {
     // --- 1a) Approval (if needed and not using permit) ---
-if (step.needsApproval && !step.usePermit) {
-  // If we don't have a spender, skip approval instead of throwing and killing the flow
-  if (!step.spender) {
-    console.warn(
-      '[executeChainPlan] step.needsApproval=true but no step.spender set – skipping approval for this step',
-      step
-    )
-  } else {
-    try {
-      const data = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: 'approve',
-        args: [step.spender, BigInt(step.amount)]
-      })
-
-      const res = await walletService.sendTransaction({
-        to: step.tokenIn,
-        from,
-        data
-      })
-
-      receipts.push({
-        type: 'approval',
-        ok: !!res.success,
-        txHash: res.txHash,
-        error: res.error
-      })
-
-      // If approval failed, skip the swap for this step
-      if (!res.success) continue
-    } catch (err) {
-      receipts.push({
-        type: 'approval',
-        ok: false,
-        error: err?.message || 'Approval failed'
-      })
-      // Skip swap if approval failed
-      continue
-    }
-  }
-}
-    // --- 1b) Swap ---
-    try {
-      let tx
-      if (step.aggregator === '1inch') {
-        tx = await buildOneInchSwapTx(Number(chainPlan.chainId), step, from)
-      } else if (step.aggregator === 'paraswap') {
-        tx = await buildParaswapTx(Number(chainPlan.chainId), step, from)
+    if (step.needsApproval && !step.usePermit) {
+      // If we don't have a spender, skip approval instead of killing the flow
+      if (!step.spender) {
+        console.warn(
+          '[executeChainPlan] step.needsApproval=true but no step.spender set – skipping approval for this step',
+          step
+        )
       } else {
-        throw new Error(`Unsupported aggregator: ${step.aggregator}`)
+        try {
+          const data = encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [step.spender, BigInt(step.amount)]
+          })
+
+          const res = await walletService.sendTransaction({
+            to: step.tokenIn,
+            from,
+            data
+          })
+
+          receipts.push({
+            type: 'approval',
+            ok: !!res.success,
+            txHash: res.txHash,
+            error: res.error
+          })
+
+          // If approval failed, skip the swap for this step
+          if (!res.success) continue
+        } catch (err) {
+          receipts.push({
+            type: 'approval',
+            ok: false,
+            error: err?.message || 'Approval failed'
+          })
+          // Skip swap if approval failed
+          continue
+        }
       }
+    }
+
+    // --- 1b) Swap (0x only now) ---
+    try {
+      if (step.aggregator !== '0x') {
+        throw new Error(`Unsupported aggregator: ${step.aggregator || 'none'} (only 0x supported now)`)
+      }
+
+      const tx = await build0xSwapTx(Number(chainPlan.chainId), step, from)
 
       const res = await walletService.sendTransaction(tx)
 
@@ -118,64 +126,35 @@ if (step.needsApproval && !step.usePermit) {
 }
 
 // -------------------------------
-// Helpers: aggregator tx builders
+// Helpers: 0x tx builder
 // -------------------------------
 
 /**
- * Build a sendable tx for 1inch /swap (v5 API).
- * Add `permit` to params if your step carries it (step.permit).
+ * Build a sendable tx for 0x /swap/v1/quote.
+ * Uses step.{tokenIn, tokenOut, amount, slippage} and takerAddress = from.
  */
-async function buildOneInchSwapTx(chainId, step, from) {
-  const base = `https://api.1inch.io/v5.0/${chainId}`
-
-  const params = {
-    fromTokenAddress: step.tokenIn,
-    toTokenAddress: step.tokenOut,
-    amount: String(step.amount), // wei (string)
-    fromAddress: from,
-    slippage: step.slippage ?? 1,
-    disableEstimate: true
+async function build0xSwapTx(chainId, step, from) {
+  const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
+  if (!host) {
+    throw new Error(`0x not supported on chain ${chainId}`)
   }
 
-  // Optional: pass permit if you have it on step
-  if (step.permit) params.permit = step.permit
+  const slippagePct = step.slippage != null ? Number(step.slippage) : 1 // 1% default
 
-  const { data } = await axios.get(`${base}/swap`, { params })
-
-  // data.tx typically includes { to, data, value, gas, gasPrice, etc. }
-  // We only pass the fields wallets need; wallet/provider will populate the rest.
-  return {
-    from,
-    to: data.tx.to,
-    data: data.tx.data,
-    value: data.tx.value ?? '0x0' // 1inch returns hex string or number
-  }
-}
-
-/**
- * Build a sendable tx for Paraswap:
- * Assumes `step.quote.route` exists (from your earlier price call).
- */
-async function buildParaswapTx(chainId, step, from) {
-  if (!step.quote?.route) {
-    throw new Error('Missing Paraswap priceRoute on step.quote.route')
-  }
-  const priceRoute = step.quote.route
-
-  const { data } = await axios.post(
-    `https://api.paraswap.io/transactions/${chainId}`,
-    {
-      srcToken: step.tokenIn,
-      destToken: step.tokenOut,
-      srcAmount: String(step.amount), // wei
-      destAmount: priceRoute.destAmount,
-      priceRoute,
-      userAddress: from,
-      slippage: step.slippageBps ?? 100 // 1% default in bps
+  const { data } = await axios.get(`${host}/swap/v1/quote`, {
+    params: {
+      sellToken: step.tokenIn,
+      buyToken: step.tokenOut,
+      sellAmount: String(step.amount), // wei (string)
+      takerAddress: from,
+      slippagePercentage: slippagePct / 100
     }
-  )
+  })
 
-  // Paraswap returns a populated tx object
+  if (!data?.to || !data?.data) {
+    throw new Error('Malformed 0x quote response')
+  }
+
   return {
     from,
     to: data.to,
