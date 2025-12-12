@@ -18,7 +18,8 @@ export const NATIVE_LOGOS = {
   81457: '/logo/blast.png', // Blast
   250: '/logo/fantom.png', // Fantom
   32456: '/logo/scroll.png', // Scroll
-  80085: '/logo/bera.png' // Berachain (example)
+  80085: '/logo/bera.png', // Berachain (example)
+  534352: '/logo/scroll.png' // Scroll
 }
 
 // ✅ Chain name mapping for TrustWallet repo folder paths
