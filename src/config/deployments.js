@@ -344,6 +344,15 @@ export const DEPLOYMENTS = {
   uniswapV3Router: null // no confirmed Uni v2/v3 router address yet
 },
 
+534352: {
+  chainId: 534352,
+  name: "Scroll",
+  dustclaim: "0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46",
+  weth: "0x4200000000000000000000000000000000000006", // WETH on Scroll
+  oneInchRouter: "0x0000000000000000000000000000000000000000", // no 1inch on Scroll
+  uniswapV3Router: null // no Uni v3 router on Scroll
+}
+
   }
 
 

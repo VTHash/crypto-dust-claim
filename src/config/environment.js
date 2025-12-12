@@ -310,7 +310,7 @@ export const CHAIN_CONFIGS = {
   symbol: "ETH",
   rpcUrl: `https://scroll-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://scrollscan.com/",
-  logo: "/logo/scroll.jpg"
+  logo: "/logo/scroll.png"
 },
 
 };
