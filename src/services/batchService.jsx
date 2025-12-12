@@ -1,12 +1,13 @@
+// src/services/batchService.jsx
 import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import web3Service from './web3Service'
-import dexAggregatorService from './dexAggregatorService' // kept to avoid breaking other imports/usage
+import dexAggregatorService from './dexAggregatorService' // kept (not used for 0x plan) to avoid breaking other imports
 import axios from 'axios'
 
 /**
- * Use the same wrapped-native idea:
- * sell token -> wrapped-native (WETH/WBNB/WMATIC...) then your contract un-wraps to native.
+ * Wrapped native per chain (used ONLY as fallback output token if no outTokenByChain provided)
+ * Keep this in sync with your project expectations.
  */
 const WRAPPED_NATIVE_BY_CHAIN = {
   1: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
@@ -49,7 +50,9 @@ const WRAPPED_NATIVE_BY_CHAIN = {
   146: "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38",
 }
 
-// 0x API hosts per chain (must be these, NOT wrapped token addresses)
+/**
+ * 0x API hosts per chain
+ */
 const ZEROX_HOST_BY_CHAIN = {
   1: 'https://api.0x.org',
   10: 'https://optimism.api.0x.org',
@@ -57,44 +60,27 @@ const ZEROX_HOST_BY_CHAIN = {
   137: 'https://polygon.api.0x.org',
   42161: 'https://arbitrum.api.0x.org',
   8453: 'https://base.api.0x.org',
+  // add more if/when 0x supports them
 }
 
-// Minimal ERC20 ABI helper
-const ERC20_DECIMALS_ABI = ['function decimals() view returns (uint8)']
-
-/** Normalize any input into a string. */
+/** Normalize any input into a wei-decimal string */
 const toAmountStr = (x) =>
   typeof x === 'bigint' ? x.toString() : String(x ?? '0')
 
-/** Convert "amount" into base units with correct decimals (best effort). */
-async function toBaseUnitsStr({ chainId, tokenAddress, amount }) {
-  const s = String(amount ?? '0')
-  // if already a big integer string (no dot), assume it's already base units
-  if (!s.includes('.')) return s
-
-  // else parse with real decimals
-  try {
-    const provider = web3Service.getProvider(chainId)
-    const erc = new ethers.Contract(tokenAddress, ERC20_DECIMALS_ABI, provider)
-    const dec = Number(await erc.decimals())
-    return ethers.parseUnits(s, dec).toString()
-  } catch {
-    // fallback to 18 if decimals fetch fails
-    return ethers.parseUnits(s, 18).toString()
-  }
+/**
+ * Best-effort: if a decimal string, parse with decimals; otherwise assume already wei string
+ */
+const toWeiStr = (maybeDecimal, decimals = 18) => {
+  const s = String(maybeDecimal ?? '0')
+  if (s.includes('.')) return ethers.parseUnits(s, decimals).toString()
+  return s
 }
 
 /**
- * Fetch 0x allowanceTarget (spender) by requesting a quote.
- * NOTE: 0x returns allowanceTarget on the quote response.
+ * Ask 0x for allowanceTarget by requesting a quote.
+ * NOTE: this does NOT execute anything — it only returns the spender address.
  */
-async function get0xAllowanceTarget({
-  chainId,
-  sellToken,
-  buyToken,
-  sellAmount,
-  slippagePercentage = 0.01,
-}) {
+async function get0xAllowanceTarget({ chainId, sellToken, buyToken, sellAmountWei }) {
   const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
   if (!host) return null
 
@@ -102,8 +88,8 @@ async function get0xAllowanceTarget({
     params: {
       sellToken,
       buyToken,
-      sellAmount: String(sellAmount),
-      slippagePercentage,
+      sellAmount: String(sellAmountWei),
+      slippagePercentage: 0.01,
     },
   })
 
@@ -116,33 +102,32 @@ class BatchService {
       'function approve(address spender, uint256 amount) external returns (bool)',
       'function transfer(address to, uint256 amount) external returns (bool)',
       'function balanceOf(address) view returns (uint256)',
-      'function decimals() view returns (uint8)',
+      'function decimals() view returns (uint8)'
     ]
 
     this.batchTransferABI = [
       'function batchTransfer(address token, address[] calldata recipients, uint256[] calldata amounts) external',
-      'function batchTransferETH(address[] calldata recipients, uint256[] calldata amounts) external payable',
+      'function batchTransferETH(address[] calldata recipients, uint256[] calldata amounts) external payable'
     ]
 
     this.BATCH_CONTRACTS = {
-      // optional
+      // (optional legacy)
     }
   }
 
   // ===========================================================================
-  // PREFERRED: Build an execution PLAN used by ClaimScreen -> executeChainPlan
-  // NOW: 0x ONLY (no 1inch / no uniswap / no paraswap)
+  // ✅ PREFERRED: Build PLAN for ClaimScreen -> executeChainPlan (0x only)
   // ===========================================================================
 
   /**
-   * claims = [
-   * { chainId, tokenAddress, tokenSymbol, amount, recipient }
-   * ]
-   * Produces:
-   * plan = [{ chainId, steps: [{ aggregator:'0x', tokenIn, tokenOut, amount, spender, needsApproval, usePermit, slippage }] }]
+   * claims = [{ chainId, tokenAddress, tokenSymbol, amount, decimals, recipient }]
+   * options = { outTokenByChain?: { [chainId]: address }, slippagePct?: number }
    */
-  async buildClaimPlan(claims = []) {
+  async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || !claims.length) return []
+
+    const outTokenByChain = options.outTokenByChain || {}
+    const slippagePct = Number(options.slippagePct ?? 1)
 
     // Group by chain
     const perChain = new Map()
@@ -155,63 +140,47 @@ class BatchService {
     const plan = []
 
     for (const [chainId, items] of perChain.entries()) {
-      const wrappedOut = WRAPPED_NATIVE_BY_CHAIN[chainId]
-      if (!wrappedOut) continue
+      // Decide output token:
+      const tokenOut =
+        outTokenByChain?.[chainId] ||
+        WRAPPED_NATIVE_BY_CHAIN?.[chainId] ||
+        ''
 
-      const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
-      if (!host) continue
+      if (!tokenOut) continue
 
       const steps = []
 
       for (const it of items) {
         const tokenIn = it.tokenAddress
-        if (!tokenIn) continue
+        const decimals = Number(it.decimals ?? 18)
 
-        // IMPORTANT: 0x needs base units
-        const sellAmountWeiStr = await toBaseUnitsStr({
+        // IMPORTANT: step.amount MUST be wei string for executeChainPlan approvals + 0x quote
+        const sellAmountWei = toWeiStr(it.amount, decimals)
+
+        // Get allowanceTarget from 0x
+        const spender = await get0xAllowanceTarget({
           chainId,
-          tokenAddress: tokenIn,
-          amount: it.amount,
+          sellToken: tokenIn,
+          buyToken: tokenOut,
+          sellAmountWei
         })
 
-        // skip empty
-        if (!sellAmountWeiStr || sellAmountWeiStr === '0' || sellAmountWeiStr === '0x0') continue
-
-        // get allowance target (spender) from 0x quote
-        let spender = null
-        try {
-          spender = await get0xAllowanceTarget({
-            chainId,
-            sellToken: tokenIn,
-            buyToken: wrappedOut,
-            sellAmount: sellAmountWeiStr,
-            slippagePercentage: 0.01, // 1%
-          })
-        } catch {
-          spender = null
-        }
         if (!spender) continue
 
         steps.push({
-          // ClaimExecutor will do approve() if neededApproval=true and usePermit=false
           needsApproval: true,
           usePermit: false,
 
           aggregator: '0x',
           tokenIn,
-          tokenOut: wrappedOut,
+          tokenOut,
 
-          // must be wei/base units string
-          amount: sellAmountWeiStr,
+          amount: sellAmountWei,
 
-          // executeChainPlan uses this spender for ERC20 approve
           spender,
 
-          // executeChainPlan uses step.slippage (percent)
-          slippage: 1,
-
-          // keep a spot for UI/debug
-          quote: {},
+          quote: {}, // optional metadata
+          slippage: slippagePct
         })
       }
 
@@ -224,7 +193,7 @@ class BatchService {
   }
 
   // ===========================================================================
-  // LEGACY: Create raw batch transactions (fallback). ClaimScreen supports it.
+  // LEGACY: Create raw batch transactions (fallback). Not used for 0x swap plans.
   // ===========================================================================
 
   async createBatchDustClaim(claims) {
@@ -273,7 +242,7 @@ class BatchService {
         data,
         value: '0x' + total.toString(16),
         gasLimit: '0x' + (50000 + recipients.length * 21000).toString(16),
-        chainId,
+        chainId
       }
     } catch (e) {
       console.error('createNativeBatchTransfer error:', e)
@@ -302,7 +271,7 @@ class BatchService {
           data,
           value: '0x0',
           gasLimit: '0x' + gasEstimate.toString(16),
-          chainId,
+          chainId
         })
         return txs
       }
@@ -315,7 +284,7 @@ class BatchService {
           data,
           value: '0x0',
           gasLimit: '0x186A0',
-          chainId,
+          chainId
         })
       }
     } catch (e) {
@@ -324,9 +293,6 @@ class BatchService {
     return txs
   }
 
-  // ---------------------------------------------------------------------------
-  // Analytics (unchanged)
-  // ---------------------------------------------------------------------------
   calculateGasSavings(individualTxs, batchTxs) {
     const individualGas = (individualTxs || []).reduce((sum, tx) => {
       const isData = tx?.data && tx.data !== '0x'
@@ -349,14 +315,16 @@ class BatchService {
     const savingsRaw = individualGas - batchGas
     const savings = savingsRaw > 0 ? savingsRaw : 0
     const savingsPct =
-      individualGas > 0 && savings > 0 ? ((savings / individualGas) * 100).toFixed(2) : '0.00'
+      individualGas > 0 && savings > 0
+        ? ((savings / individualGas) * 100).toFixed(2)
+        : '0.00'
 
     return {
       individualGas,
       batchGas,
       savings,
       savingsPercentage: savingsPct,
-      estimatedSavingsUSD: this.estimateGasSavingsUSD(savings),
+      estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
     }
   }
 
