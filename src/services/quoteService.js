@@ -1,52 +1,71 @@
 import axios from 'axios'
 
-const ONEINCH = {
-  1: 'https://api.1inch.io/v5.0/1',
-  10: 'https://api.1inch.io/v5.0/10',
-  137: 'https://api.1inch.io/v5.0/137',
-  42161: 'https://api.1inch.io/v5.0/42161',
-  8453: 'https://api.1inch.io/v5.0/8453',
+// 0x API hosts are chain-specific
+const ZEROX_HOST_BY_CHAIN = {
+  1: 'https://api.0x.org',
+  10: 'https://optimism.api.0x.org',
+  56: 'https://bsc.api.0x.org',
+  137: 'https://polygon.api.0x.org',
+  42161: 'https://arbitrum.api.0x.org',
+  8453: 'https://base.api.0x.org',
 }
 
-const PARASWAP_BASE = 'https://api.paraswap.io'
-
-export async function bestQuote({ chainId, fromToken, toToken, amount }) {
-  const [oneInch, paraswap] = await Promise.allSettled([
-    oneInchQuote(chainId, fromToken, toToken, amount),
-    paraswapQuote(chainId, fromToken, toToken, amount),
-  ])
-
-  const quotes = []
-  if (oneInch.status === 'fulfilled') quotes.push({ ...oneInch.value, aggregator: '1inch' })
-  if (paraswap.status === 'fulfilled') quotes.push({ ...paraswap.value, aggregator: 'paraswap' })
-
-  if (!quotes.length) throw new Error('No quotes available')
-  quotes.sort((a, b) => Number(b.toTokenAmount) - Number(a.toTokenAmount))
-  return quotes[0]
-}
-
-async function oneInchQuote(chainId, fromToken, toToken, amount) {
-  const base = ONEINCH[chainId]
-  const { data } = await axios.get(`${base}/quote`, {
-    params: {
-      fromTokenAddress: fromToken,
-      toTokenAddress: toToken,
-      amount,
-    },
+export async function bestQuote({
+  chainId,
+  fromToken,
+  toToken,
+  amount,
+  slippagePct = 1,
+  takerAddress, // optional (recommended if you want an executable tx)
+}) {
+  const q = await zeroXQuote({
+    chainId,
+    fromToken,
+    toToken,
+    amount,
+    slippagePct,
+    takerAddress,
   })
-  // data.tx is usually for swap; we use it during execution
-  return { toTokenAmount: data.toTokenAmount, tx: data.tx }
+
+  if (!q) throw new Error(`0x unsupported or no quote for chain ${chainId}`)
+  return { ...q, aggregator: '0x' }
 }
 
-async function paraswapQuote(chainId, fromToken, toToken, amount) {
-  const { data } = await axios.get(`${PARASWAP_BASE}/prices`, {
-    params: {
-      srcToken: fromToken,
-      destToken: toToken,
-      srcAmount: amount,
-      side: 'SELL',
-      network: chainId,
+async function zeroXQuote({
+  chainId,
+  fromToken,
+  toToken,
+  amount,
+  slippagePct = 1,
+  takerAddress,
+}) {
+  const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
+  if (!host) return null
+
+  const params = {
+    sellToken: fromToken,
+    buyToken: toToken,
+    sellAmount: String(amount),
+    slippagePercentage: Number(slippagePct) / 100,
+  }
+
+  // If provided, 0x will include an executable tx payload tailored to taker
+  if (takerAddress) params.takerAddress = takerAddress
+
+  const { data } = await axios.get(`${host}/swap/v1/quote`, { params })
+
+  return {
+    // normalize to match what your app already expects
+    toTokenAmount: data?.buyAmount ?? '0',
+    tx: {
+      to: data?.to,
+      data: data?.data,
+      value: data?.value ?? '0',
+      gas: data?.gas,
+      gasPrice: data?.gasPrice,
+      allowanceTarget: data?.allowanceTarget, // IMPORTANT for approvals
     },
-  })
-  return { toTokenAmount: data?.priceRoute?.destAmount, route: data?.priceRoute }
+    // keep raw in case you need more fields
+    raw: data,
+  }
 }
