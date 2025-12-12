@@ -4,8 +4,8 @@ import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
 import { executeChainPlan } from '../services/claimExecutor'
-import permSvc from '../services/permissionlessContractService'
-import { buildDustClaimBatch } from '../services/dustClaimService'
+import permSvc from '../services/permissionlessContractService' // kept (not used)
+import { buildDustClaimBatch } from '../services/dustClaimService' // kept (fallback only)
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
@@ -14,59 +14,33 @@ import './ClaimScreen.css'
 const ClaimScreen = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { address, isConnected, loading: walletLoading } = useWallet()
+  const { address, isConnected } = useWallet()
   const { results: scanResults } = useScan()
 
-  // -------- A) read whatever the Scanner passed (except dustResults/totalDustValue) --------
+  // ---------------- state from scanner ----------------
   const {
     claimPlan = [],
     batchTransactions = [],
-    oneInchSingle = null,
-    oneInchBatch = null,
-    uniswapSingle = null,
     batchSavings = null
   } = location.state || {}
 
-  // -------- B) hydrate dustResults + totalDustValue (state OR context OR cache) --------
+  // ---------------- hydrate scan snapshot ----------------
   const [scanSnapshot] = useState(() => {
-    // 1) Prefer data from navigation state (Scanner → Claim)
-    if (location.state?.dustResults && location.state.dustResults.length) {
-      const snap = {
+    if (location.state?.dustResults?.length) {
+      return {
         dustResults: location.state.dustResults,
         totalDustValue: Number(location.state.totalDustValue || 0)
       }
-      // mirror Dashboard behavior: persist last scan
-      try {
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(
-            'dustclaim:lastScan',
-            JSON.stringify({ dustResults: snap.dustResults, total: snap.totalDustValue })
-          )
-        }
-      } catch {}
-      return snap
     }
 
-    // 2) Next preference: ScanContext (what Dashboard / DustScanner currently have)
-    if (Array.isArray(scanResults) && scanResults.length) {
+    if (scanResults?.length) {
       const total = scanResults.reduce((s, x) => s + Number(x.totalValue || 0), 0)
-      try {
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(
-            'dustclaim:lastScan',
-            JSON.stringify({ dustResults: scanResults, total })
-          )
-        }
-      } catch {}
       return { dustResults: scanResults, totalDustValue: total }
     }
 
-    // 3) Fallback: same cache Dashboard uses
     try {
-      if (typeof window !== 'undefined') {
-        const raw = sessionStorage.getItem('dustclaim:lastScan')
-        if (!raw) return { dustResults: [], totalDustValue: 0 }
-
+      const raw = sessionStorage.getItem('dustclaim:lastScan')
+      if (raw) {
         const parsed = JSON.parse(raw)
         return {
           dustResults: parsed.dustResults || [],
@@ -80,54 +54,22 @@ const ClaimScreen = () => {
 
   const { dustResults, totalDustValue } = scanSnapshot
 
-  // If totalDustValue is 0 or missing, recompute from dustResults so it matches Dashboard
+  // ---------------- derived ----------------
   const computedTotalDustValue = useMemo(() => {
-    const base = Number(totalDustValue || 0)
-    if (base > 0) return base
-    if (!Array.isArray(dustResults) || !dustResults.length) return 0
-    return dustResults.reduce((sum, r) => sum + Number(r.totalValue || 0), 0)
+    if (totalDustValue > 0) return totalDustValue
+    return dustResults.reduce((s, r) => s + Number(r.totalValue || 0), 0)
   }, [dustResults, totalDustValue])
 
-  // ✅ do we have anything pre-planned?
-  const planAvailable = useMemo(() => {
-    if (Array.isArray(claimPlan) && claimPlan.length > 0) return true
-    if (Array.isArray(batchTransactions) && batchTransactions.length > 0) return true
-    return false
-  }, [claimPlan, batchTransactions])
+  const planAvailable = Array.isArray(claimPlan) && claimPlan.length > 0
 
-  // ✅ how many chains actually have balances
-  const realTimeChains = useMemo(() => {
-    const s = new Set()
-    for (const r of dustResults || []) {
-      const hasNative = Number(r?.nativeBalance || '0') > 0
-      const tokens =
-        Array.isArray(r?.tokenDust) && r.tokenDust.length
-          ? r.tokenDust
-          : Array.isArray(r?.claimableTokens)
-          ? r.claimableTokens
-          : []
+  const totalChains = planAvailable
+    ? claimPlan.length
+    : new Set(dustResults.map(r => r.chainId)).size
 
-      if (hasNative || tokens.length) s.add(Number(r.chainId))
-    }
-    return s.size
-  }, [dustResults])
+  const defaultChainId =
+    claimPlan?.[0]?.chainId || dustResults?.[0]?.chainId || 1
 
-  // ✅ chain count for the progress meter
-  const totalChains = useMemo(() => {
-    if (planAvailable && claimPlan.length) return claimPlan.length
-    if (planAvailable && batchTransactions.length) return 1
-    return realTimeChains
-  }, [planAvailable, claimPlan, batchTransactions, realTimeChains])
-
-  // ✅ default chain for explorers
-  const defaultChainId = useMemo(() => {
-    const fromPlan = claimPlan?.[0]?.chainId
-    const fromBatch = batchTransactions?.[0]?.chainId
-    const fromDust = dustResults?.[0]?.chainId
-    return Number(fromPlan || fromBatch || fromDust || 1)
-  }, [claimPlan, batchTransactions, dustResults])
-
-  // -------- local UI state --------
+  // ---------------- UI state ----------------
   const [claiming, setClaiming] = useState(false)
   const [currentStep, setCurrentStep] = useState(0)
   const [claimResults, setClaimResults] = useState([])
@@ -136,25 +78,17 @@ const ClaimScreen = () => {
   const getChainInfo = (chainId) =>
     SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
-  // 🔒 button disabled state (no design/logic change, just moved out of JSX)
-  const executeDisabled = claiming  // <-- ONLY block clicks while a claim is running
-
   // ============================================================================
-  // A) Execute optimized claim plan (preferred path)
+  // MAIN EXECUTION — 0x ONLY
   // ============================================================================
   const handleExecuteClaim = async () => {
-    console.log('[ClaimScreen] Execute button clicked', {
-      isConnected,
-      walletLoading,
-      claiming,
-      planAvailable,
-      claimPlanLen: claimPlan?.length || 0,
-      batchLen: batchTransactions?.length || 0,
-      dustLen: dustResults?.length || 0,
-    })
-
     if (!isConnected) {
       setError('Connect your wallet to execute the claim.')
+      return
+    }
+
+    if (!planAvailable) {
+      setError('No swap plan available. Please rescan.')
       return
     }
 
@@ -162,137 +96,55 @@ const ClaimScreen = () => {
     setError(null)
     setClaimResults([])
 
+    const results = []
+
     try {
-      if (planAvailable) {
-        const allResults = []
-        const planToRun = claimPlan && claimPlan.length ? claimPlan : []
-
-        for (let i = 0; i < planToRun.length; i++) {
-          const chainPlan = planToRun[i]
-          setCurrentStep(i + 1)
-          try {
-            const receipts = await executeChainPlan(chainPlan, address)
-            allResults.push({ chainId: chainPlan.chainId, success: true, receipts })
-          } catch (e) {
-            allResults.push({
-              chainId: chainPlan.chainId,
-              success: false,
-              error: e?.message || 'Execution failed'
-            })
-          }
-          await new Promise((r) => setTimeout(r, 200))
-        }
-
-        setClaimResults(allResults)
-        return
-      }
-
-      // Fallback: build contract transactions manually
-      if (!dustResults || dustResults.length === 0)
-        throw new Error('Nothing to execute: no dust found')
-
-      if (typeof window === 'undefined' || !window.ethereum)
-        throw new Error('No wallet provider in browser')
-
-      const provider = new ethers.BrowserProvider(window.ethereum)
-      const signer = await provider.getSigner()
-
-      const txs = await buildDustClaimBatch(dustResults, signer, {
-        includeNative: true
-      })
-      if (!txs.length) throw new Error('Nothing to execute: no ERC-20 dust tokens')
-
-      const results = []
-      for (let i = 0; i < txs.length; i++) {
-        const tx = txs[i]
+      for (let i = 0; i < claimPlan.length; i++) {
+        const chainPlan = claimPlan[i]
         setCurrentStep(i + 1)
+
         try {
-          const sent = await signer.sendTransaction({
-            to: tx.to,
-            data: tx.data,
-            value: tx.value ?? 0n
-          })
-          const r = await sent.wait()
-          results.push({ chainId: tx.chainId, success: true, receipts: [{ hash: r.hash }] })
-        } catch (e) {
+          const receipts = await executeChainPlan(chainPlan, address)
           results.push({
-            chainId: tx.chainId,
+            chainId: chainPlan.chainId,
+            success: true,
+            receipts
+          })
+        } catch (err) {
+          results.push({
+            chainId: chainPlan.chainId,
             success: false,
-            error: e?.message || 'Transaction failed'
+            error: err?.message || 'Execution failed'
           })
         }
-        await new Promise((r) => setTimeout(r, 120))
+
+        await new Promise(r => setTimeout(r, 150))
       }
 
       setClaimResults(results)
-    } catch (e) {
-      setError(e?.message || 'Claim execution error')
+    } catch (err) {
+      setError(err?.message || 'Claim execution error')
     } finally {
       setClaiming(false)
       setCurrentStep(0)
     }
   }
 
-  // ============================================================================
-  // B) Quick actions (permissionless 1inch + Uniswap)
-  // ============================================================================
-  const handleOneInchSingle = async () => {
-    if (!oneInchSingle) return
-    setClaiming(true); setError(null)
-    try {
-      const { token, quotedMinOutWei, calldata } = oneInchSingle
-      const res = await permSvc.claimDust1inch(token, ethers.toBigInt(quotedMinOutWei), calldata)
-      setClaimResults([{ chainId: defaultChainId, success: !!res.success, receipts: [{ txHash: res.txHash }] }])
-    } catch (e) {
-      setError(e?.message || '1inch swap failed')
-    } finally {
-      setClaiming(false)
-    }
-  }
+  // ---------------- render helpers ----------------
+  const successful = claimResults.filter(r => r.success).length
+  const failed = claimResults.length - successful
 
-  const handleOneInchBatch = async () => {
-    if (!oneInchBatch) return
-    setClaiming(true); setError(null)
-    try {
-      const { tokens, minOutsWei, datas } = oneInchBatch
-      const res = await permSvc.claimDustBatch1inch(tokens, minOutsWei.map(ethers.toBigInt), datas)
-      setClaimResults([{ chainId: defaultChainId, success: !!res.success, receipts: [{ txHash: res.txHash }] }])
-    } catch (e) {
-      setError(e?.message || 'Batch 1inch swap failed')
-    } finally {
-      setClaiming(false)
-    }
-  }
-
-  const handleUniswapSingle = async () => {
-    if (!uniswapSingle) return
-    setClaiming(true); setError(null)
-    try {
-      const { token, fee = 3000, minOutWei, ttlSec = 900 } = uniswapSingle
-      const deadline = Math.floor(Date.now() / 1000) + Number(ttlSec || 900)
-      const res = await permSvc.claimDustUniswap(token, fee, ethers.toBigInt(minOutWei), deadline)
-      setClaimResults([{ chainId: defaultChainId, success: !!res.success, receipts: [{ txHash: res.txHash }] }])
-    } catch (e) {
-      setError(e?.message || 'Uniswap swap failed')
-    } finally {
-      setClaiming(false)
-    }
-  }
-
-  // ============================================================================
-  // Render helpers
-  // ============================================================================
-  const successful = claimResults.filter((r) => r.success).length
-  const failed = Math.max(0, claimResults.length - successful)
-  const fmtNum = (n) => Number(n || 0).toFixed(6)
   const usdFmt = (n) =>
-    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
+    }).format(Number(n || 0))
 
   return (
     <div className="claim-screen">
       <div className="claim-header">
-        <h1>Batch Dust Claim</h1>
-        <p>Execute optimized multi-chain claims with minimal gas</p>
+        <h1>Dust Claim</h1>
+        <p>Execute optimized multi-chain swaps via 0x</p>
       </div>
 
       {/* Summary */}
@@ -302,77 +154,63 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
+              <div className="summary-value">
+                {usdFmt(computedTotalDustValue)}
+              </div>
             </div>
           </div>
+
           <div className="summary-item">
             <div className="summary-icon">🌐</div>
             <div className="summary-content">
               <h3>Chains</h3>
               <div className="summary-value">{totalChains}</div>
-              {!planAvailable && <div className="summary-sub">live from scan</div>}
             </div>
           </div>
+
           {batchSavings && (
             <div className="summary-item highlight">
               <div className="summary-icon">🎯</div>
               <div className="summary-content">
                 <h3>Gas Savings</h3>
-                <div className="summary-value">{batchSavings.savingsPercentage}%</div>
+                <div className="summary-value">
+                  {batchSavings.savingsPercentage}%
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Chain Overview from dustResults */}
-      {dustResults?.length > 0 && (
+      {/* Chains */}
+      {dustResults.length > 0 && (
         <div className="chains-section">
           <h2>Detected Chains</h2>
           <div className="chains-grid">
             {dustResults.map((r, idx) => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
-              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
-              const tokens = r.claimableTokens || r.tokenDust || []
+              const logo =
+                meta.logo ||
+                NATIVE_LOGOS[r.chainId] ||
+                '/logos/chains/generic.png'
 
               return (
                 <div key={idx} className="chain-card">
                   <div className="chain-header">
                     <div className="chain-info">
-                      <img className="chain-logo" src={nativeLogo} alt={meta.name} />
+                      <img src={logo} className="chain-logo" alt={meta.name} />
                       <div>
                         <h3>{meta.name}</h3>
-                        <p className="chain-value">{usdFmt(r.totalValue || 0)}</p>
+                        <p className="chain-value">
+                          {usdFmt(r.totalValue || 0)}
+                        </p>
                       </div>
-                    </div>
-                    <div className="chain-balance">
-                      <div className="native-balance">
-                        {fmtNum(r.nativeBalance)} {meta.symbol}
-                      </div>
-                      {!!tokens.length && (
-                        <div className="token-count">+{tokens.length} tokens</div>
-                      )}
                     </div>
                   </div>
 
-                  <div className="price-details">
-                    <div className="price-item">
-                      <span>Native:</span>
-                      <span>
-                        {fmtNum(r.nativeBalance)} {meta.symbol} ({usdFmt(r.nativeValue || 0)})
-                      </span>
-                    </div>
-
-                    {tokens.slice(0, 3).map((t, i) => (
-                      <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={t} />
-                    ))}
-
-                    {tokens.length > 3 && (
-                      <div className="price-item more">
-                        +{tokens.length - 3} more tokens
-                      </div>
-                    )}
-                  </div>
+                  {(r.tokenDust || []).slice(0, 3).map((t, i) => (
+                    <TokenRow key={`${r.chainId}-${i}`} token={t} />
+                  ))}
                 </div>
               )
             })}
@@ -380,126 +218,49 @@ const ClaimScreen = () => {
         </div>
       )}
 
-      {/* Claim Actions */}
+      {/* ACTION */}
       <div className="action-section">
         <button
           onClick={handleExecuteClaim}
-          disabled={executeDisabled}
+          disabled={claiming}
           className="execute-button"
         >
-          {claiming ? '⏳ Executing…' : '🚀 Execute Optimized Claim'}
+          {claiming ? '⏳ Executing…' : '🚀 Execute Swap & Claim'}
         </button>
 
-        {!planAvailable && (
-          <div className="hint-banner">
-            No prepared plan from the scanner. We’ll build contract calls directly for each ERC-20 dust item.
-          </div>
-        )}
-
-        {oneInchSingle && (
-          <button
-            onClick={handleOneInchSingle}
-            disabled={claiming || walletLoading || !isConnected}
-            className="secondary-button"
-          >
-            🔁 1inch (single)
-          </button>
-        )}
-
-        {oneInchBatch && (
-          <button
-            onClick={handleOneInchBatch}
-            disabled={claiming || walletLoading || !isConnected}
-            className="secondary-button"
-          >
-            🧺 1inch (batch)
-          </button>
-        )}
-
-        {uniswapSingle && (
-          <button
-            onClick={handleUniswapSingle}
-            disabled={claiming || walletLoading || !isConnected}
-            className="secondary-button"
-          >
-            ♻️ Uniswap V3 (single)
-          </button>
-        )}
-
-        {!isConnected && <p className="action-hint">Connect your wallet to start claiming.</p>}
         {error && <div className="error-message">{error}</div>}
       </div>
 
-      {/* Progress bar */}
+      {/* Progress */}
       {claiming && totalChains > 0 && (
         <div className="claiming-progress">
-          <div className="progress-info">
-            <div className="spinner" />
-            <span>Processing {Math.min(currentStep, totalChains)}/{totalChains}</span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${(currentStep / Math.max(totalChains, 1)) * 100}%` }}
-            />
-          </div>
+          <span>
+            Processing {currentStep}/{totalChains}
+          </span>
         </div>
       )}
 
-      {/* Results Summary */}
+      {/* Results */}
       {claimResults.length > 0 && (
         <div className="results-card">
-          <h3>Results Summary</h3>
+          <h3>Results</h3>
           <div className="results-summary">
-            <div className="result-success">✅ {successful} succeeded</div>
-            <div className="result-failed">❌ {failed} failed</div>
+            <div>✅ {successful} succeeded</div>
+            <div>❌ {failed} failed</div>
           </div>
 
-          <div className="results-details">
-            {claimResults.map((result, idx) => {
-              const info = getChainInfo(result.chainId || defaultChainId)
-              return (
-                <div key={idx} className={`result-item ${result.success ? 'success' : 'error'}`}>
-                  <div className="result-header"><strong>{info.name}</strong></div>
-                  {result.success && result.receipts?.length > 0 ? (
-                    result.receipts.map((r, i) => {
-                      const tx = r.txHash || r.hash
-                      return tx ? (
-                        <div key={i} className="tx-item">
-                          <a
-                            href={info.explorer ? `${info.explorer}/tx/${tx}` : '#'}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            TX {tx.slice(0, 10)}…{tx.slice(-8)}
-                          </a>
-                        </div>
-                      ) : (
-                        <div key={i} className="tx-item">✅ Step {i + 1} completed</div>
-                      )
-                    })
-                  ) : (
-                    <p>{result.error || 'Failed on this chain'}</p>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+          {claimResults.map((r, i) => {
+            const info = getChainInfo(r.chainId || defaultChainId)
+            return (
+              <div key={i} className={r.success ? 'success' : 'error'}>
+                <strong>{info.name}</strong>
+                {r.error && <p>{r.error}</p>}
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {/* Security notice */}
-      <div className="security-notice">
-        <h4>🔒 Security Check</h4>
-        <ul>
-          <li>All transactions use aggregator/router calldata you provide.</li>
-          <li>No custody — swaps pay back directly to your wallet.</li>
-          <li>Permit/EIP-2612 is used where supported to reduce approvals.</li>
-          <li>Gas is estimated per chain before signing.</li>
-        </ul>
-      </div>
-
-      {/* Footer */}
       <div className="footer-actions">
         <button onClick={() => navigate('/scanner')} className="btn btn-outline">
           ← Back to Scanner
