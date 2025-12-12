@@ -51,22 +51,25 @@ const WRAPPED_NATIVE_BY_CHAIN = {
   
 }
 
-async function getOneInchSpender(chainId) {
-  const { data } = await axios.get(
-    `https://api.1inch.io/v5.0/${chainId}/approve/spender`
-  )
-  return data.address
-}
+async function get0xSpender({
+  chainId,
+  sellToken,
+  buyToken,
+  sellAmount
+}) {
+  const host = WRAPPED_NATIVE_BY_CHAIN[Number(chainId)]
+  if (!host) return null
 
-/** Normalize any input into a wei-decimal string (no 0x). */
-const toAmountStr = (x) =>
-  typeof x === 'bigint' ? x.toString() : String(x ?? '0')
+  const { data } = await axios.get(`${host}/swap/v1/quote`, {
+    params: {
+      sellToken,
+      buyToken,
+      sellAmount: String(sellAmount),
+      slippagePercentage: 0.01
+    }
+  })
 
-/** Best-effort: if a decimal string, parse with 18; otherwise assume raw wei string */
-const toWeiStr18 = (maybeDecimal) => {
-  const s = String(maybeDecimal ?? '0')
-  if (s.includes('.')) return ethers.parseUnits(s, 18).toString()
-  return s // assume already wei
+  return data?.allowanceTarget || null
 }
 
 class BatchService {
