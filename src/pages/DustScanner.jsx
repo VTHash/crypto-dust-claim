@@ -138,6 +138,7 @@ const DustScanner = () => {
               symbol: t.symbol,
               address: t.address,
               balance: t.balance,
+              decimals: t.decimals ?? 18,
               usd
             })
           }
@@ -179,12 +180,13 @@ const DustScanner = () => {
 
     // Claims list (kept exactly like your original structure)
     const claims = buildActionUniverse.map((it) => ({
-      chainId: it.chainId,
-      tokenAddress: it.address,
-      tokenSymbol: it.symbol,
-      amount: it.balance,
-      recipient: address
-    }))
+  chainId: it.chainId,
+  tokenAddress: it.address,
+  tokenSymbol: it.symbol,
+  amount: it.balance,
+  decimals: it.decimals ?? 18,
+  recipient: address
+}))
 
     let claimPlan = []
     let batchTransactions = []
