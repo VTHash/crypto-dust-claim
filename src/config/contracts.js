@@ -2,21 +2,7 @@
 // Keep these files in: src/config/contracts/
 import commonAbi from './contracts/dustclaim.common.json'
 import ethAbi from './contracts/dustclaim.eth.json'
-import bnbAbi from './contracts/dustclaim.bnb.json'
-import avaxAbi from './contracts/dustclaim.avax.json'
-import arbAbi from './contracts/dustclaim.arb.json'
-import polygonAbi from './contracts/dustclaim.polygon.json'
-import opAbi from './contracts/dustclaim.op.json'
-import seiAbi from './contracts/dustclaim.sei.json'
-import modeAbi from './contracts/dustclaim.mode.json'
-import gnosisAbi from './contracts/dustclaim.gnosis.json'
-import lineaAbi from './contracts/dustclaim.linea.json'
-import zoraAbi from './contracts/dustclaim.zora.json'
-import beraAbi from './contracts/dustclaim.bera.json'
-import fantomAbi from './contracts/dustclaim.fantom.json'
-import unichainAbi from './contracts/dustclaim.unichain.json'
-import celoAbi from './contracts/dustclaim.celo.json'
-import auroraAbi from './contracts/dustclaim.aurora.json'
+
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
@@ -64,10 +50,7 @@ export const DUSTCLAIM_ADDRESS = {
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
-export const DUSTCLAIM_ABI_BY_CHAIN = {
-  1: ethAbi
-  // e.g. 137: polygonAbi, 42161: arbitrumAbi, ... later if needed
-}
+
 
 // ---- Helpers ----
 export function getAddressForChain(chainId) {
@@ -78,6 +61,6 @@ export function getContractConfig(chainId) {
   const id = Number(chainId)
   return {
     address: DUSTCLAIM_ADDRESS[id] || null,
-    abi: DUSTCLAIM_ABI_BY_CHAIN[id] || commonAbi
+    abi: commonAbi
   }
 }
