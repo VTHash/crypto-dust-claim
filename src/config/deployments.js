@@ -1,8 +1,34 @@
+import DUSTCLAIM_V3_ABI from './contracts/dustclaim.common.json'
+import { SUPPORTED_CHAINS } from './walletConnectConfig'
 // Per-chain execution config for swaps/claims.
 // - `weth`: the WRAPPED *native* token of that chain (ERC-20 form used for swaps).
+export const ZEROX_HOST_BY_CHAIN = {
+  1: 'https://api.0x.org',
+
+  10: 'https://optimism.api.0x.org',
+  56: 'https://bsc.api.0x.org',
+  130: 'https://unichain.api.0x.org',
+  137: 'https://polygon.api.0x.org',
+  143: 'https://monad.api.0x.org',
+  146: 'https://sonic.api.0x.org',
+  480: 'https://worldchain.api.0x.org',
+  5000: 'https://mantle.api.0x.org',
+  9745: 'https://plasma.api.0x.org',
+
+  42161: 'https://arbitrum.api.0x.org',
+  43114: 'https://avalanche.api.0x.org',
+  534352: 'https://scroll.api.0x.org',
+  59144: 'https://linea.api.0x.org',
+
+  80094: 'https://berachain.api.0x.org',
+  81457: 'https://blast.api.0x.org',
+  34443: 'https://mode.api.0x.org',
+  8453: 'https://base.api.0x.org',
+  57073: 'https://ink.api.0x.org',
+}
 
 
-export const DEPLOYMENTS = {
+export const DUSTCLAIM_V3_BY_CHAIN = {
   1: {
     chainId: 1,
     name: 'Ethereum',
@@ -352,6 +378,32 @@ export const DEPLOYMENTS = {
   }
 
 
-export function getDeployment(chainId) {
-  return DEPLOYMENTS[Number(chainId)] || null
-}
+export const DUSTCLAIM_V3_ABI = DUSTCLAIM_V3_ABI
+
+// One unified deployments object (what the app should read)
+export const DEPLOYMENTS = Object.keys(SUPPORTED_CHAINS).reduce((acc, rawId) => {
+  const chainId = Number(rawId)
+  const meta = SUPPORTED_CHAINS[chainId] || {}
+
+  const dustClaimV3 = DUSTCLAIM_V3_BY_CHAIN[chainId] || ''
+  const zeroXHost = ZEROX_HOST_BY_CHAIN[chainId] || null
+
+  acc[chainId] = {
+    chainId,
+    name: meta.name || 'Unknown',
+    dustClaimV3: dustClaimV3 || null,
+
+    // 0x-only routing for now:
+    zeroXHost, // null if unsupported by 0x
+    directSwap0x: !!zeroXHost, // convenience boolean
+
+    // legacy fields kept but null (so nothing breaks if something reads them)
+    oneInchRouter: null,
+    uniswapV3Router: null,
+  }
+
+  return acc
+}, {})
+
+export const getDeployment = (chainId) => DEPLOYMENTS[Number(chainId)] || null
+export const is0xSupported = (chainId) => !!ZEROX_HOST_BY_CHAIN[Number(chainId)]
