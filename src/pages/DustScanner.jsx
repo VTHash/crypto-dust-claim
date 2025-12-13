@@ -199,7 +199,7 @@ const DustScanner = () => {
       // 0x ONLY: build claimPlan (your batchService.buildClaimPlan is now 0x-based)
       if (typeof batchService.buildClaimPlan === 'function') {
         try {
-          claimPlan = await batchService.buildClaimPlan(claims, address)
+          claimPlan = await batchService.buildClaimPlan(claims) 
         } catch (e) {
           console.warn('[DustScanner] buildClaimPlan failed:', e)
           claimPlan = []
@@ -209,6 +209,7 @@ const DustScanner = () => {
       // If your batchService.buildClaimPlan expects a different signature,
       // it will fail above and ClaimScreen will show a clear error.
     } finally {
+      console.log('[DustScanner] ClaimPlan built:', claimPlan) 
       navigate('/claim', {
         state: {
           claimPlan,

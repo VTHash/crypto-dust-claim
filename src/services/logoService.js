@@ -38,7 +38,8 @@ const CHAIN_PATHS = {
   204: 'opbnb',
   81457: 'blast',
   32456: 'scroll',
-  80085: 'berachain'
+  80085: 'berachain',
+  534352: 'scroll'
 }
 
 // ✅ Chain → CoinGecko platform ids
@@ -56,7 +57,7 @@ const COINGECKO_PLATFORMS = {
   5000: 'mantle',
   59144: 'linea',
   81457: 'blast',
-  32456: 'scroll'
+  534352: 'scroll'
 }
 
 // Simple in-memory cache so we don’t refetch the same logo
