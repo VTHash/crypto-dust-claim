@@ -44,7 +44,7 @@ class DexService0x {
     if (!host) throw new Error(`0x does not support chain ${chainId}`);
 
     try {
-      const { data } = await axios.get(`${host}/swap/v1/quote`, {
+      const { data } = await axios.post('/.netlify/functions/0x-quote', {
         params: {
           sellToken: tokenIn,
           buyToken: tokenOut,

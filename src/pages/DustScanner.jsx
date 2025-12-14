@@ -213,7 +213,7 @@ const DustScanner = () => {
       }
 
       // If your batchService.buildClaimPlan expects a different signature,
-      // it will fail above and ClaimScreen will show a clear error.
+      // it will faill above and ClaimScreen will show a clear error.
     } finally {
       console.log('[DustScanner] ClaimPlan built:', claimPlan) 
       navigate('/claim', {

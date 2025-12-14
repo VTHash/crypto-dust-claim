@@ -18,26 +18,17 @@ async function get0xAllowanceHolderQuote({
   txOrigin,
   slippageBps
 }) {
-  const headers = {
-    '0x-version': 'v2'
-  }
+  const { data } = await axios.post('/.netlify/functions/0x-quote', {
+  chainId: Number(chainId),
+  sellToken: tokenIn,
+  buyToken: dep.weth,
+  sellAmount: String(sellAmountWei),
 
-  const apiKey = import.meta?.env?.VITE_0X_API_KEY
-  if (apiKey) headers['0x-api-key'] = apiKey
-
-  const { data } = await axios.get(`${ZEROX_V2_HOST}/swap/allowance-holder/quote`, {
-    params: {
-      chainId: Number(chainId),
-      sellToken,
-      buyToken,
-      sellAmount: String(sellAmountWei),
-      taker,
-      txOrigin,
-      recipient: taker,
-      slippageBps: Number(slippageBps)
-    },
-    headers
-  })
+  taker: dep.dustClaimV3,
+  recipient: dep.dustClaimV3,
+  txOrigin: options.txOrigin, // <-- user EOA
+  slippageBps: Math.round(slippagePct * 100) // 1% => 100
+})
 
   return data || null
 }

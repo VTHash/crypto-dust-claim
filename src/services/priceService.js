@@ -97,8 +97,12 @@ const PLATFORM_BY_CHAIN = {
   1923: 'swellchain', // Swellchain
   2741: 'abstract', // Abstract
   747474: 'katana', // Katana
-  146: 'sonic' // Sonic
-  // 80094: 'berachain', // add when officially on CG
+  146: 'sonic', // Sonic
+  534352: 'scroll', // Scroll
+  324: 'zksync', // zkSync,
+  167000: 'taiko', // Taiko
+  42170: 'arbitrum-nova', // Arbitrum Nova
+  28185: 'morph' // Morph
 }
 
 /**

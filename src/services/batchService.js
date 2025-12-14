@@ -42,35 +42,20 @@ async function get0xAllowanceHolderQuote({
   txOrigin, // user EOA
   slippageBps
 }) {
-  const headers = {
-    '0x-version': 'v2'
-  }
+  
+  
 
-  // IMPORTANT: correct env var name
-  const apiKey = import.meta?.env?.VITE_0X_API_KEY
-  if (apiKey) headers['0x-api-key'] = apiKey
+  const { data } = await axios.post('/.netlify/functions/0x-quote', {
+  chainId: Number(chainId),
+  sellToken: tokenIn,
+  buyToken: dep.weth,
+  sellAmount: String(sellAmountWei),
 
-  const { data } = await axios.get(`${ZEROX_V2_HOST}/swap/allowance-holder/quote`, {
-    params: {
-      chainId: Number(chainId),
-      sellToken,
-      buyToken,
-      sellAmount: String(sellAmountWei),
-
-      // taker is the contract that will call AllowanceHolder
-      taker,
-
-      // when taker is a contract, txOrigin must be the user EOA
-      txOrigin,
-
-      // ensure output goes to the contract (it needs WETH)
-      recipient: taker,
-
-      // v2 uses slippageBps
-      slippageBps: Number(slippageBps)
-    },
-    headers
-  })
+  taker: dep.dustClaimV3,
+  recipient: dep.dustClaimV3,
+  txOrigin: options.txOrigin, // <-- user EOA
+  slippageBps: Math.round(slippagePct * 100) // 1% => 100
+})
 
   return data || null
 }
