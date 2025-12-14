@@ -57,7 +57,13 @@ const COINGECKO_PLATFORMS = {
   5000: 'mantle',
   59144: 'linea',
   81457: 'blast',
-  534352: 'scroll'
+  534352: 'scroll',
+  80085: 'berachain',
+  167000: 'taiko',
+  42170: 'arbitrum-nova',
+  28105: 'morph',
+
+
 }
 
 // Simple in-memory cache so we don’t refetch the same logo

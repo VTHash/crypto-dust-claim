@@ -242,6 +242,26 @@ export const DUSTCLAIM_CONTRACTS = {
     address: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
     abi: commonAbi
   },
+
+  167000: {
+    key: 'taiko',
+    name: 'Taiko',
+    address: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46',
+    abi: commonAbi
+  },
+  42170: {
+    key: 'arbitrum-nova',
+    name: 'Arbitrum Nova',
+    address: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
+    abi: commonAbi
+  },
+
+  28185: {
+    key: 'morph',
+    name: 'Morph',
+    address: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
+    abi: commonAbi
+  },
   // ---- You can add more chains here if needed ---- 
 
   // ---- Add more chains as needed ----  

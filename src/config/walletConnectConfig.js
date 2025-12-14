@@ -336,6 +336,30 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/scroll.png"
 },
 
+42170: {
+  name: "Arbitrum Nova",
+  symbol: "ETH",
+  rpcUrl: `https://arbitrum-nova.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  explorer: "https://nova.arbiscan.io",
+  logo: "/logo/arbitrum-nova.png"
+},
+
+167000: {
+  name: "Taiko",
+  symbol: "ETH",
+  rpcUrl: `https://taiko-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  explorer: "https://taikoscan.io",
+  logo: "/logo/taiko.png"
+},
+
+28105: {
+  name: "Morph",
+  symbol: "ETH",
+  rpcUrl: `https://morph-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  explorer: "https://morphl2.socialscan.io/",
+  logo: "/logo/morph.png"
+},
+
 };
 
 // -------------------------------

@@ -90,6 +90,9 @@ const CHAIN_LOGOS = {
   81457: '/logo/blast.jpeg',
   1313161554: '/logo/aurora.png',
   534352: '/logo/scroll.png',
+  42170: '/logo/arbitrum-nova.png',
+  167000: '/logo/taiko.png',
+  28105: '/logo/morph.png',
 
 };
 

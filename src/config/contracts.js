@@ -48,6 +48,10 @@ export const DUSTCLAIM_ADDRESS = {
  146: "0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc", // Sonic
  534352: "0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc", // Scroll
   324: "0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d", // ZKsync
+  167000: '0xd63C9015624491f6Ba7cC137E46D8dF2132F2b46', // Taiko
+  42170: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc', // Arbitrum Nova
+  28185: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc', // Morph
+  
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----
