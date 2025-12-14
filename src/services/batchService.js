@@ -117,37 +117,60 @@ class BatchService {
       const sellAmountWei = toWeiStr(it.amount, decimals)
 
       // IMPORTANT: for DustClaimV3, buyToken MUST be chain WETH and takerAddress MUST be the CONTRACT
-      const { data } = await axios.get(`${dep.zeroXHost}/swap/allowance-holder/quote`, {
-        params: {
-          chainId: Number(chainId),
-          sellToken: tokenIn,
-          buyToken: dep.weth,
-          sellAmount: String(sellAmountWei),
-          takerAddress: dep.dustClaimV3,
-          slippagePercentage: slippagePct / 100
-        }
-      })
+      const { data } = await axios.get(`https://api.0x.org/swap/allowance-holder/quote`, {
+  params: {
+    chainId: Number(chainId),
+    sellToken: tokenIn,
+    buyToken: dep.weth,
+    sellAmount: String(sellAmountWei),
 
-      if (!data?.data || !data?.allowanceTarget) continue
+    // IMPORTANT: taker is your CONTRACT (DustClaimV3)
+    taker: dep.dustClaimV3,
 
-      steps.push({
-        aggregator: '0x',
+    // IMPORTANT: because taker is a contract, include txOrigin (the user EOA)
+    // If you don't have it here, pass it in options from DustScanner/WalletContext
+    txOrigin: options.txOrigin,
 
-        // approval must be to the DustClaimV3 contract (because it transferFrom's user)
-        needsApproval: true,
-        usePermit: false,
-        spender: dep.dustClaimV3,
+    // recipient should be the contract too (it must receive WETH)
+    recipient: dep.dustClaimV3,
 
-        tokenIn,
-        tokenOut: dep.weth,
-        amount: sellAmountWei,
+    // use slippageBps (v2)
+    slippageBps: Math.round(slippagePct * 100),
+  },
+  headers: {
+    '0x-api-key': import.meta.env.VITE_0X_API_KEY,
+    '0x-version': 'v2',
+  },
+})
 
-        // these are used later by claimExecutor to call the contract
-        routerSpender: data.allowanceTarget,
-        swapCalldata: data.data,
+      const callTarget = data?.transaction?.to
+const swapCalldata = data?.transaction?.data
+const routerSpender = data?.issues?.allowance?.spender || data?.allowanceTarget
 
-        slippage: slippagePct
-      })
+if (!callTarget || !swapCalldata || !routerSpender) continue
+
+// critical safety: your V3 takes ONE spender used for approve+call.
+// skip if 0x returns different approve-spender vs call-target.
+if (callTarget.toLowerCase() !== routerSpender.toLowerCase()) continue
+
+steps.push({
+  aggregator: '0x',
+
+  needsApproval: true,
+  usePermit: false,
+  spender: dep.dustClaimV3, // user approves DustClaimV3 (contract pulls tokens)
+
+  tokenIn,
+  tokenOut: dep.weth,
+  amount: sellAmountWei,
+
+  // used by claimExecutor to call DustClaimV3
+  routerSpender, // contract will approve+call this
+  swapCalldata,
+
+  slippage: slippagePct
+})
+
     }
 
     if (steps.length) plan.push({ chainId, steps })

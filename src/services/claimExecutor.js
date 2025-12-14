@@ -105,7 +105,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
   const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
   if (!dep?.dustClaimV3) throw new Error('Missing DustClaimV3 deployment for this chain')
-  if (!dep?.zeroXHost) throw new Error('0x not supported on this chain')
   if (!dep?.weth) throw new Error('Missing WETH for this chain')
 
   // If plan already included calldata/spender, use it.
@@ -172,15 +171,31 @@ async function build0xCalldata(chainId, step, takerAddress) {
 
   const slippagePct = step.slippage != null ? Number(step.slippage) : 1
 
-  const { data } = await axios.get(`${host}/swap/v1/quote`, {
-    params: {
-      sellToken: step.tokenIn,
-      buyToken: step.tokenOut,
-      sellAmount: String(step.amount),
-      takerAddress, // MUST be DustClaimV3
-      slippagePercentage: slippagePct / 100
-    }
-  })
+  const { data } = await axios.get(`https://api.0x.org/swap/allowance-holder/quote`, {
+  params: {
+    chainId: Number(chainId),
+    sellToken: tokenIn,
+    buyToken: dep.weth,
+    sellAmount: String(sellAmountWei),
+
+    // IMPORTANT: taker is your CONTRACT (DustClaimV3)
+    taker: dep.dustClaimV3,
+
+    // IMPORTANT: because taker is a contract, include txOrigin (the user EOA)
+    // If you don't have it here, pass it in options from DustScanner/WalletContext
+    txOrigin: options.txOrigin,
+
+    // recipient should be the contract too (it must receive WETH)
+    recipient: dep.dustClaimV3,
+
+    // use slippageBps (v2)
+    slippageBps: Math.round(slippagePct * 100),
+  },
+  headers: {
+    '0x-api-key': import.meta.env.VITE_0X_API_KEY,
+    '0x-version': 'v2',
+  },
+})
 
   if (!data?.data || !data?.allowanceTarget) {
     throw new Error('Invalid 0x response')
