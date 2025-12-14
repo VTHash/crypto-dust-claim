@@ -324,7 +324,7 @@ export const CHAIN_CONFIGS = {
 167000: {
   name: "Taiko",
   symbol: "ETH",
-  rpcUrl: `https://taiko-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  rpcUrl: `https://rpc.ankr.com/taiko`,
   explorer: "https://taikoscan.io",
   logo: "/logo/taiko.png"
 },
@@ -332,7 +332,7 @@ export const CHAIN_CONFIGS = {
 28105: {
   name: "Morph",
   symbol: "ETH",
-  rpcUrl: `https://morph-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
+  rpcUrl: `https://morphl2.socialscan.io/`,
   explorer: "https://morphl2.socialscan.io/",
   logo: "/logo/morph.jpg"
 },
