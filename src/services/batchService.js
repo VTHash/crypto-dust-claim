@@ -1,13 +1,14 @@
 // src/services/batchService.jsx
-import { ethers } from 'ethers'
+import { Contract, ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import web3Service from './web3Service'
 import dexAggregatorService from './dexAggregatorService' // kept (not used for 0x plan) to avoid breaking other imports
 import axios from 'axios'
+import { getDeployment } from '../config/deployments'
 
 /**
  * Wrapped native per chain (used ONLY as fallback output token if no outTokenByChain provided)
- * Keep this in sync with your project expectations.
+ 
  */
 export const ZEROX_HOST_BY_CHAIN = {
   1: 'https://api.0x.org',                 // Ethereum (Mainnet)
@@ -47,11 +48,8 @@ const toWeiStr = (maybeDecimal, decimals = 18) => {
   return s
 }
 
-/**
- * Ask 0x for allowanceTarget by requesting a quote.
- * NOTE: this does NOT execute anything — it only returns the spender address.
- */
-async function get0xSpender({ chainId, sellToken, buyToken, sellAmountWei }) {
+
+async function get0xQuoteForContract({ chainId, sellToken, buyToken, sellAmountWei, dustClaimV3  }) {
   const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
   if (!host) return null
 
@@ -60,11 +58,12 @@ async function get0xSpender({ chainId, sellToken, buyToken, sellAmountWei }) {
       sellToken,
       buyToken,
       sellAmount: String(sellAmountWei),
+      takerAddress: dustClaimV3,
       slippagePercentage: 0.01,
     },
   })
-
-  return data?.allowanceTarget || null
+      
+  return data || null
 }
 
 class BatchService {
@@ -86,14 +85,7 @@ class BatchService {
     }
   }
 
-  // ===========================================================================
-  // ✅ PREFERRED: Build PLAN for ClaimScreen -> executeChainPlan (0x only)
-  // ===========================================================================
-
-  /**
-   * claims = [{ chainId, tokenAddress, tokenSymbol, amount, decimals, recipient }]
-   * options = { outTokenByChain?: { [chainId]: address }, slippagePct?: number }
-   */
+  
   async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || !claims.length) return []
 
@@ -110,58 +102,72 @@ class BatchService {
 
     const plan = []
 
-    for (const [chainId, items] of perChain.entries()) {
-      // Decide output token:
-      const tokenOut =
-        outTokenByChain?.[chainId] ||
-        WRAPPED_NATIVE_BY_CHAIN?.[chainId] ||
-        ''
+  for (const [chainId, items] of perChain.entries()) {
+    const dep = getDeployment(chainId)
+    if (!dep?.dustClaimV3 || !dep?.weth) continue
 
-      if (!tokenOut) continue
+    // 0x support required to build the plan
+    if (!dep.zeroXHost && !ZEROX_HOST_BY_CHAIN[chainId]) continue
 
-      const steps = []
+    const steps = []
 
-      for (const it of items) {
-        const tokenIn = it.tokenAddress
-        const decimals = Number(it.decimals ?? 18)
+    for (const it of items) {
+      const tokenIn = it.tokenAddress
+      const decimals = Number(it.decimals ?? 18)
+      const sellAmountWei = toWeiStr(it.amount, decimals)
+      const tokenOut = dep.weth
 
-        // IMPORTANT: step.amount MUST be wei string for executeChainPlan approvals + 0x quote
-        const sellAmountWei = toWeiStr(it.amount, decimals)
+      // 0x quote (taker is the contract)
+      const q = await get0xQuoteForContract({
+        chainId,
+        sellToken: tokenIn,
+        buyToken: tokenOut,
+        sellAmountWei,
+        dustClaimV3: dep.dustClaimV3,
+      })
+      if (!q?.to || !q?.data) continue
 
-        // Get allowanceTarget from 0x
-        const spender = await get0xAllowanceTarget({
-          chainId,
-          sellToken: tokenIn,
-          buyToken: tokenOut,
-          sellAmountWei
+      // V3 contract only accepts ONE spender.
+      // 0x sometimes uses allowanceTarget different than `to`.
+      // If they differ, skip (cannot safely execute with this V3 interface).
+      if (q.allowanceTarget && q.allowanceTarget.toLowerCase() !== q.to.toLowerCase()) {
+        console.warn('[batchService] skipping token (0x allowanceTarget != to)', {
+          chainId, tokenIn, to: q.to, allowanceTarget: q.allowanceTarget
         })
-
-        if (!spender) continue
-
-        steps.push({
-          needsApproval: true,
-          usePermit: false,
-
-          aggregator: '0x',
-          tokenIn,
-          tokenOut,
-
-          amount: sellAmountWei,
-
-          spender,
-
-          quote: {}, // optional metadata
-          slippage: slippagePct
-        })
+        continue
       }
 
-      if (steps.length) {
-        plan.push({ chainId, steps })
-      }
+      steps.push({
+        type: 'contract-swap',
+        aggregator: '0x',
+        dustClaimV3: Contract,
+        chainId,
+        tokenIn,
+        tokenOut, // WETH for this chain
+        amount: sellAmountWei,
+        swapCalldata: q.data,
+        swapTarget: q.to,
+        swapValue: q.value ?? '0x0',
+        estimatedGas: q.estimatedGas,
+        // ✅ approval must be to the DustClaimV3 contract (because it pulls tokens via transferFrom)
+        approvalSpender: dep.dustClaimV3,
+         approvalTarget: Contract,
+        // ✅ V3 call parameters
+        dustClaimV3: dep.dustClaimV3,
+        spender: q.to, // call target + spender (safe only when equals allowanceTarget)
+        swapCalldata: q.data, // bytes
+        
+        // optional
+        value: q.value ?? '0x0',
+        slippage: slippagePct,
+      })
     }
 
-    return plan
+    if (steps.length) plan.push({ chainId, steps })
   }
+
+  return plan
+}
 
   // ===========================================================================
   // LEGACY: Create raw batch transactions (fallback). Not used for 0x swap plans.

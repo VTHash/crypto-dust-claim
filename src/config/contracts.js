@@ -47,6 +47,7 @@ export const DUSTCLAIM_ADDRESS = {
  747474: "0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d", // Katana
  146: "0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc", // Sonic
  534352: "0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc", // Scroll
+  324: "0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d", // ZKsync
 }
 
 // ---- Optional: per-chain ABI overrides (only add if different from common) ----

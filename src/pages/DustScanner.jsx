@@ -123,7 +123,9 @@ const DustScanner = () => {
             symbol: t.symbol,
             address: t.address,
             balance: t.balance,
+            decimals: t.decimals ?? 18,
             usd
+
           })
         } else {
           const min = Number(settings.tokenMinUSD || 0)
@@ -199,7 +201,10 @@ const DustScanner = () => {
       // 0x ONLY: build claimPlan (your batchService.buildClaimPlan is now 0x-based)
       if (typeof batchService.buildClaimPlan === 'function') {
         try {
-          claimPlan = await batchService.buildClaimPlan(claims) 
+          claimPlan = await batchService.buildClaimPlan(claims, {
+            outTokenbyChain: settings.outTokenByChain,
+            slippagePct: 1
+          })
         } catch (e) {
           console.warn('[DustScanner] buildClaimPlan failed:', e)
           claimPlan = []

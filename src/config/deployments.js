@@ -25,10 +25,10 @@ export const ZEROX_HOST_BY_CHAIN = {
   81457: 'https://blast.api.0x.org',
   34443: 'https://mode.api.0x.org',
   8453: 'https://base.api.0x.org',
-  57073: 'https://ink.api.0x.org', // ✅ Ink host (NOT "inkonchain")
+  57073: 'https://ink.api.0x.org', 
 }
 
-// Your deployed DustClaimV3 contract + wrapped native per chain.
+//  DustClaimV3 contract + wrapped native per chain.
 // For chains not supported by 0x, keep zeroXHost=null automatically (below).
 export const DUSTCLAIM_V3_BY_CHAIN = {
   1: {
