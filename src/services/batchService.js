@@ -139,6 +139,7 @@ class BatchService {
 
         // Quote using AllowanceHolder route (v2)
         let quote
+        console.log('[0x] requesting quote', { chainId, tokenIn, sellAmountWei, taker: dep.dustClaimV3, txOrigin: options.txOrigin, })
         try {
           quote = await get0xAllowanceHolderQuote({
             chainId,
