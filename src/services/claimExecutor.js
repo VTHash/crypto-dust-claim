@@ -1,9 +1,7 @@
-// src/services/claimExecutor.js
-import axios from 'axios'
 import walletService from './walletService'
 import { encodeFunctionData } from 'viem'
 import DustClaimABI from '../config/contracts/dustclaim.common.json'
-import { DEPLOYMENTS } from '../config/deployments'
+import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
 // -------------------------------
 // 0x Swap API hosts (quote only)
@@ -36,43 +34,81 @@ export const ZEROX_HOST_BY_CHAIN = {
 export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
 
-  const connected = await walletService.isConnected()
+  const connected = await walletService.isConnected?.()
   if (!connected) throw new Error('Wallet not connected')
 
-  const currentChainHex = await walletService.getChainId()
-  const currentChainId = parseInt(currentChainHex, 16)
+  const currentChainHex = await walletService.getChainId?.()
+  const currentChainId =
+    typeof currentChainHex === 'string'
+      ? parseInt(currentChainHex, 16)
+      : Number(currentChainHex || 0)
 
-  if (Number(chainPlan.chainId) !== currentChainId) {
-    const sw = await walletService.switchChain(chainPlan.chainId)
-    if (!sw?.success) throw new Error('Chain switch failed')
+  if (Number(chainPlan.chainId) !== Number(currentChainId)) {
+    const sw = await walletService.switchChain(Number(chainPlan.chainId))
+    if (!sw?.success) throw new Error(sw?.error || `Chain switch failed`)
   }
 
   const from =
     fromAddress ||
-    (await walletService.getAddress()) ||
-    (await walletService.getAccounts())?.[0]
+    (await walletService.getAddress?.()) ||
+    (await (async () => {
+      const accs = await walletService.getAccounts?.()
+      return accs?.[0] || null
+    })())
 
   if (!from) throw new Error('No wallet address')
 
-  const deployment = DEPLOYMENTS[chainPlan.chainId]
-  if (!deployment?.dustclaim) {
-    throw new Error(`DustClaimV3 not deployed on chain ${chainPlan.chainId}`)
+  const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
+  if (!dep?.dustClaimV3) {
+    throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
   }
 
-  // Execute each dust swap THROUGH the contract
   for (const step of chainPlan.steps) {
-    try {
-      if (step.aggregator !== '0x') {
-        throw new Error('Only 0x supported')
+    // 1) APPROVE DustClaimV3 (contract pulls tokens)
+    if (step.needsApproval && !step.usePermit) {
+      try {
+        const approvalData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [dep.dustClaimV3, BigInt(step.amount)]
+        })
+
+        const res = await walletService.sendTransaction({
+          to: step.tokenIn,
+          from,
+          data: approvalData
+        })
+
+        receipts.push({
+          type: 'approval',
+          ok: !!res.success,
+          txHash: res.txHash,
+          error: res.error
+        })
+
+        if (!res.success) continue
+      } catch (err) {
+        receipts.push({
+          type: 'approval',
+          ok: false,
+          error: err?.message || 'Approval failed'
+        })
+        continue
       }
+    }
 
-      // 1) Ask 0x for calldata (taker = DustClaimV3)
-      const { swapCalldata, allowanceTarget } =
-        await build0xCalldata(chainPlan.chainId, step, deployment.dustclaim)
+    // 2) SWAP THROUGH DustClaimV3 using 0x calldata
+    try {
+      if (step.aggregator !== '0x') throw new Error('Only 0x supported')
 
-      // 2) Encode DustClaimV3 call
+      const { swapCalldata, allowanceTarget } = await build0xCalldata(
+        Number(chainPlan.chainId),
+        step,
+        dep.dustClaimV3 // takerAddress = contract
+      )
+
       const data = encodeFunctionData({
-        abi: DustClaimABI,
+        abi: DUSTCLAIM_V3_ABI,
         functionName: 'claimDustUsingAggregator',
         args: [
           step.tokenIn,
@@ -82,11 +118,11 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         ]
       })
 
-      // 3) Send tx → DustClaimV3
       const res = await walletService.sendTransaction({
         from,
-        to: deployment.dustclaim,
-        data
+        to: dep.dustClaimV3,
+        data,
+        value: '0x0'
       })
 
       receipts.push({
@@ -99,7 +135,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       receipts.push({
         type: 'swap',
         ok: false,
-        error: err?.response?.data?.message || err.message
+        error: err?.response?.data?.message || err?.message || 'Swap failed'
       })
     }
   }
@@ -107,21 +143,18 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   return receipts
 }
 
-// --------------------------------------------------
-// 0x helper (quote only)
-// --------------------------------------------------
 async function build0xCalldata(chainId, step, takerAddress) {
-  const host = ZEROX_HOST_BY_CHAIN[chainId]
-  if (!host) throw new Error(`0x not supported on ${chainId}`)
+  const host = ZEROX_HOST_BY_CHAIN?.[Number(chainId)]
+  if (!host) throw new Error(`0x not supported on chain ${chainId}`)
 
-  const slippagePct = step.slippage != null ? step.slippage : 1
+  const slippagePct = step.slippage != null ? Number(step.slippage) : 1
 
   const { data } = await axios.get(`${host}/swap/v1/quote`, {
     params: {
       sellToken: step.tokenIn,
       buyToken: step.tokenOut,
       sellAmount: String(step.amount),
-      takerAddress,
+      takerAddress, // MUST be DustClaimV3
       slippagePercentage: slippagePct / 100
     }
   })

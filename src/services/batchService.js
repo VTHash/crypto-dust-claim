@@ -4,7 +4,7 @@ import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import web3Service from './web3Service'
 import dexAggregatorService from './dexAggregatorService' // kept (not used for 0x plan) to avoid breaking other imports
 import axios from 'axios'
-import { getDeployment } from '../config/deployments'
+import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
 /**
  * Wrapped native per chain (used ONLY as fallback output token if no outTokenByChain provided)
@@ -49,17 +49,19 @@ const toWeiStr = (maybeDecimal, decimals = 18) => {
 }
 
 
-async function get0xQuoteForContract({ chainId, sellToken, buyToken, sellAmountWei, dustClaimV3  }) {
+async function get0xQuote({ chainId, sellToken, buyToken, sellAmountWei, taker  }) {
   const host = ZEROX_HOST_BY_CHAIN[Number(chainId)]
   if (!host) return null
 
-  const { data } = await axios.get(`${host}/swap/v1/quote`, {
+  const { data } = await axios.get(`${host}/swap/allowance-holder/quote`, {
     params: {
       sellToken,
       buyToken,
       sellAmount: String(sellAmountWei),
-      takerAddress: dustClaimV3,
+      taker,
       slippagePercentage: 0.01,
+      recipient: taker,
+      slippageBps: 100,
     },
   })
       
@@ -102,45 +104,39 @@ class BatchService {
 
     const plan = []
 
-  for (const [chainId, items] of perChain.entries()) {
-    const dep = getDeployment(chainId)
-    if (!dep?.dustClaimV3 || !dep?.weth) continue
+    for (const [chainId, items] of perChain.entries()) {
+      const dep = DEPLOYMENTS?.[chainId]
+      // 0x support required to build the plan
+      if (!dep.dustClaimV3 || !dep.weth || !dep.zeroXHost) continue
+      const tokenOut = dep.weth
 
-    // 0x support required to build the plan
-    if (!dep.zeroXHost && !ZEROX_HOST_BY_CHAIN[chainId]) continue
+      const steps = []
 
-    const steps = []
-
-    for (const it of items) {
+      for (const it of items) {
       const tokenIn = it.tokenAddress
       const decimals = Number(it.decimals ?? 18)
       const sellAmountWei = toWeiStr(it.amount, decimals)
       const tokenOut = dep.weth
 
       // 0x quote (taker is the contract)
-      const q = await get0xQuoteForContract({
+      const quote = await get0xQuote({
         chainId,
         sellToken: tokenIn,
         buyToken: tokenOut,
         sellAmountWei,
-        dustClaimV3: dep.dustClaimV3,
+        taker: dep.dustClaimV3,
       })
-      if (!q?.to || !q?.data) continue
+       const spender = quote?.transaction?.to || null
+       const swapCalldata = quote?.transaction?.data || null
+       if (!spender || !swapCalldata) continue
 
-      // V3 contract only accepts ONE spender.
-      // 0x sometimes uses allowanceTarget different than `to`.
-      // If they differ, skip (cannot safely execute with this V3 interface).
-      if (q.allowanceTarget && q.allowanceTarget.toLowerCase() !== q.to.toLowerCase()) {
-        console.warn('[batchService] skipping token (0x allowanceTarget != to)', {
-          chainId, tokenIn, to: q.to, allowanceTarget: q.allowanceTarget
-        })
-        continue
-      }
+      const q = quote.transaction
 
       steps.push({
+        needsApproval: true, // user must approve tokenIn to DustClaimV3
         type: 'contract-swap',
+        usePermit: false,
         aggregator: '0x',
-        dustClaimV3: Contract,
         chainId,
         tokenIn,
         tokenOut, // WETH for this chain
@@ -151,27 +147,25 @@ class BatchService {
         estimatedGas: q.estimatedGas,
         // ✅ approval must be to the DustClaimV3 contract (because it pulls tokens via transferFrom)
         approvalSpender: dep.dustClaimV3,
-         approvalTarget: Contract,
-        // ✅ V3 call parameters
-        dustClaimV3: dep.dustClaimV3,
-        spender: q.to, // call target + spender (safe only when equals allowanceTarget)
-        swapCalldata: q.data, // bytes
-        
+        approvalTarget: dep.dustClaimV3,
+        spender: dep.dustClaimV3, // APPROVE THE CONTRACT
+        swapCalldata,  // calldata router expects
+      
         // optional
         value: q.value ?? '0x0',
         slippage: slippagePct,
-      })
-    }
+    })
+  }
 
-    if (steps.length) plan.push({ chainId, steps })
+  if (steps.length) plan.push({ chainId, steps })
   }
 
   return plan
 }
 
-  // ===========================================================================
-  // LEGACY: Create raw batch transactions (fallback). Not used for 0x swap plans.
-  // ===========================================================================
+// ===========================================================================
+// LEGACY: Create raw batch transactions (fallback). Not used for 0x swap plans.
+// ===========================================================================
 
   async createBatchDustClaim(claims) {
     const txs = []

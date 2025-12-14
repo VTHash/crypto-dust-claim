@@ -202,7 +202,7 @@ const DustScanner = () => {
       if (typeof batchService.buildClaimPlan === 'function') {
         try {
           claimPlan = await batchService.buildClaimPlan(claims, {
-            outTokenbyChain: settings.outTokenByChain,
+            outTokenByChain: settings.outTokenByChain,
             slippagePct: 1
           })
         } catch (e) {
