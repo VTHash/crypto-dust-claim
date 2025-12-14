@@ -1,95 +1,78 @@
 // src/services/batchService.jsx
 import { ethers } from 'ethers'
-import axios from 'axios'
 import web3Service from './web3Service'
 import dexAggregatorService from './dexAggregatorService' // kept to avoid breaking imports
+import axios from 'axios'
+import walletService from './walletService'
 import { DEPLOYMENTS } from '../config/deployments'
 
-/** Normalize any input into a wei-decimal string */
+// -------------------------------
+// 0x Swap API v2 (single host + chainId param)
+// -------------------------------
+const ZEROX_V2_HOST = 'https://api.0x.org'
+
+// Normalize any input into a wei-decimal string
 const toWeiStr = (maybeDecimal, decimals = 18) => {
   const s = String(maybeDecimal ?? '0')
   if (s.includes('.')) return ethers.parseUnits(s, decimals).toString()
   return s
 }
 
-/**
- * Try 0x legacy v1 quote first (best match for your DustClaimV3: allowanceTarget == call target).
- * Host comes from DEPLOYMENTS[chainId].zeroXHost (per-chain host).
- */
-async function get0xV1Quote({ zeroXHost, sellToken, buyToken, sellAmountWei, takerAddress, slippagePct }) {
-  if (!zeroXHost) return null
-  const url = `${zeroXHost}/swap/v1/quote`
+async function getTxOriginFallback(optionsTxOrigin) {
+  if (optionsTxOrigin) return optionsTxOrigin
 
-  const { data } = await axios.get(url, {
-    params: {
-      sellToken,
-      buyToken,
-      sellAmount: String(sellAmountWei),
-      takerAddress,
-      slippagePercentage: Number(slippagePct) / 100
-    }
-  })
+  // Best-effort: pull wallet address from walletService (so UI doesn’t need changes)
+  const from =
+    (await walletService.getAddress?.()) ||
+    (await (async () => {
+      const accs = await walletService.getAccounts?.()
+      return accs?.[0] || null
+    })())
 
-  // v1 response: { to, data, value, allowanceTarget, ... }
-  if (!data?.to || !data?.data || !data?.allowanceTarget) return null
-
-  return {
-    kind: 'v1',
-    callTarget: data.to,
-    allowanceTarget: data.allowanceTarget,
-    calldata: data.data
-  }
+  return from || null
 }
 
-/**
- * Fallback: 0x allowance-holder v2 quote (single global host).
- * IMPORTANT: Only usable with DustClaimV3 if allowance spender == transaction.to.
- */
+// 0x v2 quote helper (Allowance Holder)
 async function get0xAllowanceHolderQuote({
   chainId,
   sellToken,
   buyToken,
   sellAmountWei,
-  taker,
-  txOrigin,
-  recipient,
-  slippagePct,
-  apiKey
+  taker, // your DustClaimV3 contract
+  txOrigin, // user EOA
+  slippageBps
 }) {
-  if (!apiKey) return null
+  const headers = {
+    '0x-version': 'v2'
+  }
 
-  const url = `https://api.0x.org/swap/allowance-holder/quote`
+  // IMPORTANT: correct env var name
+  const apiKey = import.meta?.env?.VITE_0X_API_KEY
+  if (apiKey) headers['0x-api-key'] = apiKey
 
-  const { data } = await axios.get(url, {
+  const { data } = await axios.get(`${ZEROX_V2_HOST}/swap/allowance-holder/quote`, {
     params: {
       chainId: Number(chainId),
       sellToken,
       buyToken,
       sellAmount: String(sellAmountWei),
-      taker, // your DustClaimV3
-      recipient, // your DustClaimV3 (must receive WETH)
-      txOrigin, // user EOA (required because taker is a contract)
-      slippageBps: Math.round(Number(slippagePct) * 100) // 1% => 100 bps
+
+      // taker is the contract that will call AllowanceHolder
+      taker,
+
+      // when taker is a contract, txOrigin must be the user EOA
+      txOrigin,
+
+      // ensure output goes to the contract (it needs WETH)
+      recipient: taker,
+
+      // v2 uses slippageBps
+      slippageBps: Number(slippageBps)
     },
-    headers: {
-      '0x-api-key': apiKey,
-      '0x-version': 'v2'
-    }
+    headers
   })
 
-  // v2 allowance-holder response: transaction.to + transaction.data + issues.allowance.spender
-  const callTarget = data?.transaction?.to
-  const calldata = data?.transaction?.data
-  const allowanceSpender = data?.issues?.allowance?.spender
-
-  if (!callTarget || !calldata || !allowanceSpender) return null
-
-  return {
-    kind: 'allowance-holder',
-    callTarget,
-    allowanceSpender,
-    calldata
-  }
+  return data || null
 }
 
 class BatchService {
@@ -112,7 +95,7 @@ class BatchService {
   }
 
   // ===========================================================================
-  // ✅ Build PLAN for ClaimScreen -> executeChainPlan (0x through DustClaimV3)
+  // ✅ PREFERRED: Build PLAN for ClaimScreen -> executeChainPlan (0x v2 + contract)
   // ===========================================================================
   /**
    * claims = [{ chainId, tokenAddress, tokenSymbol, amount, decimals, recipient }]
@@ -122,9 +105,15 @@ class BatchService {
     if (!Array.isArray(claims) || !claims.length) return []
 
     const slippagePct = Number(options.slippagePct ?? 1)
-    const txOrigin = options.txOrigin || null
+    const slippageBps = Math.max(1, Math.round(slippagePct * 100)) // 1% => 100 bps
 
-    // group by chain
+    const txOrigin = await getTxOriginFallback(options.txOrigin)
+    if (!txOrigin) {
+      // Without txOrigin we can't safely quote when taker is a contract
+      throw new Error('Missing txOrigin (wallet address). Connect wallet first.')
+    }
+
+    // Group by chain
     const perChain = new Map()
     for (const c of claims) {
       const cid = Number(c.chainId)
@@ -133,79 +122,53 @@ class BatchService {
     }
 
     const plan = []
-    const apiKey = import.meta.env.VITE_0X_API_KEY || ''
 
     for (const [chainId, items] of perChain.entries()) {
       const dep = DEPLOYMENTS?.[Number(chainId)]
+      // only build plan where we have contract + WETH
       if (!dep?.dustClaimV3 || !dep?.weth) continue
-
-      // if chain has no 0x host, skip
-      // (this is your “unsupported by 0x = null” requirement)
-      if (!dep?.zeroXHost) continue
 
       const steps = []
 
       for (const it of items) {
         const tokenIn = it.tokenAddress
         const decimals = Number(it.decimals ?? 18)
+
+        // MUST be wei string
         const sellAmountWei = toWeiStr(it.amount, decimals)
 
-        // --------------------------
-        // 1) Try legacy 0x v1 quote
-        // --------------------------
-        let q = null
+        // Quote using AllowanceHolder route (v2)
+        let quote
         try {
-          q = await get0xV1Quote({
-            zeroXHost: dep.zeroXHost,
+          quote = await get0xAllowanceHolderQuote({
+            chainId,
             sellToken: tokenIn,
             buyToken: dep.weth,
             sellAmountWei,
-            takerAddress: dep.dustClaimV3,
-            slippagePct
+            taker: dep.dustClaimV3,
+            txOrigin,
+            slippageBps
           })
-        } catch {
-          q = null
+        } catch (e) {
+          // skip this token if 0x can't quote it
+          continue
         }
 
-        // ---------------------------------------
-        // 2) Fallback to allowance-holder v2 quote
-        // ONLY if compatible with DustClaimV3
-        // ---------------------------------------
-        if (!q) {
-          try {
-            const q2 = await get0xAllowanceHolderQuote({
-              chainId,
-              sellToken: tokenIn,
-              buyToken: dep.weth,
-              sellAmountWei,
-              taker: dep.dustClaimV3,
-              recipient: dep.dustClaimV3,
-              txOrigin: txOrigin || it.recipient, // best fallback is user address
-              slippagePct,
-              apiKey
-            })
+        const callTarget = quote?.transaction?.to
+        const swapCalldata = quote?.transaction?.data
 
-            // DustClaimV3 supports a single spender for approve+call
-            // so we require allowanceSpender == callTarget
-            if (q2 && q2.allowanceSpender?.toLowerCase() === q2.callTarget?.toLowerCase()) {
-              q = {
-                kind: q2.kind,
-                callTarget: q2.callTarget,
-                allowanceTarget: q2.allowanceSpender,
-                calldata: q2.calldata
-              }
-            }
-          } catch {
-            q = null
-          }
-        }
+        // spender needed for DustClaimV3 to approve before calling
+        const routerSpender =
+          quote?.issues?.allowance?.spender ||
+          quote?.allowanceTarget ||
+          callTarget
 
-        if (!q?.allowanceTarget || !q?.calldata) continue
+        if (!callTarget || !swapCalldata || !routerSpender) continue
 
         steps.push({
           aggregator: '0x',
 
-          // user approves DustClaimV3 (because DustClaimV3 does transferFrom)
+          // USER approves DustClaimV3 (contract pulls tokenIn from user)
           needsApproval: true,
           usePermit: false,
           spender: dep.dustClaimV3,
@@ -214,9 +177,9 @@ class BatchService {
           tokenOut: dep.weth,
           amount: sellAmountWei,
 
-          // DustClaimV3 will approve+call this spender with calldata
-          routerSpender: q.allowanceTarget,
-          swapCalldata: q.calldata,
+          // used by claimExecutor to call DustClaimV3
+          routerSpender,
+          swapCalldata,
 
           slippage: slippagePct
         })
@@ -229,7 +192,7 @@ class BatchService {
   }
 
   // ===========================================================================
-  // LEGACY methods below unchanged (kept so app imports don't break)
+  // LEGACY: Create raw batch transactions (not used by 0x plan)
   // ===========================================================================
   async createBatchDustClaim(claims) {
     const txs = []
@@ -326,6 +289,71 @@ class BatchService {
       console.error('createTokenBatchTransfers error:', e)
     }
     return txs
+  }
+
+  calculateGasSavings(individualTxs, batchTxs) {
+    const individualGas = (individualTxs || []).reduce((sum, tx) => {
+      const isData = tx?.data && tx.data !== '0x'
+      return sum + (isData ? 65000 : 21000)
+    }, 0)
+
+    const batchGas = (batchTxs || []).reduce((sum, tx) => {
+      const d = tx?.data || ''
+      if (d.includes('batchTransfer')) {
+        const approxRecipients = Math.max(0, Math.floor((d.length - 138) / 64))
+        return sum + 100000 + approxRecipients * 20000
+      }
+      if (d.includes('multiSend')) {
+        const approxTransfers = Math.max(0, Math.floor((d.length - 138) / 64))
+        return sum + 150000 + approxTransfers * 5000
+      }
+      return sum + 65000
+    }, 0)
+
+    const savingsRaw = individualGas - batchGas
+    const savings = savingsRaw > 0 ? savingsRaw : 0
+    const savingsPct =
+      individualGas > 0 && savings > 0
+        ? ((savings / individualGas) * 100).toFixed(2)
+        : '0.00'
+
+    return {
+      individualGas,
+      batchGas,
+      savings,
+      savingsPercentage: savingsPct,
+      estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
+    }
+  }
+
+  estimateGasSavingsUSD(gasUnits, chainId = 1) {
+    const avgGwei = { 1: 30, 137: 200, 42161: 0.1, 10: 0.001 }
+    const gwei = avgGwei[Number(chainId)] ?? 30
+    const ethPrice = 2500
+    const ethSaved = (Number(gasUnits) * gwei * 1e9) / 1e18
+    return ethSaved * ethPrice
+  }
+
+  validateBatchTransactions(txs) {
+    const errors = []
+    ;(txs || []).forEach((tx, i) => {
+      if (!tx?.to) errors.push(`Tx ${i + 1}: missing 'to'`)
+      if (!tx?.data && !tx?.value) errors.push(`Tx ${i + 1}: no data or value`)
+      if (!tx?.chainId) errors.push(`Tx ${i + 1}: missing chainId`)
+      if (tx?.value && !/^0x[0-9a-fA-F]+$/.test(tx.value)) errors.push(`Tx ${i + 1}: bad value`)
+      if (tx?.gasLimit && !/^0x[0-9a-fA-F]+$/.test(tx.gasLimit)) errors.push(`Tx ${i + 1}: bad gasLimit`)
+    })
+    return { isValid: errors.length === 0, errors }
+  }
+
+  optimizeTransactionOrder(txs = []) {
+    return [...txs].sort((a, b) => {
+      const aNative = !a.data || a.data === '0x'
+      const bNative = !b.data || b.data === '0x'
+      if (aNative && !bNative) return -1
+      if (!aNative && bNative) return 1
+      return Number(a.chainId) - Number(b.chainId)
+    })
   }
 }
 
