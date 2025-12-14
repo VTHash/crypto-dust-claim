@@ -114,12 +114,13 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   let swapCalldata = step.swapCalldata
 
   if (!routerSpender || !swapCalldata) {
-    const q = await axios.get(`${dep.zeroXHost}/swap/v1/quote`, {
+    const q = await axios.get(`${dep.zeroXHost}/swap/allowance-holder/quote`, {
       params: {
+        chainId: Number(chainPlan.chainId),
         sellToken: step.tokenIn,
         buyToken: dep.weth,
         sellAmount: String(step.amount),
-        takerAddress: dep.dustClaimV3,
+        taker: dep.dustClaimV3,
         slippagePercentage: (Number(step.slippage ?? 1)) / 100
       }
     })

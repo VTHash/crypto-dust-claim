@@ -117,8 +117,9 @@ class BatchService {
       const sellAmountWei = toWeiStr(it.amount, decimals)
 
       // IMPORTANT: for DustClaimV3, buyToken MUST be chain WETH and takerAddress MUST be the CONTRACT
-      const { data } = await axios.get(`${dep.zeroXHost}/swap/v1/quote`, {
+      const { data } = await axios.get(`${dep.zeroXHost}/swap/allowance-holder/quote`, {
         params: {
+          chainId: Number(chainId),
           sellToken: tokenIn,
           buyToken: dep.weth,
           sellAmount: String(sellAmountWei),
