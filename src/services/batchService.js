@@ -89,75 +89,67 @@ class BatchService {
 
   
   async buildClaimPlan(claims = [], options = {}) {
-    if (!Array.isArray(claims) || !claims.length) return []
+  if (!Array.isArray(claims) || !claims.length) return []
 
-    const outTokenByChain = options.outTokenByChain || {}
-    const slippagePct = Number(options.slippagePct ?? 1)
+  const slippagePct = Number(options.slippagePct ?? 1)
 
-    // Group by chain
-    const perChain = new Map()
-    for (const c of claims) {
-      const cid = Number(c.chainId)
-      if (!perChain.has(cid)) perChain.set(cid, [])
-      perChain.get(cid).push(c)
-    }
-
-    const plan = []
-
-    for (const [chainId, items] of perChain.entries()) {
-      const dep = DEPLOYMENTS?.[chainId]
-      // 0x support required to build the plan
-      if (!dep.dustClaimV3 || !dep.weth || !dep.zeroXHost) continue
-      const tokenOut = dep.weth
-
-      const steps = []
-
-      for (const it of items) {
-      const tokenIn = it.tokenAddress
-      const decimals = Number(it.decimals ?? 18)
-      const sellAmountWei = toWeiStr(it.amount, decimals)
-      const tokenOut = dep.weth
-
-      // 0x quote (taker is the contract)
-      const quote = await get0xQuote({
-        chainId,
-        sellToken: tokenIn,
-        buyToken: tokenOut,
-        sellAmountWei,
-        taker: dep.dustClaimV3,
-      })
-       const spender = quote?.transaction?.to || null
-       const swapCalldata = quote?.transaction?.data || null
-       if (!spender || !swapCalldata) continue
-
-      const q = quote.transaction
-
-      steps.push({
-        needsApproval: true, // user must approve tokenIn to DustClaimV3
-        type: 'contract-swap',
-        usePermit: false,
-        aggregator: '0x',
-        chainId,
-        tokenIn,
-        tokenOut, // WETH for this chain
-        amount: sellAmountWei,
-        swapCalldata: q.data,
-        swapTarget: q.to,
-        swapValue: q.value ?? '0x0',
-        estimatedGas: q.estimatedGas,
-        // ✅ approval must be to the DustClaimV3 contract (because it pulls tokens via transferFrom)
-        approvalSpender: dep.dustClaimV3,
-        approvalTarget: dep.dustClaimV3,
-        spender: dep.dustClaimV3, // APPROVE THE CONTRACT
-        swapCalldata,  // calldata router expects
-      
-        // optional
-        value: q.value ?? '0x0',
-        slippage: slippagePct,
-    })
+  // group by chain
+  const perChain = new Map()
+  for (const c of claims) {
+    const cid = Number(c.chainId)
+    if (!perChain.has(cid)) perChain.set(cid, [])
+    perChain.get(cid).push(c)
   }
 
-  if (steps.length) plan.push({ chainId, steps })
+  const plan = []
+
+  for (const [chainId, items] of perChain.entries()) {
+    const dep = DEPLOYMENTS?.[Number(chainId)]
+    if (!dep?.dustClaimV3 || !dep?.weth || !dep?.zeroXHost) continue // skip chains without 0x or missing config
+
+    const steps = []
+
+    for (const it of items) {
+      const tokenIn = it.tokenAddress
+      const decimals = Number(it.decimals ?? 18)
+
+      // amount MUST be wei string
+      const sellAmountWei = toWeiStr(it.amount, decimals)
+
+      // IMPORTANT: for DustClaimV3, buyToken MUST be chain WETH and takerAddress MUST be the CONTRACT
+      const { data } = await axios.get(`${dep.zeroXHost}/swap/v1/quote`, {
+        params: {
+          sellToken: tokenIn,
+          buyToken: dep.weth,
+          sellAmount: String(sellAmountWei),
+          takerAddress: dep.dustClaimV3,
+          slippagePercentage: slippagePct / 100
+        }
+      })
+
+      if (!data?.data || !data?.allowanceTarget) continue
+
+      steps.push({
+        aggregator: '0x',
+
+        // approval must be to the DustClaimV3 contract (because it transferFrom's user)
+        needsApproval: true,
+        usePermit: false,
+        spender: dep.dustClaimV3,
+
+        tokenIn,
+        tokenOut: dep.weth,
+        amount: sellAmountWei,
+
+        // these are used later by claimExecutor to call the contract
+        routerSpender: data.allowanceTarget,
+        swapCalldata: data.data,
+
+        slippage: slippagePct
+      })
+    }
+
+    if (steps.length) plan.push({ chainId, steps })
   }
 
   return plan

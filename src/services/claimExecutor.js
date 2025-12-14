@@ -99,46 +99,68 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
     // 2) SWAP THROUGH DustClaimV3 using 0x calldata
     try {
-      if (step.aggregator !== '0x') throw new Error('Only 0x supported')
-
-      const { swapCalldata, allowanceTarget } = await build0xCalldata(
-        Number(chainPlan.chainId),
-        step,
-        dep.dustClaimV3 // takerAddress = contract
-      )
-
-      const data = encodeFunctionData({
-        abi: DUSTCLAIM_V3_ABI,
-        functionName: 'claimDustUsingAggregator',
-        args: [
-          step.tokenIn,
-          BigInt(step.amount),
-          allowanceTarget,
-          swapCalldata
-        ]
-      })
-
-      const res = await walletService.sendTransaction({
-        from,
-        to: dep.dustClaimV3,
-        data,
-        value: '0x0'
-      })
-
-      receipts.push({
-        type: 'swap',
-        ok: !!res.success,
-        txHash: res.txHash,
-        error: res.error
-      })
-    } catch (err) {
-      receipts.push({
-        type: 'swap',
-        ok: false,
-        error: err?.response?.data?.message || err?.message || 'Swap failed'
-      })
-    }
+  if (step.aggregator !== '0x') {
+    throw new Error(`Unsupported aggregator: ${step.aggregator || 'none'} (only 0x supported now)`)
   }
+
+  const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
+  if (!dep?.dustClaimV3) throw new Error('Missing DustClaimV3 deployment for this chain')
+  if (!dep?.zeroXHost) throw new Error('0x not supported on this chain')
+  if (!dep?.weth) throw new Error('Missing WETH for this chain')
+
+  // If plan already included calldata/spender, use it.
+  // Otherwise fetch it now (safe fallback).
+  let routerSpender = step.routerSpender
+  let swapCalldata = step.swapCalldata
+
+  if (!routerSpender || !swapCalldata) {
+    const q = await axios.get(`${dep.zeroXHost}/swap/v1/quote`, {
+      params: {
+        sellToken: step.tokenIn,
+        buyToken: dep.weth,
+        sellAmount: String(step.amount),
+        takerAddress: dep.dustClaimV3,
+        slippagePercentage: (Number(step.slippage ?? 1)) / 100
+      }
+    })
+    routerSpender = q?.data?.allowanceTarget
+    swapCalldata = q?.data?.data
+    if (!routerSpender || !swapCalldata) throw new Error('Invalid 0x quote response')
+  }
+
+  const data = encodeFunctionData({
+    abi: DUSTCLAIM_V3_ABI,
+    functionName: 'claimDustUsingAggregator',
+    args: [
+      step.tokenIn,
+      BigInt(step.amount),
+      routerSpender,
+      swapCalldata
+    ]
+  })
+
+  const tx = {
+    from,
+    to: dep.dustClaimV3,
+    data,
+    value: '0x0'
+  }
+
+  const res = await walletService.sendTransaction(tx)
+
+  receipts.push({
+    type: 'swap',
+    ok: !!res.success,
+    txHash: res.txHash,
+    error: res.error
+  })
+} catch (err) {
+  receipts.push({
+    type: 'swap',
+    ok: false,
+    error: err?.response?.data?.message || err?.message || 'Swap failed'
+  })
+}
 
   return receipts
 }
@@ -167,4 +189,5 @@ async function build0xCalldata(chainId, step, takerAddress) {
     swapCalldata: data.data,
     allowanceTarget: data.allowanceTarget
   }
+}
 }
