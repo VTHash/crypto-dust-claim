@@ -12,10 +12,9 @@ import { DEPLOYMENTS } from '../config/deployments'
 const ZEROX_V2_HOST = 'https://api.0x.org'
 
 // Normalize any input into a wei-decimal string
-const toWeiStr = (maybeDecimal, decimals = 18) => {
-  const s = String(maybeDecimal ?? '0')
-  if (s.includes('.')) return ethers.parseUnits(s, decimals).toString()
-  return s
+const toWeiStr = (amount, decimals = 18) => {
+  const s = String(amount ?? '0')
+  return s.includes('.') ? ethers.parseUnits(s, decimals).toString() : s
 }
 
 async function getTxOriginFallback(optionsTxOrigin) {
@@ -61,56 +60,24 @@ async function get0xAllowanceHolderQuote({
 }
 
 class BatchService {
-  constructor() {
-    this.erc20ABI = [
-      'function approve(address spender, uint256 amount) external returns (bool)',
-      'function transfer(address to, uint256 amount) external returns (bool)',
-      'function balanceOf(address) view returns (uint256)',
-      'function decimals() view returns (uint8)'
-    ]
-
-    this.batchTransferABI = [
-      'function batchTransfer(address token, address[] calldata recipients, uint256[] calldata amounts) external',
-      'function batchTransferETH(address[] calldata recipients, uint256[] calldata amounts) external payable'
-    ]
-
-    this.BATCH_CONTRACTS = {
-      // (optional legacy)
-    }
-  }
-
-  // ===========================================================================
-  // ✅ PREFERRED: Build PLAN for ClaimScreen -> executeChainPlan (0x v2 + contract)
-  // ===========================================================================
-  /**
-   * claims = [{ chainId, tokenAddress, tokenSymbol, amount, decimals, recipient }]
-   * options = { slippagePct?: number, txOrigin?: string }
-   */
   async buildClaimPlan(claims = [], options = {}) {
-    if (!Array.isArray(claims) || !claims.length) return []
+    if (!Array.isArray(claims) || claims.length === 0) return []
 
-    const slippagePct = Number(options.slippagePct ?? 1)
-    const slippageBps = Math.max(1, Math.round(slippagePct * 100)) // 1% => 100 bps
+    const { txOrigin, slippagePct = 1 } = options
+    if (!txOrigin) throw new Error('txOrigin (user EOA) is required')
 
-    const txOrigin = await getTxOriginFallback(options.txOrigin)
-    if (!txOrigin) {
-      // Without txOrigin we can't safely quote when taker is a contract
-      throw new Error('Missing txOrigin (wallet address). Connect wallet first.')
-    }
-
-    // Group by chain
-    const perChain = new Map()
+    // group claims by chain
+    const byChain = new Map()
     for (const c of claims) {
       const cid = Number(c.chainId)
-      if (!perChain.has(cid)) perChain.set(cid, [])
-      perChain.get(cid).push(c)
+      if (!byChain.has(cid)) byChain.set(cid, [])
+      byChain.get(cid).push(c)
     }
 
     const plan = []
 
-    for (const [chainId, items] of perChain.entries()) {
-      const dep = DEPLOYMENTS?.[Number(chainId)]
-      // only build plan where we have contract + WETH
+    for (const [chainId, items] of byChain.entries()) {
+      const dep = DEPLOYMENTS?.[chainId]
       if (!dep?.dustClaimV3 || !dep?.weth) continue
 
       const steps = []
@@ -118,43 +85,66 @@ class BatchService {
       for (const it of items) {
         const tokenIn = it.tokenAddress
         const decimals = Number(it.decimals ?? 18)
-
-        // MUST be wei string
         const sellAmountWei = toWeiStr(it.amount, decimals)
 
-        // Quote using AllowanceHolder route (v2)
-        let quote
-        console.log('[0x] requesting quote', { chainId, tokenIn, sellAmountWei, taker: dep.dustClaimV3, txOrigin: options.txOrigin, })
+        console.log('[0x:v2] requesting quote', {
+          chainId,
+          tokenIn,
+          sellAmountWei,
+          taker: dep.dustClaimV3,
+          txOrigin
+        })
+
+        let data
         try {
-          quote = await get0xAllowanceHolderQuote({
-            chainId,
-            sellToken: tokenIn,
-            buyToken: dep.weth,
-            sellAmountWei,
-            taker: dep.dustClaimV3,
-            txOrigin,
-            slippageBps
+          const res = await axios.get(ZEROX_V2_URL, {
+            params: {
+              chainId,
+              sellToken: tokenIn,
+              buyToken: dep.weth,
+              sellAmount: sellAmountWei,
+
+              // CRITICAL (per docs)
+              taker: dep.dustClaimV3,
+              txOrigin,
+              recipient: dep.dustClaimV3,
+
+              slippageBps: Math.round(slippagePct * 100)
+            },
+            headers: {
+              '0x-api-key': import.meta.env.VITE_0X_API_KEY,
+              '0x-version': 'v2'
+            }
           })
+          data = res.data
         } catch (e) {
-          // skip this token if 0x can't quote it
+          console.warn('[0x:v2] quote failed', tokenIn, e?.response?.data || e.message)
           continue
         }
 
-        const callTarget = quote?.transaction?.to
-        const swapCalldata = quote?.transaction?.data
+        const callTarget = data?.transaction?.to
+        const swapCalldata = data?.transaction?.data
+        const allowanceTarget = data?.allowanceTarget
 
-        // spender needed for DustClaimV3 to approve before calling
-        const routerSpender =
-          quote?.issues?.allowance?.spender ||
-          quote?.allowanceTarget ||
-          callTarget
+        // HARD requirements for DustClaimV3
+        if (!callTarget || !swapCalldata || !allowanceTarget) {
+          console.warn('[0x:v2] invalid quote response', data)
+          continue
+        }
 
-        if (!callTarget || !swapCalldata || !routerSpender) continue
+        // safety: DustClaimV3 expects ONE external target
+        if (callTarget.toLowerCase() !== allowanceTarget.toLowerCase()) {
+          console.warn('[0x:v2] callTarget != allowanceTarget, skipping', {
+            callTarget,
+            allowanceTarget
+          })
+          continue
+        }
 
         steps.push({
           aggregator: '0x',
 
-          // USER approves DustClaimV3 (contract pulls tokenIn from user)
+          // user approves DustClaimV3
           needsApproval: true,
           usePermit: false,
           spender: dep.dustClaimV3,
@@ -163,15 +153,17 @@ class BatchService {
           tokenOut: dep.weth,
           amount: sellAmountWei,
 
-          // used by claimExecutor to call DustClaimV3
-          routerSpender,
+          // DustClaimV3 will approve + call this
+          routerSpender: allowanceTarget,
           swapCalldata,
 
           slippage: slippagePct
         })
       }
 
-      if (steps.length) plan.push({ chainId, steps })
+      if (steps.length > 0) {
+        plan.push({ chainId, steps })
+      }
     }
 
     return plan
