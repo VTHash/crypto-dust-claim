@@ -76,6 +76,17 @@ exports.handler = async (event) => {
       slippageBps // integer (e.g. 100 = 1%)
     } = body;
 
+    console.log('[0x] REQUEST PARAMS:', {
+      chainId,
+      sellToken,
+      buyToken,
+      sellAmount,
+      taker,
+      txOrigin,
+      recipient,
+      slippageBps
+    });
+
     const cid = Number(chainId);
     const host = ZEROX_HOST_BY_CHAIN[cid];
     if (!host) return json(400, { error: `0x unsupported chainId: ${chainId}` });
