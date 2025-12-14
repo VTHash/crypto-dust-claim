@@ -334,7 +334,7 @@ export const CHAIN_CONFIGS = {
   symbol: "ETH",
   rpcUrl: `https://morph-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://morphl2.socialscan.io/",
-  logo: "/logo/morph.png"
+  logo: "/logo/morph.jpg"
 },
 
 };

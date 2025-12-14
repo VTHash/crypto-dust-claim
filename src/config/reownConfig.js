@@ -324,7 +324,7 @@ export const SUPPORTED_CHAINS = {
   symbol: "ETH",
   rpcUrl: `https://arbitrum-nova.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://nova.arbiscan.io",
-  logo: "/logo/arbitrum-nova.png"
+  logo: "/logo/arbitrum-nova.jpeg"
 },
 
 167000: {
@@ -340,7 +340,7 @@ export const SUPPORTED_CHAINS = {
   symbol: "ETH",
   rpcUrl: `https://morph-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
   explorer: "https://morphl2.socialscan.io/",
-  logo: "/logo/morph.png"
+  logo: "/logo/morph.jpg"
 },
 
 };
