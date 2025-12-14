@@ -42,6 +42,7 @@ const CHAIN_LABELS = {
   59144: 'Linea',
   80094: 'Berachain',
   1313161554: 'Aurora',
+  534352: 'Scroll',
   
 
 
@@ -88,6 +89,7 @@ const CHAIN_LOGOS = {
   80094: '/logo/bera.png',
   81457: '/logo/blast.jpeg',
   1313161554: '/logo/aurora.png',
+  534352: '/logo/scroll.png',
 
 };
 
