@@ -138,7 +138,7 @@ class BatchService {
     slippageBps: Math.round(slippagePct * 100),
   },
   headers: {
-    '0x-api-key': import.meta.env.VITE_0X_API_KEY,
+    '0x-api-key': import.meta.env.VIE_0X_API_KEY,
     '0x-version': 'v2',
   },
 })
