@@ -3,6 +3,7 @@
 // - avoids CORS
 // - keeps API key off the browser
 // - logs request + response (safe summaries) for debugging
+// - supports POST (app) + optional GET (manual debug in browser)
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
@@ -49,6 +50,12 @@ function safeAddr(x) {
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) out[k] = obj?.[k];
+  return out;
+}
+
 exports.handler = async (event) => {
   const started = Date.now();
   const reqId =
@@ -63,6 +70,7 @@ exports.handler = async (event) => {
   console.log("[0x] ua:", event.headers?.["user-agent"] || "n/a");
 
   try {
+    // CORS preflight
     if (event.httpMethod === "OPTIONS") {
       console.log("[0x] OPTIONS preflight OK");
       return {
@@ -70,15 +78,10 @@ exports.handler = async (event) => {
         headers: {
           "access-control-allow-origin": "*",
           "access-control-allow-headers": "content-type",
-          "access-control-allow-methods": "POST, OPTIONS",
+          "access-control-allow-methods": "POST, GET, OPTIONS",
         },
         body: "",
       };
-    }
-
-    if (event.httpMethod !== "POST") {
-      console.log("[0x] Rejected: method not allowed");
-      return json(405, { error: "Method not allowed. Use POST." }, { "x-req-id": reqId });
     }
 
     const apiKey = process.env.ZEROX_API_KEY || process.env.VITE_0X_API_KEY;
@@ -87,12 +90,21 @@ exports.handler = async (event) => {
       return json(500, { error: "Missing 0x API key in Netlify env vars." }, { "x-req-id": reqId });
     }
 
+    // ---- Input parsing: POST body OR GET query (debug) ----
     let body = {};
-    try {
-      body = event.body ? JSON.parse(event.body) : {};
-    } catch (e) {
-      console.log("[0x] ERROR: invalid JSON body");
-      return json(400, { error: "Invalid JSON body" }, { "x-req-id": reqId });
+    if (event.httpMethod === "POST") {
+      try {
+        body = event.body ? JSON.parse(event.body) : {};
+      } catch (e) {
+        console.log("[0x] ERROR: invalid JSON body");
+        return json(400, { error: "Invalid JSON body" }, { "x-req-id": reqId });
+      }
+    } else if (event.httpMethod === "GET") {
+      // Optional debug mode: /0x-quote?chainId=1&sellToken=...&buyToken=...&sellAmount=...&taker=...&txOrigin=...&recipient=...&slippageBps=100
+      body = event.queryStringParameters || {};
+    } else {
+      console.log("[0x] Rejected: method not allowed");
+      return json(405, { error: "Method not allowed. Use POST (or GET for debug)." }, { "x-req-id": reqId });
     }
 
     const {
@@ -129,7 +141,7 @@ exports.handler = async (event) => {
       console.log("[0x] ERROR: missing required fields");
       return json(
         400,
-        { error: "Missing required fields: sellToken,buyToken,sellAmount,taker,recipient" },
+        { error: "Missing required fields: chainId,sellToken,buyToken,sellAmount,taker,recipient" },
         { "x-req-id": reqId }
       );
     }
@@ -147,7 +159,10 @@ exports.handler = async (event) => {
       ? String(Math.trunc(Number(slippageBps)))
       : "100";
 
+    // ✅ IMPORTANT: include chainId in query (per v2 docs/examples)
+    // even if you select host by chain. 
     const url = new URL(`${host}/swap/allowance-holder/quote`);
+    url.searchParams.set("chainId", String(cid));
     url.searchParams.set("sellToken", sellToken);
     url.searchParams.set("buyToken", buyToken);
     url.searchParams.set("sellAmount", String(sellAmount));
@@ -177,19 +192,25 @@ exports.handler = async (event) => {
       data = { raw: text };
     }
 
-    // Safe summary (very important for debugging plan === [])
+    // Safe summary (helps debug why buildClaimPlan becomes [])
     const summary = {
       ok: resp.ok,
       status: resp.status,
+
+      // v2 response often includes these (per docs example response) 
+      allowanceTarget: safeAddr(data?.allowanceTarget),
+      issues_allowance_spender: safeAddr(data?.issues?.allowance?.spender),
+
       hasTransaction: !!data?.transaction,
       tx_to: safeAddr(data?.transaction?.to),
       tx_data_len: data?.transaction?.data ? String(data.transaction.data.length) : "0",
       tx_value: data?.transaction?.value ?? null,
-      allowance_spender:
-        safeAddr(data?.issues?.allowance?.spender) || safeAddr(data?.allowanceTarget) || null,
+
       buyAmount: data?.buyAmount ?? null,
       sellAmount: data?.sellAmount ?? null,
-      issues: data?.issues ? Object.keys(data.issues) : [],
+
+      liquidityAvailable: data?.liquidityAvailable ?? null,
+      issuesKeys: data?.issues ? Object.keys(data.issues) : [],
       validationErrors: data?.validationErrors ?? null,
       code: data?.code ?? null,
       reason: data?.reason ?? null,
@@ -198,17 +219,13 @@ exports.handler = async (event) => {
 
     console.log("[0x] Response summary:", summary);
 
-    if (!resp.ok) {
-      console.log("[0x] 0x ERROR body (truncated):", text?.slice?.(0, 2000) || text);
-      return json(
-        resp.status,
-        { error: "0x error", status: resp.status, data },
-        { "x-req-id": reqId }
-      );
-    }
+    // If you need the full JSON for ONE request, log a capped version:
+    console.log("[0x] Full JSON (capped 12k):", (text || "").slice(0, 12000));
 
-    // Optional: if you WANT full JSON in logs (can be huge), uncomment:
-    // console.log("[0x] Full JSON:", JSON.stringify(data).slice(0, 5000));
+    if (!resp.ok) {
+      console.log("[0x] 0x ERROR body (capped 12k):", (text || "").slice(0, 12000));
+      return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
+    }
 
     return json(200, data, { "x-req-id": reqId });
   } catch (e) {
