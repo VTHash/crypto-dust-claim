@@ -4,38 +4,7 @@ import walletService from './walletService'
 import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
-// -------------------------------
-// 0x Swap API v2 (Allowance Holder)
-// -------------------------------
-const ZEROX_V2_HOST = 'https://api.0x.org'
-
-async function get0xAllowanceHolderQuote({
-  chainId,
-  sellToken,
-  buyToken,
-  sellAmountWei,
-  taker,
-  txOrigin,
-  slippageBps
-}) {
-  const { data } = await axios.post('/.netlify/functions/0x-quote', {
-  chainId: Number(chainId),
-  sellToken: tokenIn,
-  buyToken: dep.weth,
-  sellAmount: String(sellAmountWei),
-
-  taker: dep.dustClaimV3,
-  recipient: dep.dustClaimV3,
-  txOrigin: options.txOrigin, // <-- user EOA
-  slippageBps: Math.round(slippagePct * 100) // 1% => 100
-})
-
-  return data || null
-}
-
-// --------------------------------------------------
 // Execute chain plan THROUGH DustClaimV3
-// --------------------------------------------------
 export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
 
@@ -50,9 +19,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
   if (Number(chainPlan.chainId) !== Number(currentChainId)) {
     const sw = await walletService.switchChain(Number(chainPlan.chainId))
-    if (!sw?.success) {
-      throw new Error(sw?.error || `Failed to switch to chain ${chainPlan.chainId}`)
-    }
+    if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
   }
 
   const from =
@@ -67,12 +34,9 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
   const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
   if (!dep?.dustClaimV3) throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
-  if (!dep?.weth) throw new Error(`Missing wrapped native (weth) for chain ${chainPlan.chainId}`)
 
   for (const step of chainPlan.steps) {
-    // -------------------------
-    // 1) APPROVE DustClaimV3
-    // -------------------------
+    // 1) APPROVE DustClaimV3 (contract pulls tokens)
     if (step.needsApproval && !step.usePermit) {
       try {
         const approvalData = encodeFunctionData({
@@ -82,8 +46,8 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         })
 
         const res = await walletService.sendTransaction({
-          from,
           to: step.tokenIn,
+          from,
           data: approvalData
         })
 
@@ -105,62 +69,54 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       }
     }
 
-    // -------------------------
-    // 2) SWAP via DustClaimV3
-    // -------------------------
+    // 2) SWAP THROUGH DustClaimV3 using 0x calldata
     try {
       if (step.aggregator !== '0x') {
         throw new Error(`Unsupported aggregator: ${step.aggregator || 'none'} (only 0x supported)`)
       }
 
-      // If plan already included calldata/spender, use it; otherwise fetch again.
+      // Prefer plan’s data (best), fallback to re-quote via Netlify (safe)
       let routerSpender = step.routerSpender
       let swapCalldata = step.swapCalldata
 
       if (!routerSpender || !swapCalldata) {
-        const slippagePct = Number(step.slippage ?? 1)
-        const slippageBps = Math.max(1, Math.round(slippagePct * 100))
+        const { data: q } = await axios.post(
+          '/.netlify/functions/0x-quote',
+          {
+            chainId: Number(chainPlan.chainId),
+            sellToken: step.tokenIn,
+            buyToken: step.tokenOut, // should be chain WETH
+            sellAmount: String(step.amount),
+            taker: dep.dustClaimV3,
+            recipient: dep.dustClaimV3,
+            txOrigin: from,
+            slippageBps: Math.round(Number(step.slippage ?? 1) * 100)
+          },
+          { headers: { 'content-type': 'application/json' } }
+        )
 
-        const quote = await get0xAllowanceHolderQuote({
-          chainId: Number(chainPlan.chainId),
-          sellToken: step.tokenIn,
-          buyToken: dep.weth,
-          sellAmountWei: String(step.amount),
-          taker: dep.dustClaimV3,
-          txOrigin: from,
-          slippageBps
-        })
+        const callTarget = q?.transaction?.to
+        const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
+        const calldata = q?.transaction?.data
 
-        const callTarget = quote?.transaction?.to
-        swapCalldata = quote?.transaction?.data
-        routerSpender =
-          quote?.issues?.allowance?.spender ||
-          quote?.allowanceTarget ||
-          callTarget
-
-        if (!routerSpender || !swapCalldata) {
-          throw new Error('Invalid 0x v2 quote response')
+        if (!callTarget || !spender || !calldata) {
+          throw new Error('Invalid 0x quote response (missing tx/spender/data)')
         }
+        if (String(callTarget).toLowerCase() !== String(spender).toLowerCase()) {
+          throw new Error('0x quote not compatible with V3 (tx.to != spender)')
+        }
+
+        routerSpender = spender
+        swapCalldata = calldata
       }
 
-      // Encode DustClaimV3 call:
       const data = encodeFunctionData({
         abi: DUSTCLAIM_V3_ABI,
         functionName: 'claimDustUsingAggregator',
-        args: [
-          step.tokenIn,
-          BigInt(step.amount),
-          routerSpender,
-          swapCalldata
-        ]
+        args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      const tx = {
-        from,
-        to: dep.dustClaimV3,
-        data,
-        value: '0x0'
-      }
+      const tx = { from, to: dep.dustClaimV3, data, value: '0x0' }
 
       const res = await walletService.sendTransaction(tx)
 
@@ -174,10 +130,10 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       receipts.push({
         type: 'swap',
         ok: false,
-        error: err?.response?.data?.message || err?.message || 'Swap failed'
+        error: err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Swap failed'
       })
     }
   }
 
   return receipts
-}
+            }
