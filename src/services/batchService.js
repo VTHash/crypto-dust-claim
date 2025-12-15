@@ -6,21 +6,47 @@ import axios from 'axios'
 import walletService from './walletService'
 import { DEPLOYMENTS } from '../config/deployments'
 
-// -------------------------------
-// 0x Swap API v2 (single host + chainId param)
-// -------------------------------
-const ZEROX_V2_HOST = 'https://api.0x.org'
-
-// Normalize any input into a wei-decimal string
+// Normalize any input into a wei string
 const toWeiStr = (amount, decimals = 18) => {
   const s = String(amount ?? '0')
   return s.includes('.') ? ethers.parseUnits(s, decimals).toString() : s
 }
 
+/**
+ * 0x Swap API v2 via Netlify function (POST)
+ * This is the ONLY place we request quotes to build the plan.
+ */
+async function get0xAllowanceHolderQuote({
+  chainId,
+  sellToken,
+  buyToken,
+  sellAmountWei,
+  taker,
+  txOrigin,
+  recipient,
+  slippageBps
+}) {
+  const payload = {
+    chainId: Number(chainId),
+    sellToken,
+    buyToken,
+    sellAmount: String(sellAmountWei),
+    taker,
+    txOrigin,
+    recipient,
+    slippageBps: Number(slippageBps)
+  }
+
+  const { data } = await axios.post('/.netlify/functions/0x-quote', payload, {
+    headers: { 'content-type': 'application/json' }
+  })
+
+  return data
+}
+
 async function getTxOriginFallback(optionsTxOrigin) {
   if (optionsTxOrigin) return optionsTxOrigin
 
-  // Best-effort: pull wallet address from walletService (so UI doesn’t need changes)
   const from =
     (await walletService.getAddress?.()) ||
     (await (async () => {
@@ -31,48 +57,26 @@ async function getTxOriginFallback(optionsTxOrigin) {
   return from || null
 }
 
-// 0x v2 quote helper (Allowance Holder)
-async function get0xAllowanceHolderQuote({
-  chainId,
-  sellToken,
-  buyToken,
-  sellAmountWei,
-  taker,      // DustClaimV3
-  txOrigin,   // user EOA
-  recipient,  // DustClaimV3
-  slippageBps
-}) {
-  const { data } = await axios.post(
-    '/.netlify/functions/0x-quote',
-    {
-      chainId: Number(chainId),
-      sellToken,
-      buyToken,
-      sellAmount: String(sellAmountWei),
-      taker,
-      txOrigin,
-      recipient,
-      slippageBps: Number(slippageBps)
-    },
-    {
-      headers: { 'content-type': 'application/json' }
-    }
-  )
-
-  return data || null
-}
-
 class BatchService {
+  /**
+   * claims = [{ chainId, tokenAddress, amount, decimals, recipient }]
+   * options = { txOrigin, slippagePct }
+   */
   async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || claims.length === 0) return []
 
-    const { txOrigin, slippagePct = 1 } = options
-    if (!txOrigin) throw new Error('txOrigin (user EOA) is required')
+    const slippagePct = Number(options.slippagePct ?? 1)
+    const txOrigin = await getTxOriginFallback(options.txOrigin)
 
-    // group claims by chain
+    if (!txOrigin) {
+      throw new Error('txOrigin (user EOA) is required to build 0x v2 quotes')
+    }
+
+    // group by chain
     const byChain = new Map()
     for (const c of claims) {
       const cid = Number(c.chainId)
+      if (!Number.isFinite(cid) || cid <= 0) continue
       if (!byChain.has(cid)) byChain.set(cid, [])
       byChain.get(cid).push(c)
     }
@@ -80,7 +84,7 @@ class BatchService {
     const plan = []
 
     for (const [chainId, items] of byChain.entries()) {
-      const dep = DEPLOYMENTS?.[chainId]
+      const dep = DEPLOYMENTS?.[Number(chainId)]
       if (!dep?.dustClaimV3 || !dep?.weth) continue
 
       const steps = []
@@ -90,56 +94,62 @@ class BatchService {
         const decimals = Number(it.decimals ?? 18)
         const sellAmountWei = toWeiStr(it.amount, decimals)
 
-        console.log('[0x:v2] requesting quote', {
-          chainId,
-          tokenIn,
-          sellAmountWei,
-          taker: dep.dustClaimV3,
-          txOrigin
-        })
-
-        let data
+        // Skip nonsense amounts
         try {
-          const res = await axios.get(ZEROX_V2_URL, {
-            params: {
-              chainId,
-              sellToken: tokenIn,
-              buyToken: dep.weth,
-              sellAmount: sellAmountWei,
+          if (BigInt(sellAmountWei) <= 0n) continue
+        } catch {
+          continue
+        }
 
-              // CRITICAL (per docs)
-              taker: dep.dustClaimV3,
-              txOrigin,
-              recipient: dep.dustClaimV3,
-
-              slippageBps: Math.round(slippagePct * 100)
-            },
-            headers: {
-              '0x-api-key': import.meta.env.VITE_0X_API_KEY,
-              '0x-version': 'v2'
-            }
+        let q
+        try {
+          q = await get0xAllowanceHolderQuote({
+            chainId,
+            sellToken: tokenIn,
+            buyToken: dep.weth,
+            sellAmountWei,
+            taker: dep.dustClaimV3,      // contract is taker
+            recipient: dep.dustClaimV3,  // contract must receive WETH
+            txOrigin,                   // user EOA
+            slippageBps: Math.round(slippagePct * 100) // 1% => 100
           })
-          data = res.data
         } catch (e) {
-          console.warn('[0x:v2] quote failed', tokenIn, e?.response?.data || e.message)
+          console.warn(
+            '[buildClaimPlan] 0x quote failed:',
+            { chainId, tokenIn },
+            e?.response?.data || e?.message
+          )
           continue
         }
 
-        const callTarget = data?.transaction?.to
-        const swapCalldata = data?.transaction?.data
-        const allowanceTarget = data?.allowanceTarget
+        const callTarget = q?.transaction?.to
+        const swapCalldata = q?.transaction?.data
 
-        // HARD requirements for DustClaimV3
-        if (!callTarget || !swapCalldata || !allowanceTarget) {
-          console.warn('[0x:v2] invalid quote response', data)
-          continue
-        }
+        // spender location (v2 allowance-holder)
+        const spender =
+          q?.issues?.allowance?.spender ||
+          q?.allowanceTarget ||
+          q?.allowance?.spender ||
+          null
 
-        // safety: DustClaimV3 expects ONE external target
-        if (callTarget.toLowerCase() !== allowanceTarget.toLowerCase()) {
-          console.warn('[0x:v2] callTarget != allowanceTarget, skipping', {
+        if (!callTarget || !swapCalldata || !spender) {
+          console.warn('[buildClaimPlan] missing required quote fields', {
+            chainId,
+            hasTx: !!q?.transaction,
             callTarget,
-            allowanceTarget
+            hasData: !!swapCalldata,
+            spender
+          })
+          continue
+        }
+
+        // CRITICAL for your V3:
+        // spender.call(swapCalldata) must be valid -> spender must equal tx.to
+        if (String(callTarget).toLowerCase() !== String(spender).toLowerCase()) {
+          console.warn('[buildClaimPlan] callTarget != spender (V3 incompatible), skipping', {
+            chainId,
+            callTarget,
+            spender
           })
           continue
         }
@@ -147,7 +157,7 @@ class BatchService {
         steps.push({
           aggregator: '0x',
 
-          // user approves DustClaimV3
+          // user approves DustClaimV3 (contract pulls tokens)
           needsApproval: true,
           usePermit: false,
           spender: dep.dustClaimV3,
@@ -156,185 +166,18 @@ class BatchService {
           tokenOut: dep.weth,
           amount: sellAmountWei,
 
-          // DustClaimV3 will approve + call this
-          routerSpender: allowanceTarget,
+          // used by claimExecutor to call DustClaimV3
+          routerSpender: spender,
           swapCalldata,
 
           slippage: slippagePct
         })
       }
 
-      if (steps.length > 0) {
-        plan.push({ chainId, steps })
-      }
+      if (steps.length) plan.push({ chainId, steps })
     }
 
     return plan
-  }
-
-  // ===========================================================================
-  // LEGACY: Create raw batch transactions (not used by 0x plan)
-  // ===========================================================================
-  async createBatchDustClaim(claims) {
-    const txs = []
-    const byChain = this.groupClaimsByChain(claims)
-
-    for (const [chainIdStr, chainClaims] of Object.entries(byChain)) {
-      const chainId = Number(chainIdStr)
-      for (const [tokenAddr, tokenClaims] of Object.entries(chainClaims)) {
-        if (tokenAddr === '0x0000000000000000000000000000000000000000') {
-          const nativeTx = await this.createNativeBatchTransfer(chainId, tokenClaims)
-          if (nativeTx) txs.push(nativeTx)
-        } else {
-          const tokenTxs = await this.createTokenBatchTransfers(chainId, tokenAddr, tokenClaims)
-          txs.push(...tokenTxs)
-        }
-      }
-    }
-    return txs
-  }
-
-  groupClaimsByChain(claims = []) {
-    const result = {}
-    for (const c of claims) {
-      const cid = Number(c.chainId)
-      if (!result[cid]) result[cid] = {}
-      if (!result[cid][c.tokenAddress]) result[cid][c.tokenAddress] = []
-      result[cid][c.tokenAddress].push(c)
-    }
-    return result
-  }
-
-  async createNativeBatchTransfer(chainId, claims) {
-    try {
-      const recipients = claims.map((c) => c.recipient)
-      const amounts = claims.map((c) => ethers.parseEther(String(c.amount)))
-      const total = amounts.reduce((a, b) => a + b, 0n)
-
-      const batch = this.BATCH_CONTRACTS[chainId]
-      if (!batch) return null
-
-      const iface = new ethers.Interface(this.batchTransferABI)
-      const data = iface.encodeFunctionData('batchTransferETH', [recipients, amounts])
-      return {
-        to: batch,
-        data,
-        value: '0x' + total.toString(16),
-        gasLimit: '0x' + (50000 + recipients.length * 21000).toString(16),
-        chainId
-      }
-    } catch (e) {
-      console.error('createNativeBatchTransfer error:', e)
-      return null
-    }
-  }
-
-  async createTokenBatchTransfers(chainId, tokenAddress, claims) {
-    const txs = []
-    const recipients = claims.map((c) => c.recipient)
-
-    try {
-      const provider = web3Service.getProvider(chainId)
-      const erc = new ethers.Contract(tokenAddress, this.erc20ABI, provider)
-      const decimals = await erc.decimals()
-
-      const amounts = claims.map((c) => ethers.parseUnits(String(c.amount), decimals))
-
-      const batch = this.BATCH_CONTRACTS[chainId]
-      if (batch) {
-        const iface = new ethers.Interface(this.batchTransferABI)
-        const data = iface.encodeFunctionData('batchTransfer', [tokenAddress, recipients, amounts])
-        const gasEstimate = 100000 + recipients.length * 25000
-        txs.push({
-          to: batch,
-          data,
-          value: '0x0',
-          gasLimit: '0x' + gasEstimate.toString(16),
-          chainId
-        })
-        return txs
-      }
-
-      const iface = new ethers.Interface(this.erc20ABI)
-      for (let i = 0; i < recipients.length; i++) {
-        const data = iface.encodeFunctionData('transfer', [recipients[i], amounts[i]])
-        txs.push({
-          to: tokenAddress,
-          data,
-          value: '0x0',
-          gasLimit: '0x186A0',
-          chainId
-        })
-      }
-    } catch (e) {
-      console.error('createTokenBatchTransfers error:', e)
-    }
-    return txs
-  }
-
-  calculateGasSavings(individualTxs, batchTxs) {
-    const individualGas = (individualTxs || []).reduce((sum, tx) => {
-      const isData = tx?.data && tx.data !== '0x'
-      return sum + (isData ? 65000 : 21000)
-    }, 0)
-
-    const batchGas = (batchTxs || []).reduce((sum, tx) => {
-      const d = tx?.data || ''
-      if (d.includes('batchTransfer')) {
-        const approxRecipients = Math.max(0, Math.floor((d.length - 138) / 64))
-        return sum + 100000 + approxRecipients * 20000
-      }
-      if (d.includes('multiSend')) {
-        const approxTransfers = Math.max(0, Math.floor((d.length - 138) / 64))
-        return sum + 150000 + approxTransfers * 5000
-      }
-      return sum + 65000
-    }, 0)
-
-    const savingsRaw = individualGas - batchGas
-    const savings = savingsRaw > 0 ? savingsRaw : 0
-    const savingsPct =
-      individualGas > 0 && savings > 0
-        ? ((savings / individualGas) * 100).toFixed(2)
-        : '0.00'
-
-    return {
-      individualGas,
-      batchGas,
-      savings,
-      savingsPercentage: savingsPct,
-      estimatedSavingsUSD: this.estimateGasSavingsUSD(savings)
-    }
-  }
-
-  estimateGasSavingsUSD(gasUnits, chainId = 1) {
-    const avgGwei = { 1: 30, 137: 200, 42161: 0.1, 10: 0.001 }
-    const gwei = avgGwei[Number(chainId)] ?? 30
-    const ethPrice = 2500
-    const ethSaved = (Number(gasUnits) * gwei * 1e9) / 1e18
-    return ethSaved * ethPrice
-  }
-
-  validateBatchTransactions(txs) {
-    const errors = []
-    ;(txs || []).forEach((tx, i) => {
-      if (!tx?.to) errors.push(`Tx ${i + 1}: missing 'to'`)
-      if (!tx?.data && !tx?.value) errors.push(`Tx ${i + 1}: no data or value`)
-      if (!tx?.chainId) errors.push(`Tx ${i + 1}: missing chainId`)
-      if (tx?.value && !/^0x[0-9a-fA-F]+$/.test(tx.value)) errors.push(`Tx ${i + 1}: bad value`)
-      if (tx?.gasLimit && !/^0x[0-9a-fA-F]+$/.test(tx.gasLimit)) errors.push(`Tx ${i + 1}: bad gasLimit`)
-    })
-    return { isValid: errors.length === 0, errors }
-  }
-
-  optimizeTransactionOrder(txs = []) {
-    return [...txs].sort((a, b) => {
-      const aNative = !a.data || a.data === '0x'
-      const bNative = !b.data || b.data === '0x'
-      if (aNative && !bNative) return -1
-      if (!aNative && bNative) return 1
-      return Number(a.chainId) - Number(b.chainId)
-    })
   }
 }
 
