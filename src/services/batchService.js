@@ -37,24 +37,27 @@ async function get0xAllowanceHolderQuote({
   sellToken,
   buyToken,
   sellAmountWei,
-  taker, // your DustClaimV3 contract
-  txOrigin, // user EOA
+  taker,      // DustClaimV3
+  txOrigin,   // user EOA
+  recipient,  // DustClaimV3
   slippageBps
 }) {
-  
-  
-
-  const { data } = await axios.post('/.netlify/functions/0x-quote', {
-  chainId: Number(chainId),
-  sellToken: tokenIn,
-  buyToken: dep.weth,
-  sellAmount: String(sellAmountWei),
-
-  taker: dep.dustClaimV3,
-  recipient: dep.dustClaimV3,
-  txOrigin: options.txOrigin, // <-- user EOA
-  slippageBps: Math.round(slippagePct * 100) // 1% => 100
-})
+  const { data } = await axios.post(
+    '/.netlify/functions/0x-quote',
+    {
+      chainId: Number(chainId),
+      sellToken,
+      buyToken,
+      sellAmount: String(sellAmountWei),
+      taker,
+      txOrigin,
+      recipient,
+      slippageBps: Number(slippageBps)
+    },
+    {
+      headers: { 'content-type': 'application/json' }
+    }
+  )
 
   return data || null
 }
