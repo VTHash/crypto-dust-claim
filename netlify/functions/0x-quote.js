@@ -78,7 +78,7 @@ exports.handler = async (event) => {
         headers: {
           "access-control-allow-origin": "*",
           "access-control-allow-headers": "content-type",
-          "access-control-allow-methods": "POST, GET, OPTIONS",
+          "access-control-allow-methods": "POST, OPTIONS",
         },
         body: "",
       };
@@ -104,7 +104,7 @@ exports.handler = async (event) => {
       body = event.queryStringParameters || {};
     } else {
       console.log("[0x] Rejected: method not allowed");
-      return json(405, { error: "Method not allowed. Use POST (or GET for debug)." }, { "x-req-id": reqId });
+      return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
     }
 
     const {
