@@ -29,8 +29,6 @@ export async function buildClaimPlan({ itemsByChain, wallet, toTokenByChain }) {
       })
 
       // 0x spender (AllowanceHolder / Permit2) comes from quote issues.allowance.spender
-      const spender = q.allowanceTarget
-      if (!spender) continue
 
       const hasPermit = await supportsPermit2612({ chainId: Number(chainId), token: { address: item.address } })
 
@@ -40,7 +38,6 @@ export async function buildClaimPlan({ itemsByChain, wallet, toTokenByChain }) {
           chainId: Number(chainId),
           token: { address: item.address },
           owner: wallet,
-          spender,
         })
         needsApproval = allowance < rawAmount
       }
@@ -54,7 +51,6 @@ export async function buildClaimPlan({ itemsByChain, wallet, toTokenByChain }) {
         needsApproval,
         usePermit: hasPermit,
         quote: q,
-        spender,
         slippageBps: 100, // 1% default
       })
 
