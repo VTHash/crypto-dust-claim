@@ -1,7 +1,6 @@
 import axios from 'axios'
 import { parseUnits } from 'viem'
 import { DEPLOYMENTS } from '../config/deployments'
-import { bestQuote } from './quoteService'
 /**
  * itemsByChain: {
  *   [chainId]: [{ address, symbol, decimals, value (float/string), usd, ... }]
