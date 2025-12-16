@@ -140,7 +140,7 @@ const swapCalldata = q?.transaction?.data || q?.data
 const spender = q?.allowanceTarget || q?.issues?.allowance?.spender || null
         if (callTarget.toLowerCase() !== spender.toLowerCase()) continue
         // spender location (v2 allowance-holder)
-        const spender =
+      
           q?.issues?.allowance?.spender ||
           q?.allowanceTarget ||
           q?.allowance?.spender ||
