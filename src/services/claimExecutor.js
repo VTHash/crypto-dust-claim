@@ -116,7 +116,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      const tx = { from, to: dep.dustClaimV3, data, value: '0x0' }
+      const tx = { from, to: dep.dustClaimV3, data }
 
       const res = await walletService.sendTransaction(tx)
 
