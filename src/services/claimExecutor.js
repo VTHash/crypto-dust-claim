@@ -79,6 +79,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       let swapCalldata = step.swapCalldata
 
       if (!routerSpender || !swapCalldata) {
+        
         const { data: q } = await axios.post(
           '/.netlify/functions/0x-quote',
           {
@@ -93,7 +94,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           },
           { headers: { 'content-type': 'application/json' } }
         )
-
+        const gasFromQuote = q?.transaction?.gas
         const callTarget = q?.transaction?.to
         const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
         const calldata = q?.transaction?.data
@@ -115,8 +116,15 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      const tx = { from, to: dep.dustClaimV3, data, value: On }
-
+      const gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n // buffer
+      
+      const tx = {
+        from,
+        to: dep.dustClaimV3,
+        data,
+        value: 0n,
+        gasLimit
+      }
       const res = await walletService.sendTransaction(tx)
 
       receipts.push({
