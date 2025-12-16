@@ -37,11 +37,23 @@ async function get0xAllowanceHolderQuote({
     slippageBps: Number(slippageBps)
   }
 
-  const { data } = await axios.post('/.netlify/functions/0x-quote', payload, {
+    // Helpful browser-side logs (you’ll see these in DevTools)
+  console.log('[batchService] /.netlify/functions/0x-quote payload:', payload)
+
+  const res = await axios.post('/.netlify/functions/0x-quote', payload, {
     headers: { 'content-type': 'application/json' }
   })
 
-  return data
+  // Helpful browser-side logs
+  console.log('[batchService] 0x-quote response keys:', Object.keys(res?.data || {}))
+  console.log('[batchService] 0x-quote tx.to:', res?.data?.transaction?.to)
+  console.log('[batchService] 0x-quote tx.data len:', res?.data?.transaction?.data?.length || 0)
+  console.log(
+    '[batchService] 0x-quote spender:',
+    res?.data?.issues?.allowance?.spender || res?.data?.allowanceTarget || null
+  )
+
+  return res.data
 }
 
 async function getTxOriginFallback(optionsTxOrigin) {
@@ -141,7 +153,7 @@ class BatchService {
             hasData: !!swapCalldata,
             spender
           })
-          continue
+           continue
         }
 
         // CRITICAL for your V3:
