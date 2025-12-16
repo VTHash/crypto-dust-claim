@@ -47,7 +47,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
         const res = await walletService.sendTransaction({
           to: step.tokenIn,
-          from,
           data: approvalData
         })
 
@@ -116,7 +115,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      const tx = { from, to: dep.dustClaimV3, data }
+      const tx = { from, to: dep.dustClaimV3, data, value: On }
 
       const res = await walletService.sendTransaction(tx)
 
