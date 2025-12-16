@@ -91,6 +91,7 @@ class BatchService {
 
       for (const it of items) {
         const tokenIn = it.tokenAddress
+        if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
         const decimals = Number(it.decimals ?? 18)
         const sellAmountWei = toWeiStr(it.amount, decimals)
 
@@ -107,7 +108,7 @@ class BatchService {
             chainId,
             sellToken: tokenIn,
             buyToken: dep.weth,
-            sellAmountWei,
+            sellAmountWei: sellAmountWei,
             taker: dep.dustClaimV3,      // contract is taker
             recipient: dep.dustClaimV3,  // contract must receive WETH
             txOrigin,                   // user EOA
@@ -146,8 +147,9 @@ class BatchService {
         // CRITICAL for your V3:
         // spender.call(swapCalldata) must be valid -> spender must equal tx.to
         if (String(callTarget).toLowerCase() !== String(spender).toLowerCase()) {
-          console.warn('[buildClaimPlan] callTarget != spender (V3 incompatible), skipping', {
+          console.warn('[buildClaimPlan] V3 incompatible quote (tx.to != spender).', {
             chainId,
+            tokenIn,
             callTarget,
             spender
           })
