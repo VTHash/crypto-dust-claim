@@ -98,7 +98,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         const callTarget = q?.transaction?.to
         const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
         const calldata = q?.transaction?.data
-
+        if (callTarget.toLowerCase() !== spender.toLowerCase()) continue
         if (!callTarget || !spender || !calldata) {
           throw new Error('Invalid 0x quote response (missing tx/spender/data)')
         }
