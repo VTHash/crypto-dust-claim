@@ -101,76 +101,72 @@ class BatchService {
 
       const steps = []
 
-      for (const it of items) {
-        const tokenIn = it.tokenAddress
-        if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
-        const decimals = Number(it.decimals ?? 18)
-        const sellAmountWei = toWeiStr(it.amount, decimals)
+for (const it of items) {
+  const tokenIn = it.tokenAddress
+  if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
+  const decimals = Number(it.decimals ?? 18)
+  const sellAmountWei = toWeiStr(it.amount, decimals)
 
-        // Skip nonsense amounts
-        try {
-          if (BigInt(sellAmountWei) <= 0n) continue
-        } catch {
-          continue
-        }
+  // Skip nonsense amounts
+  try {
+    if (BigInt(sellAmountWei) <= 0n) continue
+  } catch {
+    continue
+  }
 
-        let q
-        try {
-          q = await get0xAllowanceHolderQuote({
-            chainId,
-            sellToken: tokenIn,
-            buyToken: dep.weth,
-            sellAmountWei: sellAmountWei,
-            taker: dep.dustClaimV3,      // contract is taker
-            recipient: dep.dustClaimV3,  // contract must receive WETH
-            txOrigin,                   // user EOA
-            slippageBps: Math.round(slippagePct * 100) // 1% => 100
-          })
-        } catch (e) {
-          console.warn(
-            '[buildClaimPlan] 0x quote failed:',
-            { chainId, tokenIn },
-            e?.response?.data || e?.message
-          )
-          continue
-        }
+  let q
+  try {
+    q = await get0xAllowanceHolderQuote({
+      chainId,
+      sellToken: tokenIn,
+      buyToken: dep.weth,
+      sellAmountWei: sellAmountWei,
+      taker: dep.dustClaimV3,      // contract is taker
+      recipient: dep.dustClaimV3,  // contract must receive WETH
+      txOrigin,                   // user EOA
+      slippageBps: Math.round(slippagePct * 100) // 1% => 100
+    })
+  } catch (e) {
+    console.warn(
+      '[buildClaimPlan] 0x quote failed:',
+      { chainId, tokenIn },
+      e?.response?.data || e?.message
+    )
+    continue
+  }
 
-        const callTarget = q?.transaction?.to || q?.to
-const swapCalldata = q?.transaction?.data || q?.data
-const spender = q?.allowanceTarget || q?.issues?.allowance?.spender || null
-        if (callTarget.toLowerCase() !== spender.toLowerCase()) continue
-        // spender location (v2 allowance-holder)
-      
-          q?.issues?.allowance?.spender ||
-          q?.allowanceTarget ||
-          q?.allowance?.spender ||
-          null
+  const callTarget = q?.transaction?.to
+  const spender =
+    q?.issues?.allowance?.spender ||
+    q?.allowanceTarget ||
+    null
+  const calldata = q?.transaction?.data
 
-        if (!callTarget || !swapCalldata || !spender) {
-          console.warn('[buildClaimPlan] missing required quote fields', {
-            chainId,
-            hasTx: !!q?.transaction,
-            callTarget,
-            hasData: !!swapCalldata,
-            spender
-          })
-           continue
-        }
+  // HARD GUARD — must come FIRST
+  if (!callTarget || !spender || !calldata) {
+    console.warn('[0x] invalid quote, missing fields', {
+      callTarget,
+      spender,
+      calldataLen: calldata?.length
+    })
+    continue
+  }
 
-        // CRITICAL for your V3:
-        // spender.call(swapCalldata) must be valid -> spender must equal tx.to
-        if (String(callTarget).toLowerCase() !== String(spender).toLowerCase()) {
-          console.warn('[buildClaimPlan] V3 incompatible quote (tx.to != spender).', {
-            chainId,
-            tokenIn,
-            callTarget,
-            spender
-          })
-          continue
-        }
+  //  V3 COMPATIBILITY CHECK
+  if (callTarget.toLowerCase() !== spender.toLowerCase()) {
+    console.warn('[0x] incompatible quote (tx.to !== spender)', {
+      callTarget,
+      spender
+    })
+    continue
+  }
 
-        steps.push({
-          aggregator: '0x',
+  //  ONLY NOW assign
+  const routerSpender = spender
+  const swapCalldata = calldata
+
+  steps.push({
+    aggregator: '0x',
 
           // user approves DustClaimV3 (contract pulls tokens)
           needsApproval: true,

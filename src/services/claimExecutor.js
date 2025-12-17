@@ -97,18 +97,34 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         )
          gasFromQuote = q?.transaction?.gas ?? null
         const callTarget = q?.transaction?.to
-        const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
-        const calldata = q?.transaction?.data
-        if (!callTarget || !spender || !calldata) {
-          throw new Error('Invalid 0x quote response (missing tx/spender/data)')
-        }
+const spender =
+  q?.issues?.allowance?.spender ||
+  q?.allowanceTarget ||
+  null
+const calldata = q?.transaction?.data
 
-        if (String(callTarget).toLowerCase() !== String(spender).toLowerCase()) {
-          throw new Error('0x quote not compatible with V3 (tx.to != spender)')
-        }
+//  HARD GUARD — must come FIRST
+if (!callTarget || !spender || !calldata) {
+  console.warn('[0x] invalid quote, missing fields', {
+    callTarget,
+    spender,
+    calldataLen: calldata?.length
+  })
+  continue
+}
 
-        routerSpender = spender
-        swapCalldata = calldata
+//  V3 COMPATIBILITY CHECK
+if (callTarget.toLowerCase() !== spender.toLowerCase()) {
+  console.warn('[0x] incompatible quote (tx.to !== spender)', {
+    callTarget,
+    spender
+  })
+  continue
+}
+
+//  ONLY NOW assign
+routerSpender = spender
+swapCalldata = calldata
       }
 
       const data = encodeFunctionData({
