@@ -3,232 +3,262 @@ import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import priceService from './priceService'
 import { discoverAllERC20s } from './tokenDiscoveryService'
 
-const toKey = (id) => String(Number(id))
+const toKey = (id) => String(id)
 
+// Default thresholds (used when Settings not provided)
 const DEFAULT_DUST_THRESHOLDS = {
-  native: 0.001,
-  tokenUnit: 0.01
-}
-
-function normalizeRpcUrl(rpcUrl) {
-  // Accept common shapes:
-  // - "https://..."
-  // - ["https://...", "https://backup..."]
-  // - { http: "https://..." } / { default: "https://..." }
-  // - { url: "https://..." }
-  if (!rpcUrl) return null
-
-  if (typeof rpcUrl === 'string') return rpcUrl.trim() || null
-
-  if (Array.isArray(rpcUrl)) {
-    const first = rpcUrl.find((x) => typeof x === 'string' && x.trim())
-    return first ? first.trim() : null
-  }
-
-  if (typeof rpcUrl === 'object') {
-    const candidates = [rpcUrl.http, rpcUrl.https, rpcUrl.default, rpcUrl.url]
-    const first = candidates.find((x) => typeof x === 'string' && x.trim())
-    return first ? first.trim() : null
-  }
-
-  return null
-}
-
-async function withTimeout(promise, ms = 12_000, label = 'timeout') {
-  let t
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(label)), ms)
-  })
-  try {
-    return await Promise.race([promise, timeout])
-  } finally {
-    clearTimeout(t)
-  }
+native: 0.001, // e.g., ETH < 0.001
+tokenUnit: 0.01 // token units < 0.01
 }
 
 class Web3Service {
-  constructor() {
-    this.providers = {}
-    this.disabled = new Set()
-  }
+constructor() {
+this.providers = {}
+this.initializeProviders()
+}
 
-  getProvider(chainId) {
-    const id = toKey(chainId)
-    if (this.disabled.has(id)) return null
-    if (this.providers[id]) return this.providers[id]
+initializeProviders() {
+this.providers = {}
+Object.keys(SUPPORTED_CHAINS).forEach((rawId) => {
+const id = toKey(rawId)
+const chain = SUPPORTED_CHAINS[id]
+if (!chain?.rpcUrl) return
+try {
+this.providers[id] = new ethers.JsonRpcProvider(chain.rpcUrl, Number(id))
+} catch (e) {
+console.warn(RPC init failed for chain ${id}, e)
+}
+})
+}
 
-    const chain = SUPPORTED_CHAINS[id]
-    const rpc = normalizeRpcUrl(chain?.rpcUrl)
+getProvider(chainId) {
+const id = toKey(chainId)
+const p = this.providers[id]
+if (!p) console.warn(No provider for chain ${id}. Check SUPPORTED_CHAINS.rpcUrl)
+return p
+}
 
-    if (!rpc) {
-      console.warn(
-        `[web3Service] No valid rpcUrl for chain ${id}. Got:`,
-        chain?.rpcUrl
-      )
-      this.disabled.add(id)
-      return null
-    }
+// ---------- native balances ----------
+async getBalance(chainId, address) {
+try {
+const provider = this.getProvider(chainId)
+if (!provider) return '0'
+const balance = await provider.getBalance(address)
+return ethers.formatEther(balance)
+} catch {
+return '0'
+}
+}
 
-    try {
-      // DO NOT pass chainId as 2nd arg (can cause weird parsing issues across builds)
-      const p = new ethers.JsonRpcProvider(rpc)
-      this.providers[id] = p
-      return p
-    } catch (e) {
-      console.warn(`[web3Service] RPC init failed for chain ${id}:`, e?.message || e)
-      this.disabled.add(id)
-      return null
-    }
-  }
+// ---------- curated ERC-20 fallback (old behaviour) ----------
+async _readErc20Balance(provider, tokenAddress, userAddress) {
+const abi = [
+'function balanceOf(address) view returns (uint256)',
+'function decimals() view returns (uint8)',
+'function symbol() view returns (string)'
+]
+const c = new ethers.Contract(tokenAddress, abi, provider)
+const [raw, decimals, symbol] = await Promise.all([
+c.balanceOf(userAddress),
+c.decimals(),
+c.symbol().catch(() => '') // some tokens throw on symbol()
+])
+return { amount: ethers.formatUnits(raw, decimals), decimals, symbol }
+}
 
-  async assertProviderHealthy(chainId) {
-    const id = toKey(chainId)
-    const provider = this.getProvider(id)
-    if (!provider) return false
+// SAME curated list you had before – used only as a fallback
+TOKENS = {
+'1': {
+USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+USDT: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+DAI: '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+WBTC: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+UNI: '0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984'
+},
+'10': {
+USDC: '0x7F5c764cBc14f9669B88837ca1490cCa17c31607',
+USDT: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
+},
+'137': {
+USDC: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174',
+USDT: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+DAI: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063'
+},
+'42161': {
+USDC: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+USDT: '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9'
+},
+'56': {
+USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+USDT: '0x55d398326f99059fF775485246999027B3197955'
+}
+// …you can add more chains/tokens here later if you want
+}
 
-    try {
-      const net = await withTimeout(provider.getNetwork(), 10_000, 'RPC getNetwork timeout')
-      const got = Number(net?.chainId || 0)
-      const expected = Number(id)
+async _getTokenBalancesFallback(chainId, address) {
+const key = toKey(chainId)
+const entries = Object.entries(this.TOKENS[key] || {})
+if (!entries.length) return []
 
-      if (expected && got && expected !== got) {
-        console.warn(`[web3Service] RPC chainId mismatch expected=${expected} got=${got}. Disabling chain ${id}.`)
-        this.disabled.add(id)
-        return false
-      }
+const provider = this.getProvider(key)  
+if (!provider) return []  
 
-      return true
-    } catch (e) {
-      console.warn(`[web3Service] RPC unhealthy for chain ${id}:`, e?.message || e)
-      this.disabled.add(id)
-      return false
-    }
-  }
+const out = []  
+for (const [symbolGuess, token] of entries) {  
+  try {  
+    const { amount, decimals, symbol } = await this._readErc20Balance(  
+      provider,  
+      token,  
+      address  
+    )  
+    const bal = parseFloat(amount)  
+    if (bal > 0) {  
+      out.push({  
+        symbol: symbol || symbolGuess,  
+        balance: amount,  
+        address: token,  
+        decimals,  
+        chainId: Number(key)  
+      })  
+    }  
+  } catch {  
+    // ignore single token failures  
+  }  
+}  
+return out
 
-  async getBalance(chainId, address) {
-    const id = toKey(chainId)
-    try {
-      const ok = await this.assertProviderHealthy(id)
-      if (!ok) return '0'
-      const provider = this.getProvider(id)
-      const balance = await provider.getBalance(address)
-      return ethers.formatEther(balance)
-    } catch {
-      return '0'
-    }
-  }
+}
 
-  async getTokenBalances(chainId, address) {
-    const key = Number(chainId)
-    const ok = await this.assertProviderHealthy(key)
-    if (!ok) return []
+// ---------- main token discovery ----------
+async getTokenBalances(chainId, address) {
+const key = Number(chainId)
+const provider = this.getProvider(key)
+if (!provider) return []
 
-    const provider = this.getProvider(key)
-    if (!provider) return []
+// 1) try auto-discovery  
+try {  
+  const discovered = await discoverAllERC20s({  
+    provider,  
+    chainId: key,  
+    owner: address  
+  })  
 
-    try {
-      const discovered = await discoverAllERC20s({ provider, chainId: key, owner: address })
+  const out = []  
+  for (const t of discovered) {  
+    try {  
+      const human = ethers.formatUnits(t.balance, t.decimals ?? 18)  
+      const bal = parseFloat(human)  
+      if (bal > 0) {  
+        out.push({  
+          chainId: key,  
+          address: t.address,  
+          symbol: t.symbol || 'TOKEN',  
+          decimals: t.decimals ?? 18,  
+          balance: human  
+        })  
+      }  
+    } catch (e) {  
+      console.warn('Token decode failed on chain', key, t.address, e?.message)  
+    }  
+  }  
 
-      const out = []
-      for (const t of discovered) {
-        try {
-          const human = ethers.formatUnits(t.balance, t.decimals ?? 18)
-          const bal = parseFloat(human)
-          if (bal > 0) {
-            out.push({
-              chainId: key,
-              address: t.address,
-              symbol: t.symbol || 'TOKEN',
-              decimals: t.decimals ?? 18,
-              balance: human,
-              name: t.name || '',
-              logoURI: t.logoURI || ''
-            })
-          }
-        } catch (e) {
-          console.warn('[web3Service] Token decode failed', key, t.address, e?.message)
-        }
-      }
+  // If discovery worked & found something, use it  
+  if (out.length > 0) return out  
+  console.warn(`Auto discovery found 0 tokens on chain ${key}, falling back to TOKENS map`)  
+} catch (e) {  
+  console.warn('Auto token discovery failed on chain', key, e?.message)  
+}  
 
-      return out
-    } catch (e) {
-      console.warn('[web3Service] Auto token discovery failed on chain', key, e?.message)
-      return []
-    }
-  }
+// 2) fallback: curated list (old behaviour)  
+return this._getTokenBalancesFallback(chainId, address)
 
-  async getDetailedChainView(chainId, address, settings = null) {
-    const key = Number(chainId)
-    const symbol = SUPPORTED_CHAINS[key]?.symbol || 'ETH'
+}
 
-    const nativeBalance = await this.getBalance(key, address)
-    const tokens = await this.getTokenBalances(key, address)
+// ---------- valuation + dust marking ----------
+async getDetailedChainView(chainId, address, settings = null) {
+const key = Number(chainId)
+const symbol = SUPPORTED_CHAINS[key]?.symbol || 'ETH'
 
-    const nativePrice = await priceService.getNativeUsdPrice(key)
-    const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)
+const nativeBalance = await this.getBalance(key, address)  
+const tokens = await this.getTokenBalances(key, address)  
 
-    const tokenAddrs = tokens.map((t) => t.address.toLowerCase())
-    const priceMap = tokenAddrs.length ? await priceService.getTokenUsdPrices(key, tokenAddrs) : {}
+const nativePrice = await priceService.getNativeUsdPrice(key)  
+const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)  
 
-    const tokenDetails = tokens.map((t) => {
-      const price = priceMap[t.address.toLowerCase()] || 0
-      const value = parseFloat(t.balance || '0') * price
-      return { ...t, price, value }
-    })
+const tokenAddrs = tokens.map((t) => t.address.toLowerCase())  
+const priceMap = tokenAddrs.length  
+  ? await priceService.getTokenUsdPrices(key, tokenAddrs)  
+  : {}  
 
-    const nativeDustThreshold =
-      settings && settings.nativeDustThreshold != null
-        ? Number(settings.nativeDustThreshold)
-        : DEFAULT_DUST_THRESHOLDS.native
+const tokenDetails = tokens.map((t) => {  
+  const price = priceMap[t.address.toLowerCase()] || 0  
+  const value = parseFloat(t.balance || '0') * price  
+  return { ...t, price, value }  
+})  
 
-    const isNativeDust =
-      parseFloat(nativeBalance) > 0 && parseFloat(nativeBalance) < nativeDustThreshold
+const nativeDustThreshold =  
+  settings && settings.nativeDustThreshold != null  
+    ? Number(settings.nativeDustThreshold)  
+    : DEFAULT_DUST_THRESHOLDS.native  
 
-    let claimableTokens = []
+const isNativeDust =  
+  parseFloat(nativeBalance) > 0 && parseFloat(nativeBalance) < nativeDustThreshold  
 
-    if (settings) {
-      const includeNonDust = !!settings.includeNonDust
-      const minUsd = Number(settings.tokenMinUSD ?? 0)
-      const maxUsdRaw = settings.tokenMaxUSD
-      const maxUsd = maxUsdRaw === undefined || maxUsdRaw === null || maxUsdRaw === 0 ? Infinity : Number(maxUsdRaw)
+let claimableTokens = []  
 
-      claimableTokens = includeNonDust
-        ? tokenDetails.filter((t) => Number(t.balance || 0) > 0)
-        : tokenDetails.filter((t) => {
-            const v = Number(t.value || 0)
-            return v >= minUsd && v <= maxUsd
-          })
-    } else {
-      claimableTokens = tokenDetails.filter((t) => parseFloat(t.balance || '0') < DEFAULT_DUST_THRESHOLDS.tokenUnit)
-    }
+if (settings) {  
+  const includeNonDust = !!settings.includeNonDust  
+  const minUsd = Number(settings.tokenMinUSD ?? 0)  
+  const maxUsdRaw = settings.tokenMaxUSD  
+  const maxUsd =  
+    maxUsdRaw === undefined || maxUsdRaw === null || maxUsdRaw === 0  
+      ? Infinity  
+      : Number(maxUsdRaw)  
 
-    const totalValue = Number((nativeValue + tokenDetails.reduce((s, x) => s + x.value, 0)).toFixed(6))
+  if (includeNonDust) {  
+    claimableTokens = tokenDetails.filter((t) => Number(t.balance || 0) > 0)  
+  } else {  
+    claimableTokens = tokenDetails.filter((t) => {  
+      const v = Number(t.value || 0)  
+      return v >= minUsd && v <= maxUsd  
+    })  
+  }  
+} else {  
+  claimableTokens = tokenDetails.filter(  
+    (t) => parseFloat(t.balance || '0') < DEFAULT_DUST_THRESHOLDS.tokenUnit  
+  )  
+}  
 
-    return {
-      chainId: key,
-      chainName: SUPPORTED_CHAINS[key]?.name || `Chain ${key}`,
-      symbol,
-      nativeBalance,
-      nativePrice,
-      nativeValue,
-      tokenDetails,
-      claimableTokens,
-      hasDust: isNativeDust || claimableTokens.length > 0,
-      totalValue
-    }
-  }
+const totalValue = Number(  
+  (nativeValue + tokenDetails.reduce((s, x) => s + x.value, 0)).toFixed(6)  
+)  
 
-  async scanChains(chainIds, address, settings = null) {
-    const out = []
-    for (const id of chainIds) {
-      try {
-        out.push(await this.getDetailedChainView(id, address, settings))
-      } catch (e) {
-        console.warn('[web3Service] scan error for chain', id, e?.message)
-      }
-    }
-    return out
-  }
+return {  
+  chainId: key,  
+  chainName: SUPPORTED_CHAINS[key]?.name || `Chain ${key}`,  
+  symbol,  
+  nativeBalance,  
+  nativePrice,  
+  nativeValue,  
+  tokenDetails,  
+  claimableTokens,  
+  hasDust: isNativeDust || claimableTokens.length > 0,  
+  totalValue  
+}
+
+}
+
+async scanChains(chainIds, address, settings = null) {
+const out = []
+for (const id of chainIds) {
+try {
+out.push(await this.getDetailedChainView(id, address, settings))
+} catch (e) {
+console.warn('scan error for chain', id, e?.message)
+}
+}
+return out
+}
 }
 
 export default new Web3Service()
