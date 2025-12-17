@@ -1,3 +1,4 @@
+// src/pages/DustScanner.jsx (or wherever this lives)
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
@@ -5,12 +6,31 @@ import { useScan } from '../contexts/ScanContext'
 import { useSettings } from '../contexts/SettingsContext'
 import web3Service from '../services/web3Service'
 import batchService from '../services/batchService'
-import dexAggregatorService from '../services/dexAggregatorService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
-import Shimmer from '../components/Shimmer.jsx'
 import './DustScanner.css'
+
+// Force a human-readable decimal string so batchService ALWAYS uses parseUnits()
+// - "12" -> "12.0"
+// - "0" -> "0.0"
+// - "1e-7" -> leave as-is (but we avoid producing this by not Number() converting balances)
+// - "12.34" -> unchanged
+function forceHumanDecimalString(v) {
+  if (v === null || v === undefined) return '0.0'
+  const s = String(v).trim()
+  if (!s) return '0.0'
+  if (s.includes('.')) return s
+  // If somehow scientific notation appears, keep it (parseUnits won't accept it anyway)
+  if (s.toLowerCase().includes('e')) return s
+  return `${s}.0`
+}
+
+// Safe “> 0” check without BigInt parsing (balances are decimal strings)
+function isPositiveBalanceStr(v) {
+  const n = Number.parseFloat(String(v || '0'))
+  return Number.isFinite(n) && n > 0
+}
 
 const DustScanner = () => {
   const { address } = useWallet()
@@ -38,9 +58,7 @@ const DustScanner = () => {
       const cached = sessionStorage.getItem('dustclaim:lastScan')
       if (cached) {
         const { dustResults = [] } = JSON.parse(cached)
-        if (dustResults.length > 0) {
-          setResults(dustResults)
-        }
+        if (dustResults.length > 0) setResults(dustResults)
       }
     } catch {
       // ignore
@@ -51,12 +69,11 @@ const DustScanner = () => {
     if (!address) return
     setScanning(true)
     try {
-      // Pass settings as optional 3rd arg (web3Service can ignore it or use it)
       const scan = await web3Service.scanChains(selectedIds, address, settings)
       setResults(scan)
 
       const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      // BigInt-safe JSON.stringify for lastScan cache
+
       try {
         sessionStorage.setItem(
           'dustclaim:lastScan',
@@ -69,9 +86,8 @@ const DustScanner = () => {
         console.warn('Failed to store lastScan in sessionStorage:', err)
       }
 
-      // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
+      // stats reporting (unchanged)
       try {
-        // Extract actual scanned chain IDs from the real scan results
         const usedChainIdsArray = Array.from(
           new Set(
             (scan || [])
@@ -80,30 +96,24 @@ const DustScanner = () => {
           )
         )
 
-        console.log('stats-scan-supabase chains payload:', usedChainIdsArray)
-
         if (usedChainIdsArray.length > 0) {
           await fetch('/.netlify/functions/stats-scan-supabase', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chains: usedChainIdsArray
-            })
+            body: JSON.stringify({ chains: usedChainIdsArray })
           })
         }
       } catch (err) {
         console.error('stats-scan client-supabase error:', err)
       }
-      // --- END NEW PART ---
     } finally {
       setScanning(false)
     }
   }
 
   /**
-   * Build the list of items to act on based on settings:
-   * - includeNonDust: include all tokens (not just "dust")
-   * - tokenMinUSD/tokenMaxUSD: USD filter window for "dust" when includeNonDust=false
+   * Build the list of items to act on based on settings
+   * IMPORTANT: keep balances as STRINGS (no Number() conversion)
    */
   const buildActionUniverse = useMemo(() => {
     const list = []
@@ -113,33 +123,32 @@ const DustScanner = () => {
 
       for (const t of tokenList) {
         const usd = Number(t.value || 0)
-        const balance = Number(t.balance || 0)
+        const balanceStr = String(t.balance ?? '0')
 
-        if (balance <= 0) continue
+        if (!isPositiveBalanceStr(balanceStr)) continue
 
         if (settings.includeNonDust) {
           list.push({
             chainId,
             symbol: t.symbol,
             address: t.address,
-            balance: t.balance,
+            balance: balanceStr, // keep as string
             decimals: t.decimals ?? 18,
             usd
-
           })
         } else {
           const min = Number(settings.tokenMinUSD || 0)
-          const max = Number(
+          const max =
             settings.tokenMaxUSD === 0 || settings.tokenMaxUSD === undefined
               ? Infinity
-              : settings.tokenMaxUSD
-          )
+              : Number(settings.tokenMaxUSD)
+
           if (usd >= min && usd <= max) {
             list.push({
               chainId,
               symbol: t.symbol,
               address: t.address,
-              balance: t.balance,
+              balance: balanceStr, // keep as string
               decimals: t.decimals ?? 18,
               usd
             })
@@ -173,32 +182,31 @@ const DustScanner = () => {
   const totalClaimableCount = useMemo(() => buildActionUniverse.length, [buildActionUniverse])
 
   /**
-   * Swap & Claim (0x only):
-   * - Build a claimPlan via batchService.buildClaimPlan (now your 0x version)
-   * - Navigate to ClaimScreen with claimPlan set
+   * Build claimPlan EXACTLY how claimExecutor expects:
+   * claims[] -> batchService.buildClaimPlan() -> claimPlan[ { chainId, steps[] } ]
+   *
+   * Key fix: amount must be a human decimal string so batchService parses units.
    */
   const handleBatchClaim = async () => {
     if (!address) return
 
-    // Claims list (kept exactly like your original structure)
     const claims = buildActionUniverse.map((it) => ({
-  chainId: it.chainId,
-  tokenAddress: it.address,
-  tokenSymbol: it.symbol,
-  amount: it.balance,
-  decimals: it.decimals ?? 18,
-  recipient: address
-}))
+      chainId: it.chainId,
+      tokenAddress: it.address,
+      tokenSymbol: it.symbol,
+      amount: forceHumanDecimalString(it.balance), // ✅ critical fix
+      decimals: it.decimals ?? 18,
+      recipient: address
+    }))
 
     let claimPlan = []
-    let batchTransactions = []
-    let oneInchSingle = null
-    let oneInchBatch = null
-    let uniswapSingle = null
-    let batchSavings = null
+    const batchTransactions = []
+    const oneInchSingle = null
+    const oneInchBatch = null
+    const uniswapSingle = null
+    const batchSavings = null
 
     try {
-      // 0x ONLY: build claimPlan (your batchService.buildClaimPlan is now 0x-based)
       if (typeof batchService.buildClaimPlan === 'function') {
         try {
           claimPlan = await batchService.buildClaimPlan(claims, {
@@ -211,11 +219,8 @@ const DustScanner = () => {
           claimPlan = []
         }
       }
-
-      // If your batchService.buildClaimPlan expects a different signature,
-      // it will faill above and ClaimScreen will show a clear error.
     } finally {
-      console.log('[DustScanner] ClaimPlan built:', claimPlan) 
+      console.log('[DustScanner] ClaimPlan built:', claimPlan)
       navigate('/claim', {
         state: {
           claimPlan,
