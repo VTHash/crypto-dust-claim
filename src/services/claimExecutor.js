@@ -4,6 +4,9 @@ import walletService from './walletService'
 import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
+// Small helper to keep addresses normalized
+const lower = (x) => (x ? String(x).toLowerCase() : '')
+
 // Execute chain plan THROUGH DustClaimV3
 export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
@@ -36,33 +39,90 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   if (!dep?.dustClaimV3) throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
 
   for (const step of chainPlan.steps) {
-    // 1) APPROVE DustClaimV3 (contract pulls tokens)
+    const tokenIn = step.tokenIn
+    const amountWei = BigInt(step.amount || 0)
+
+    // 1) APPROVE spender (0x allowance-holder spender) so DustClaimV3 can execute allowance-holder flow
     if (step.needsApproval && !step.usePermit) {
+      // ✅ IMPORTANT: approve step.spender (from plan), fallback to routerSpender, last resort dep.dustClaimV3
+      const spender =
+        step.spender ||
+        step.routerSpender ||
+        dep.dustClaimV3
+
       try {
-        const approvalData = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [dep.dustClaimV3, BigInt(step.amount)]
-        })
+        // Skip approval if already enough allowance
+        let hasAllowance = false
+        try {
+          const allowanceData = encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'allowance',
+            args: [from, spender]
+          })
 
-        const res = await walletService.sendTransaction({
-          to: step.tokenIn,
-          data: approvalData
-        })
+          const provider = await walletService.getBrowserProvider?.()
+          if (provider?.call) {
+            const raw = await provider.call({ to: tokenIn, data: allowanceData })
+            // raw is hex-encoded uint256
+            const current = BigInt(raw)
+            if (current >= amountWei) {
+              hasAllowance = true
+              receipts.push({
+                type: 'approval',
+                ok: true,
+                skipped: true,
+                reason: 'allowance already sufficient',
+                tokenIn,
+                spender,
+                amount: String(amountWei)
+              })
+            }
+          }
+        } catch {
+          // If allowance call fails for weird tokens, just proceed with approve
+        }
 
-        receipts.push({
-          type: 'approval',
-          ok: !!res.success,
-          txHash: res.txHash,
-          error: res.error
-        })
+        if (!hasAllowance) {
+          const approvalData = encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [spender, amountWei]
+          })
 
-        if (!res.success) continue
+          console.debug('[claimExecutor] approving', {
+            chainId: Number(chainPlan.chainId),
+            tokenIn,
+            spender,
+            amount: String(amountWei)
+          })
+
+          const res = await walletService.sendTransaction({
+            from,
+            to: tokenIn,
+            data: approvalData,
+            value: 0n
+          })
+
+          receipts.push({
+            type: 'approval',
+            ok: !!res.success,
+            txHash: res.txHash,
+            error: res.error,
+            tokenIn,
+            spender,
+            amount: String(amountWei)
+          })
+
+          if (!res.success) continue
+        }
       } catch (err) {
         receipts.push({
           type: 'approval',
           ok: false,
-          error: err?.message || 'Approval failed'
+          error: err?.message || 'Approval failed',
+          tokenIn,
+          spender: step.spender || step.routerSpender || dep.dustClaimV3,
+          amount: String(amountWei)
         })
         continue
       }
@@ -77,7 +137,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       // Prefer plan’s data (best), fallback to re-quote via Netlify (safe)
       let routerSpender = step.routerSpender
       let swapCalldata = step.swapCalldata
-
       let gasFromQuote = null
 
       if (!routerSpender || !swapCalldata) {
@@ -95,36 +154,38 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           },
           { headers: { 'content-type': 'application/json' } }
         )
-         gasFromQuote = q?.transaction?.gas ?? null
-        const callTarget = q?.transaction?.to
-const spender =
-  q?.issues?.allowance?.spender ||
-  q?.allowanceTarget ||
-  null
-const calldata = q?.transaction?.data
 
-//  HARD GUARD — must come FIRST
-if (!callTarget || !spender || !calldata) {
-  console.warn('[0x] invalid quote, missing fields', {
-    callTarget,
-    spender,
-    calldataLen: calldata?.length
-  })
-  continue
-}
+        gasFromQuote = q?.transaction?.gas ?? null
 
-//  V3 COMPATIBILITY CHECK
-if (callTarget.toLowerCase() !== spender.toLowerCase()) {
-  console.warn('[0x] incompatible quote (tx.to !== spender)', {
-    callTarget,
-    spender
-  })
-  continue
-}
+        const callTarget = q?.transaction?.to || null
+        const spender =
+          q?.issues?.allowance?.spender ||
+          q?.allowanceTarget ||
+          null
+        const calldata = q?.transaction?.data || null
 
-//  ONLY NOW assign
-routerSpender = spender
-swapCalldata = calldata
+        // HARD GUARD — must come FIRST
+        if (!callTarget || !spender || !calldata) {
+          console.warn('[0x] invalid quote, missing fields', {
+            chainId: Number(chainPlan.chainId),
+            tokenIn: step.tokenIn,
+            callTarget,
+            spender,
+            calldataLen: calldata?.length || 0,
+            keys: Object.keys(q || {})
+          })
+          receipts.push({
+            type: 'swap',
+            ok: false,
+            error: '0x quote missing transaction fields (no route/liquidity?)',
+            tokenIn: step.tokenIn
+          })
+          continue
+        }
+
+        // Do NOT force spender == tx.to; allowance-holder commonly uses same, but we shouldn’t hard fail.
+        routerSpender = spender
+        swapCalldata = calldata
       }
 
       const data = encodeFunctionData({
@@ -134,7 +195,7 @@ swapCalldata = calldata
       })
 
       const gas = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n // buffer
-      
+
       const tx = {
         from,
         to: dep.dustClaimV3,
@@ -142,22 +203,37 @@ swapCalldata = calldata
         value: 0n,
         gas
       }
+
+      console.debug('[claimExecutor] swap tx', {
+        chainId: Number(chainPlan.chainId),
+        from,
+        dustClaimV3: dep.dustClaimV3,
+        tokenIn: step.tokenIn,
+        amount: String(step.amount),
+        routerSpender,
+        calldataLen: swapCalldata?.length || 0,
+        gas: String(gas)
+      })
+
       const res = await walletService.sendTransaction(tx)
 
       receipts.push({
         type: 'swap',
         ok: !!res.success,
         txHash: res.txHash,
-        error: res.error
+        error: res.error,
+        tokenIn: step.tokenIn,
+        routerSpender
       })
     } catch (err) {
       receipts.push({
         type: 'swap',
         ok: false,
-        error: err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Swap failed'
+        error: err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Swap failed',
+        tokenIn: step.tokenIn
       })
     }
   }
 
   return receipts
-            }
+}

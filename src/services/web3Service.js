@@ -1,3 +1,4 @@
+// src/services/web3Service.js
 import { ethers } from 'ethers'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import priceService from './priceService'
@@ -11,31 +12,83 @@ const DEFAULT_DUST_THRESHOLDS = {
   tokenUnit: 0.01 // token units < 0.01
 }
 
+/**
+ * Detect common bad RPC URLs (especially Alchemy key missing in production)
+ * and prevent ethers from creating a provider that will spam "failed to detect network".
+ */
+function isBadRpcUrl(url) {
+  if (!url) return true
+  const u = String(url)
+
+  // Alchemy key missing -> ".../v2/undefined" or ".../v2/"
+  if (u.includes('alchemy.com') && (u.includes('/v2/undefined') || u.endsWith('/v2/') || u.endsWith('/v2'))) {
+    return true
+  }
+
+  // Obvious template placeholder cases
+  if (u.includes('${') || u.includes('YOUR_KEY') || u.includes('REPLACE_ME')) {
+    return true
+  }
+
+  // Must be https for browser usage
+  if (!u.startsWith('https://')) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Create an ethers provider WITHOUT network auto-detection spam.
+ * Ethers v6 JsonRpcProvider tries to detect network by default and retries forever on failure.
+ * Using staticNetwork avoids the "retry in 1s" loop.
+ */
+function makeProvider(chainId, rpcUrl, chainName = '') {
+  const network = { chainId: Number(chainId), name: chainName || `chain-${chainId}` }
+
+  // Ethers v6: options.staticNetwork avoids detectNetwork retry spam
+  return new ethers.JsonRpcProvider(rpcUrl, network, { staticNetwork: network })
+}
+
 class Web3Service {
   constructor() {
-    this.providers = {}
-    this.initializeProviders()
+    this.providers = {} // { [chainId: string]: ethers.JsonRpcProvider }
+    this.providerErrors = {} // { [chainId: string]: string }
   }
 
-  initializeProviders() {
-    this.providers = {}
-    Object.keys(SUPPORTED_CHAINS).forEach((rawId) => {
-      const id = toKey(rawId)
-      const chain = SUPPORTED_CHAINS[id]
-      if (!chain?.rpcUrl) return
-      try {
-        this.providers[id] = new ethers.JsonRpcProvider(chain.rpcUrl, Number(id))
-      } catch (e) {
-        console.warn(`RPC init failed for chain ${id}`, e)
-      }
-    })
-  }
-
+  // Lazily initialize per chain (prevents a broken RPC from spamming on app load)
   getProvider(chainId) {
     const id = toKey(chainId)
-    const p = this.providers[id]
-    if (!p) console.warn(`No provider for chain ${id}. Check SUPPORTED_CHAINS.rpcUrl`)
-    return p
+    if (this.providers[id]) return this.providers[id]
+
+    const chain = SUPPORTED_CHAINS[id] || SUPPORTED_CHAINS[Number(id)]
+    const rpcUrl = chain?.rpcUrl
+
+    if (!rpcUrl) {
+      const msg = `No rpcUrl configured for chain ${id}`
+      this.providerErrors[id] = msg
+      console.warn(msg)
+      return null
+    }
+
+    if (isBadRpcUrl(rpcUrl)) {
+      const msg = `Bad rpcUrl for chain ${id}. Check env keys (Alchemy/Infura) or URL: ${rpcUrl}`
+      this.providerErrors[id] = msg
+      console.warn(msg)
+      return null
+    }
+
+    try {
+      const p = makeProvider(Number(id), rpcUrl, chain?.name)
+      this.providers[id] = p
+      delete this.providerErrors[id]
+      return p
+    } catch (e) {
+      const msg = `RPC init failed for chain ${id}: ${e?.message || e}`
+      this.providerErrors[id] = msg
+      console.warn(msg)
+      return null
+    }
   }
 
   // ---------- native balances ----------
@@ -45,7 +98,8 @@ class Web3Service {
       if (!provider) return '0'
       const balance = await provider.getBalance(address)
       return ethers.formatEther(balance)
-    } catch {
+    } catch (e) {
+      // Don’t spam logs here; a single broken RPC can happen
       return '0'
     }
   }
@@ -92,7 +146,6 @@ class Web3Service {
       USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
       USDT: '0x55d398326f99059fF775485246999027B3197955'
     }
-    // …you can add more chains/tokens here later if you want
   }
 
   async _getTokenBalancesFallback(chainId, address) {
@@ -106,11 +159,7 @@ class Web3Service {
     const out = []
     for (const [symbolGuess, token] of entries) {
       try {
-        const { amount, decimals, symbol } = await this._readErc20Balance(
-          provider,
-          token,
-          address
-        )
+        const { amount, decimals, symbol } = await this._readErc20Balance(provider, token, address)
         const bal = parseFloat(amount)
         if (bal > 0) {
           out.push({
@@ -161,21 +210,20 @@ class Web3Service {
         }
       }
 
-      // If discovery worked & found something, use it
       if (out.length > 0) return out
       console.warn(`Auto discovery found 0 tokens on chain ${key}, falling back to TOKENS map`)
     } catch (e) {
       console.warn('Auto token discovery failed on chain', key, e?.message)
     }
 
-    // 2) fallback: curated list (old behaviour)
+    // 2) fallback: curated list
     return this._getTokenBalancesFallback(chainId, address)
   }
 
   // ---------- valuation + dust marking ----------
   async getDetailedChainView(chainId, address, settings = null) {
     const key = Number(chainId)
-    const symbol = SUPPORTED_CHAINS[key]?.symbol || 'ETH'
+    const symbol = SUPPORTED_CHAINS[key]?.symbol || SUPPORTED_CHAINS[String(key)]?.symbol || 'ETH'
 
     const nativeBalance = await this.getBalance(key, address)
     const tokens = await this.getTokenBalances(key, address)
@@ -184,9 +232,7 @@ class Web3Service {
     const nativeValue = parseFloat(nativeBalance || '0') * (nativePrice || 0)
 
     const tokenAddrs = tokens.map((t) => t.address.toLowerCase())
-    const priceMap = tokenAddrs.length
-      ? await priceService.getTokenUsdPrices(key, tokenAddrs)
-      : {}
+    const priceMap = tokenAddrs.length ? await priceService.getTokenUsdPrices(key, tokenAddrs) : {}
 
     const tokenDetails = tokens.map((t) => {
       const price = priceMap[t.address.toLowerCase()] || 0
@@ -228,12 +274,12 @@ class Web3Service {
     }
 
     const totalValue = Number(
-      (nativeValue + tokenDetails.reduce((s, x) => s + x.value, 0)).toFixed(6)
+      (nativeValue + tokenDetails.reduce((s, x) => s + (Number(x.value) || 0), 0)).toFixed(6)
     )
 
     return {
       chainId: key,
-      chainName: SUPPORTED_CHAINS[key]?.name || `Chain ${key}`,
+      chainName: SUPPORTED_CHAINS[key]?.name || SUPPORTED_CHAINS[String(key)]?.name || `Chain ${key}`,
       symbol,
       nativeBalance,
       nativePrice,
@@ -247,6 +293,9 @@ class Web3Service {
 
   async scanChains(chainIds, address, settings = null) {
     const out = []
+
+    // Sequential scan is fine; keeps RPC rate-limits calmer.
+    // If you later want speed, we can add concurrency-limited parallelism.
     for (const id of chainIds) {
       try {
         out.push(await this.getDetailedChainView(id, address, settings))

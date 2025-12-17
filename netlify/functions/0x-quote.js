@@ -1,13 +1,11 @@
 // netlify/functions/0x-quote.js
-// 0x Swap API v2 proxy for DustClaimV3
+// POST-only 0x Swap API v2 proxy for DustClaimV3
 // - avoids CORS
 // - keeps API key off the browser
-// - logs request + response (safe summaries) for debugging
-// - supports POST (app) + optional GET (manual debug in browser)
+// - adds cache + retry + timeout for production stability
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
-
   10: "https://optimism.api.0x.org",
   56: "https://bsc.api.0x.org",
   130: "https://unichain.api.0x.org",
@@ -17,12 +15,10 @@ const ZEROX_HOST_BY_CHAIN = {
   480: "https://worldchain.api.0x.org",
   5000: "https://mantle.api.0x.org",
   9745: "https://plasma.api.0x.org",
-
   42161: "https://arbitrum.api.0x.org",
   43114: "https://avalanche.api.0x.org",
   534352: "https://scroll.api.0x.org",
   59144: "https://linea.api.0x.org",
-
   80094: "https://berachain.api.0x.org",
   81457: "https://blast.api.0x.org",
   34443: "https://mode.api.0x.org",
@@ -30,13 +26,18 @@ const ZEROX_HOST_BY_CHAIN = {
   57073: "https://ink.api.0x.org",
 };
 
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "content-type, x-requested-with",
+  "access-control-allow-methods": "POST, OPTIONS",
+};
+
 function json(statusCode, body, extraHeaders = {}) {
   return {
     statusCode,
     headers: {
       "content-type": "application/json",
-      "access-control-allow-origin": "*",
-      "access-control-allow-headers": "content-type",
+      ...CORS_HEADERS,
       ...extraHeaders,
     },
     body: JSON.stringify(body),
@@ -50,10 +51,61 @@ function safeAddr(x) {
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
-function pick(obj, keys) {
-  const out = {};
-  for (const k of keys) out[k] = obj?.[k];
-  return out;
+// ---------- tiny in-memory cache (warm lambda) ----------
+const CACHE_TTL_MS = 25_000; // reduces burst rate limiting during scans
+const cache = new Map(); // key -> { ts, data }
+function getCache(key) {
+  const v = cache.get(key);
+  if (!v) return null;
+  if (Date.now() - v.ts > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
+  return v.data;
+}
+function setCache(key, data) {
+  cache.set(key, { ts: Date.now(), data });
+}
+
+// ---------- fetch with timeout + retry ----------
+async function fetchWithTimeout(url, opts, timeoutMs = 12_000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function fetch0xWithRetry(url, headers, reqId) {
+  const maxAttempts = 3;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let resp;
+    try {
+      resp = await fetchWithTimeout(url, { method: "GET", headers }, 12_000);
+    } catch (e) {
+      const msg = e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
+      console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg);
+      if (attempt === maxAttempts) throw e;
+      await sleep(250 * attempt);
+      continue;
+    }
+
+    if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
+      console.log(`[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`, { reqId });
+      if (attempt === maxAttempts) return resp;
+      await sleep(300 * attempt);
+      continue;
+    }
+
+    return resp;
+  }
 }
 
 exports.handler = async (event) => {
@@ -72,16 +124,13 @@ exports.handler = async (event) => {
   try {
     // CORS preflight
     if (event.httpMethod === "OPTIONS") {
-      console.log("[0x] OPTIONS preflight OK");
-      return {
-        statusCode: 204,
-        headers: {
-          "access-control-allow-origin": "*",
-          "access-control-allow-headers": "content-type",
-          "access-control-allow-methods": "POST, OPTIONS",
-        },
-        body: "",
-      };
+      return { statusCode: 204, headers: CORS_HEADERS, body: "" };
+    }
+
+    // POST only
+    if (event.httpMethod !== "POST") {
+      console.log("[0x] Rejected: method not allowed");
+      return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
     }
 
     const apiKey = process.env.ZEROX_API_KEY || process.env.VITE_0X_API_KEY;
@@ -90,33 +139,22 @@ exports.handler = async (event) => {
       return json(500, { error: "Missing 0x API key in Netlify env vars." }, { "x-req-id": reqId });
     }
 
-    // ---- Input parsing: POST body OR GET query (debug) ----
     let body = {};
-    if (event.httpMethod === "POST") {
-      try {
-        body = event.body ? JSON.parse(event.body) : {};
-      } catch (e) {
-        console.log("[0x] ERROR: invalid JSON body");
-        return json(400, { error: "Invalid JSON body" }, { "x-req-id": reqId });
-      }
-    } else if (event.httpMethod === "GET") {
-      // Optional debug mode: /0x-quote?chainId=1&sellToken=...&buyToken=...&sellAmount=...&taker=...&txOrigin=...&recipient=...&slippageBps=100
-      body = event.queryStringParameters || {};
-    } else {
-      console.log("[0x] Rejected: method not allowed");
-      return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
+    try {
+      body = event.body ? JSON.parse(event.body) : {};
+    } catch {
+      console.log("[0x] ERROR: invalid JSON body");
+      return json(400, { error: "Invalid JSON body" }, { "x-req-id": reqId });
     }
 
-    const {
-      chainId,
-      sellToken,
-      buyToken,
-      sellAmount, // wei string
-      taker, // DustClaimV3 address (contract)
-      txOrigin, // user EOA (required if taker is contract)
-      recipient, // DustClaimV3 address (contract receives WETH)
-      slippageBps, // integer (e.g. 100 = 1%)
-    } = body;
+    const chainId = Number(body.chainId);
+    const sellToken = body.sellToken;
+    const buyToken = body.buyToken;
+    const sellAmount = body.sellAmount ?? body.sellAmountWei; // defensive
+    const taker = body.taker;
+    const txOrigin = body.txOrigin;
+    const recipient = body.recipient;
+    const slippageBps = body.slippageBps;
 
     console.log("[0x] REQUEST PARAMS:", {
       chainId,
@@ -129,14 +167,12 @@ exports.handler = async (event) => {
       slippageBps,
     });
 
-    const cid = Number(chainId);
-    const host = ZEROX_HOST_BY_CHAIN[cid];
+    const host = ZEROX_HOST_BY_CHAIN[chainId];
     if (!host) {
       console.log("[0x] ERROR: unsupported chainId:", chainId);
       return json(400, { error: `0x unsupported chainId: ${chainId}` }, { "x-req-id": reqId });
     }
 
-    // Basic validation
     if (!sellToken || !buyToken || !sellAmount || !taker || !recipient) {
       console.log("[0x] ERROR: missing required fields");
       return json(
@@ -145,8 +181,9 @@ exports.handler = async (event) => {
         { "x-req-id": reqId }
       );
     }
+
     if (!txOrigin) {
-      console.log("[0x] ERROR: missing txOrigin (required when taker is contract)");
+      console.log("[0x] ERROR: missing txOrigin");
       return json(
         400,
         { error: "Missing txOrigin (user EOA). Required when taker is a contract." },
@@ -154,15 +191,12 @@ exports.handler = async (event) => {
       );
     }
 
-    // v2 uses slippageBps
     const bps = Number.isFinite(Number(slippageBps))
       ? String(Math.trunc(Number(slippageBps)))
       : "100";
 
-    // ✅ IMPORTANT: include chainId in query (per v2 docs/examples)
-    // even if you select host by chain. 
     const url = new URL(`${host}/swap/allowance-holder/quote`);
-    url.searchParams.set("chainId", String(cid));
+    url.searchParams.set("chainId", String(chainId));
     url.searchParams.set("sellToken", sellToken);
     url.searchParams.set("buyToken", buyToken);
     url.searchParams.set("sellAmount", String(sellAmount));
@@ -171,15 +205,20 @@ exports.handler = async (event) => {
     url.searchParams.set("slippageBps", bps);
     url.searchParams.set("txOrigin", txOrigin);
 
+    const cacheKey = url.toString();
+    const cached = getCache(cacheKey);
+    if (cached) {
+      console.log("[0x] cache hit", { reqId });
+      return json(200, cached, { "x-req-id": reqId, "x-cache": "HIT" });
+    }
+
     console.log("[0x] Calling URL:", url.toString());
 
-    const resp = await fetch(url.toString(), {
-      method: "GET",
-      headers: {
-        "0x-api-key": apiKey, // do NOT log this
-        "0x-version": "v2",
-      },
-    });
+    const resp = await fetch0xWithRetry(
+      url.toString(),
+      { "0x-api-key": apiKey, "0x-version": "v2" },
+      reqId
+    );
 
     const elapsed = Date.now() - started;
     console.log("[0x] 0x response status:", resp.status, resp.statusText, "elapsed(ms):", elapsed);
@@ -192,23 +231,17 @@ exports.handler = async (event) => {
       data = { raw: text };
     }
 
-    // Safe summary (helps debug why buildClaimPlan becomes [])
     const summary = {
       ok: resp.ok,
       status: resp.status,
-
-      // v2 response often includes these (per docs example response) 
       allowanceTarget: safeAddr(data?.allowanceTarget),
       issues_allowance_spender: safeAddr(data?.issues?.allowance?.spender),
-
       hasTransaction: !!data?.transaction,
       tx_to: safeAddr(data?.transaction?.to),
       tx_data_len: data?.transaction?.data ? String(data.transaction.data.length) : "0",
       tx_value: data?.transaction?.value ?? null,
-
       buyAmount: data?.buyAmount ?? null,
       sellAmount: data?.sellAmount ?? null,
-
       liquidityAvailable: data?.liquidityAvailable ?? null,
       issuesKeys: data?.issues ? Object.keys(data.issues) : [],
       validationErrors: data?.validationErrors ?? null,
@@ -219,15 +252,13 @@ exports.handler = async (event) => {
 
     console.log("[0x] Response summary:", summary);
 
-    // If you need the full JSON for ONE request, log a capped version:
-    console.log("[0x] Full JSON (capped 12k):", (text || "").slice(0, 12000));
-
     if (!resp.ok) {
       console.log("[0x] 0x ERROR body (capped 12k):", (text || "").slice(0, 12000));
       return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
     }
 
-    return json(200, data, { "x-req-id": reqId });
+    setCache(cacheKey, data);
+    return json(200, data, { "x-req-id": reqId, "x-cache": "MISS" });
   } catch (e) {
     console.log("[0x] FUNCTION ERROR:", e?.message || e);
     return json(500, { error: e?.message || "Function error" }, { "x-req-id": reqId });

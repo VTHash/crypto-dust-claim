@@ -37,7 +37,7 @@ async function get0xAllowanceHolderQuote({
     slippageBps: Number(slippageBps)
   }
 
-    // Helpful browser-side logs (you’ll see these in DevTools)
+  // Helpful browser-side logs (you’ll see these in DevTools)
   console.log('[batchService] /.netlify/functions/0x-quote payload:', payload)
 
   const res = await axios.post('/.netlify/functions/0x-quote', payload, {
@@ -101,85 +101,91 @@ class BatchService {
 
       const steps = []
 
-for (const it of items) {
-  const tokenIn = it.tokenAddress
-  if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
-  const decimals = Number(it.decimals ?? 18)
-  const sellAmountWei = toWeiStr(it.amount, decimals)
+      for (const it of items) {
+        const tokenIn = it.tokenAddress
+        if (!tokenIn) continue
 
-  // Skip nonsense amounts
-  try {
-    if (BigInt(sellAmountWei) <= 0n) continue
-  } catch {
-    continue
-  }
+        // Skip WETH -> WETH
+        if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
 
-  let q
-  try {
-    q = await get0xAllowanceHolderQuote({
-      chainId,
-      sellToken: tokenIn,
-      buyToken: dep.weth,
-      sellAmountWei: sellAmountWei,
-      taker: dep.dustClaimV3,      // contract is taker
-      recipient: dep.dustClaimV3,  // contract must receive WETH
-      txOrigin,                   // user EOA
-      slippageBps: Math.round(slippagePct * 100) // 1% => 100
-    })
-  } catch (e) {
-    console.warn(
-      '[buildClaimPlan] 0x quote failed:',
-      { chainId, tokenIn },
-      e?.response?.data || e?.message
-    )
-    continue
-  }
+        const decimals = Number(it.decimals ?? 18)
+        const sellAmountWei = toWeiStr(it.amount, decimals)
 
-  const callTarget = q?.transaction?.to
-  const spender =
-    q?.issues?.allowance?.spender ||
-    q?.allowanceTarget ||
-    null
-  const calldata = q?.transaction?.data
+        // Skip nonsense amounts
+        try {
+          if (BigInt(sellAmountWei) <= 0n) continue
+        } catch {
+          continue
+        }
 
-  // HARD GUARD — must come FIRST
-  if (!callTarget || !spender || !calldata) {
-    console.warn('[0x] invalid quote, missing fields', {
-      callTarget,
-      spender,
-      calldataLen: calldata?.length
-    })
-    continue
-  }
+        let q
+        try {
+          q = await get0xAllowanceHolderQuote({
+            chainId,
+            sellToken: tokenIn,
+            buyToken: dep.weth,
+            sellAmountWei,
+            taker: dep.dustClaimV3, // contract is taker
+            recipient: dep.dustClaimV3, // contract must receive WETH
+            txOrigin, // user EOA
+            slippageBps: Math.round(slippagePct * 100) // 1% => 100
+          })
+        } catch (e) {
+          console.warn(
+            '[buildClaimPlan] 0x quote failed:',
+            { chainId, tokenIn },
+            e?.response?.data || e?.message
+          )
+          continue
+        }
 
-  //  V3 COMPATIBILITY CHECK
-  if (callTarget.toLowerCase() !== spender.toLowerCase()) {
-    console.warn('[0x] incompatible quote (tx.to !== spender)', {
-      callTarget,
-      spender
-    })
-    continue
-  }
+        const callTarget = q?.transaction?.to || null
+        const spender =
+          q?.issues?.allowance?.spender ||
+          q?.allowanceTarget ||
+          null
+        const calldata = q?.transaction?.data || null
 
-  //  ONLY NOW assign
-  const routerSpender = spender
-  const swapCalldata = calldata
+        // HARD GUARD — must come FIRST
+        if (!callTarget || !spender || !calldata) {
+          console.warn('[0x] invalid quote, missing fields', {
+            chainId,
+            tokenIn,
+            callTarget,
+            spender,
+            calldataLen: calldata?.length || 0,
+            keys: Object.keys(q || {})
+          })
+          continue
+        }
 
-  steps.push({
-    aggregator: '0x',
+        // NOTE:
+        // With 0x allowance-holder quotes, tx.to and spender are often the same (as your logs show),
+        // but we should NOT enforce equality here—some routes may differ.
+        const routerSpender = spender
+        const swapCalldata = calldata
 
-          // user approves DustClaimV3 (contract pulls tokens)
+        // ✅ CRITICAL: approval spender must be the 0x spender (AllowanceHolder),
+        // NOT the DustClaimV3 contract address.
+        steps.push({
+          aggregator: '0x',
+
           needsApproval: true,
           usePermit: false,
-          spender: dep.dustClaimV3,
+
+          // ✅ approve the spender returned by 0x
+          spender: routerSpender,
 
           tokenIn,
           tokenOut: dep.weth,
           amount: sellAmountWei,
 
           // used by claimExecutor to call DustClaimV3
-          routerSpender: spender,
+          routerSpender,
           swapCalldata,
+
+          // optional debug fields (safe to keep)
+          callTarget,
 
           slippage: slippagePct
         })
