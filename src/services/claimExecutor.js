@@ -77,7 +77,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       // Prefer plan’s data (best), fallback to re-quote via Netlify (safe)
       let routerSpender = step.routerSpender
       let swapCalldata = step.swapCalldata
-
+      let gasFromQuote = null
       if (!routerSpender || !swapCalldata) {
         
         const { data: q } = await axios.post(
@@ -94,11 +94,10 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           },
           { headers: { 'content-type': 'application/json' } }
         )
-        const gasFromQuote = q?.transaction?.gas
+         gasFromQuote = q?.transaction?.gas ?? null
         const callTarget = q?.transaction?.to
         const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
         const calldata = q?.transaction?.data
-        if (callTarget.toLowerCase() !== spender.toLowerCase()) continue
         if (!callTarget || !spender || !calldata) {
           throw new Error('Invalid 0x quote response (missing tx/spender/data)')
         }
@@ -123,7 +122,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         to: dep.dustClaimV3,
         data,
         value: 0n,
-        gasLimit
+        gas: gasLimit
       }
       const res = await walletService.sendTransaction(tx)
 
