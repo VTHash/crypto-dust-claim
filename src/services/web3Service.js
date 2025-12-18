@@ -26,7 +26,7 @@ if (!chain?.rpcUrl) return
 try {
 this.providers[id] = new ethers.JsonRpcProvider(chain.rpcUrl, Number(id))
 } catch (e) {
-console.warn(RPC init failed for chain ${id}, e)
+console.warn(`RPC init failed for chain ${id}`, e)
 }
 })
 }
@@ -34,7 +34,7 @@ console.warn(RPC init failed for chain ${id}, e)
 getProvider(chainId) {
 const id = toKey(chainId)
 const p = this.providers[id]
-if (!p) console.warn(No provider for chain ${id}. Check SUPPORTED_CHAINS.rpcUrl)
+if (!p) console.warn(`No provider for chain ${id}. Check SUPPORTED_CHAINS.rpcUrl`)
 return p
 }
 

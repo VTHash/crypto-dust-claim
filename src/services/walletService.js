@@ -3,25 +3,22 @@ import { createAppKit } from '@reown/appkit'
 import { EthersAdapter } from '@reown/appkit-adapter-ethers'
 import { ethers } from 'ethers'
 import {
-  projectId,
-  getReownMetadata,
-  reownNetworks,
-  SUPPORTED_CHAINS
+projectId,
+getReownMetadata,
+reownNetworks,
+SUPPORTED_CHAINS
 } from '../config/walletConnectConfig'
 
 // ---- utils ----
 const toHexChainId = (id) => '0x' + Number(id).toString(16)
 
-const getInjected = () => (typeof window !== 'undefined' ? window.ethereum : null)
-const isMetaMask = (p) => !!p?.isMetaMask
-
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
-  adapters: [new EthersAdapter()],
-  networks: reownNetworks,
-  metadata: getReownMetadata(),
-  projectId,
-  enableInjectedProvider: true
+adapters: [new EthersAdapter()], // typo fix: EthersAdapter
+networks: reownNetworks,
+metadata: getReownMetadata(),
+projectId,
+enableInjectedProvider: true,
 })
 
 // ---- internal state ----
@@ -38,273 +35,235 @@ let onDisconnected = null
 
 // ---- event handlers ----
 function handleAccounts(accs = []) {
-  accounts = Array.isArray(accs) ? accs : []
-  onAccChanged?.(accounts)
+accounts = Array.isArray(accs) ? accs : []
+onAccChanged?.(accounts)
 }
 function handleChain(hexId) {
-  chainId = hexId
-  onChainChanged?.(hexId)
+chainId = hexId
+onChainChanged?.(hexId)
 }
 function handleDisconnect(err) {
-  accounts = []
-  chainId = null
-  signer = null
-  browserProvider = null
-  onDisconnected?.(err)
+accounts = []
+chainId = null
+signer = null
+browserProvider = null
+onDisconnected?.(err)
 }
 function attachListeners() {
-  if (!eip1193) return
-  eip1193.removeListener?.('accountsChanged', handleAccounts)
-  eip1193.removeListener?.('chainChanged', handleChain)
-  eip1193.removeListener?.('disconnect', handleDisconnect)
-  eip1193.on?.('accountsChanged', handleAccounts)
-  eip1193.on?.('chainChanged', handleChain)
-  eip1193.on?.('disconnect', handleDisconnect)
-}
-
-// Small helper: set internal state from a provider (assumes it is authorized)
-async function setStateFromProvider(provider) {
-  eip1193 = provider
-  browserProvider = new ethers.BrowserProvider(eip1193)
-  signer = await browserProvider.getSigner()
-  accounts = (await eip1193.request?.({ method: 'eth_accounts' })) || []
-  chainId = await eip1193.request?.({ method: 'eth_chainId' })
-  attachListeners()
-  return {
-    success: true,
-    accounts,
-    chainId,
-    address: accounts?.[0] ?? null,
-    signer
-  }
+if (!eip1193) return
+eip1193.removeListener?.('accountsChanged', handleAccounts)
+eip1193.removeListener?.('chainChanged', handleChain)
+eip1193.removeListener?.('disconnect', handleDisconnect)
+eip1193.on?.('accountsChanged', handleAccounts)
+eip1193.on?.('chainChanged', handleChain)
+eip1193.on?.('disconnect', handleDisconnect)
 }
 
 // ---- API ----
 const walletService = {
-  // getters / helpers
-  getAppKit: () => appKit,
-  async getProvider() {
-    return eip1193
-  },
-  async getBrowserProvider() {
-    return browserProvider
-  },
-  async getSigner() {
-    return signer
-  },
-  async getAddress() {
-    return accounts?.[0] ?? null
-  },
-  async getChainId() {
-    return chainId
-  },
-  async isConnected() {
-    return !!(accounts?.length && signer)
-  },
-  openModal() {
-    return appKit.open?.()
-  },
-  closeModal() {
-    return appKit.close?.()
-  },
+// getters / helpers
+getAppKit: () => appKit,
+async getProvider() { return eip1193 },
+async getBrowserProvider() { return browserProvider },
+async getSigner() { return signer },
+async getAddress() { return accounts?.[0] ?? null },
+async getChainId() { return chainId },
+async isConnected() { return !!(accounts?.length && signer) },
+openModal() { return appKit.open?.() },
+closeModal() { return appKit.close?.() },
 
-  async init() {
-    return
-  },
+async init() {
+// nothing heavy here; instance already created
+return
+},
 
-  // Try to re-hydrate a previous session (called by WalletContext on mount)
-  async restoreSession() {
-    try {
-      const injected = getInjected()
+// Try to re-hydrate a previous session (called by WalletContext on mount)
+async restoreSession() {
+try {
+// 1) Prefer an already-available EIP-1193 provider from AppKit
+const maybeProvider = await appKit.getProvider?.()
+// 2) Fallback to injected (MetaMask etc.) if present
+const injected = typeof window !== 'undefined' ? window.ethereum : null
+const prov = maybeProvider || injected
+if (!prov) return null
 
-      // ✅ Prefer MetaMask injected if it already has an authorized session
-      if (isMetaMask(injected)) {
-        const accs = await injected.request?.({ method: 'eth_accounts' })
-        if (Array.isArray(accs) && accs.length > 0) {
-          const res = await setStateFromProvider(injected)
-          console.debug('[walletService] restoreSession: MetaMask', { accounts: res.accounts, chainId: res.chainId })
-          return { ...res, connected: true }
-        }
-      }
+// Pull accounts without opening the modal  
+  const accs = await prov.request?.({ method: 'eth_accounts' })  
+  if (!accs || accs.length === 0) return null  
 
-      // Otherwise, try AppKit session
-      const maybeProvider = await appKit.getProvider?.()
-      if (!maybeProvider) return null
+  // Set up internal state so the rest of the app sees "connected"  
+  eip1193 = maybeProvider || injected  
+  browserProvider = new ethers.BrowserProvider(eip1193)  
+  signer = await browserProvider.getSigner()  
+  accounts = accs  
+  chainId = await eip1193.request({ method: 'eth_chainId' })  
+  attachListeners()  
 
-      const accs = await maybeProvider.request?.({ method: 'eth_accounts' })
-      if (!Array.isArray(accs) || accs.length === 0) return null
+  return {  
+    accounts,  
+    account: accounts[0],  
+    chainId,  
+    address: accounts[0],  
+    connected: true  
+  }  
+} catch (err) {  
+  console.warn('restoreSession error:', err)  
+  return null  
+}
 
-      const res = await setStateFromProvider(maybeProvider)
-      console.debug('[walletService] restoreSession: AppKit', { accounts: res.accounts, chainId: res.chainId })
-      return { ...res, connected: true }
-    } catch (err) {
-      console.warn('[walletService] restoreSession error:', err)
-      return null
-    }
-  },
+},
 
-  // Connect: prefer MetaMask, fallback to AppKit modal
-  async connect() {
-    try {
-      const injected = getInjected()
+// Open modal and connect
+async connect() {
+try {
+// 1) Open the modal (doesn't guarantee user has finished connecting yet)
+await appKit.open();
 
-      // ✅ 1) Prefer MetaMask (deterministic UX)
-      if (isMetaMask(injected)) {
-        // This triggers the MetaMask permission popup if not yet authorized
-        const accs = await injected.request?.({ method: 'eth_requestAccounts' })
-        if (!Array.isArray(accs) || accs.length === 0) {
-          return { success: false, error: 'No accounts returned from MetaMask' }
-        }
+// 2) Wait for provider & accounts to become available (up to 30s)  
+  const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {  
+    const start = Date.now();  
+    // eslint-disable-next-line no-constant-condition  
+    while (true) {  
+      const val = await fn();  
+      if (predicate(val)) return val;  
+      if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out');  
+      await new Promise(r => setTimeout(r, intervalMs));  
+    }  
+  };  
 
-        const res = await setStateFromProvider(injected)
-        console.debug('[walletService] connected via MetaMask', { accounts: res.accounts, chainId: res.chainId })
-        return res
-      }
+  // Wait until AppKit actually has an EIP-1193 provider  
+  eip1193 = await waitFor(  
+    () => appKit.getProvider(),  
+    (p) => !!p  
+  );  
 
-      // ✅ 2) Fallback: AppKit modal (WalletConnect etc.)
-      await appKit.open()
+  // Build ethers objects  
+  browserProvider = new ethers.BrowserProvider(eip1193);  
+  signer = await browserProvider.getSigner();  
 
-      const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
-        const start = Date.now()
-        while (true) {
-          const val = await fn()
-          if (predicate(val)) return val
-          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
-          await new Promise((r) => setTimeout(r, intervalMs))
-        }
-      }
+  // Wait until the wallet returns at least one account  
+  accounts = await waitFor(  
+    () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),  
+    (arr) => Array.isArray(arr) && arr.length > 0  
+  );  
 
-      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
+  // Get chainId (hex string like "0x1")  
+  chainId = await eip1193.request({ method: 'eth_chainId' });  
 
-      // Trigger permission prompt for providers that require it
-      const accs = await eip1193.request?.({ method: 'eth_requestAccounts' })
-      if (!Array.isArray(accs) || accs.length === 0) {
-        return { success: false, error: 'No accounts returned from provider' }
-      }
+  // Hook up listeners once we’re sure we have the provider  
+  attachListeners();  
 
-      const res = await setStateFromProvider(eip1193)
-      console.debug('[walletService] connected via AppKit', { accounts: res.accounts, chainId: res.chainId })
-      return res
-    } catch (err) {
-      console.warn('[walletService] connect error:', err)
-      return { success: false, error: err?.message || 'Connect failed' }
-    }
-  },
+  // Optional: small debug  
+  console.debug('[walletService] connected', { accounts, chainId });  
 
-  async disconnect() {
-    try {
-      await appKit.disconnect?.()
-    } finally {
-      handleDisconnect()
-    }
-    return { success: true }
-  },
+  return {  
+    success: true,  
+    accounts,  
+    chainId,  
+    address: accounts[0] ?? null,  
+    signer  
+  };  
+} catch (err) {  
+  // Optional: small debug  
+  console.warn('[walletService] connect error:', err?.message || err);  
+  return { success: false, error: err?.message || 'Connect failed' };  
+}
 
-  // actions
-  async getAccounts() {
-    if (!eip1193) return []
-    try {
-      return await eip1193.request({ method: 'eth_accounts' })
-    } catch {
-      return []
-    }
-  },
+},
 
-  async sendTransaction(tx) {
-    try {
-      if (!signer) {
-        const res = await this.connect()
-        if (!res.success) return { success: false, error: res.error }
-      }
+async disconnect() {
+try {
+await appKit.disconnect?.()
+} finally {
+handleDisconnect()
+}
+return { success: true }
+},
 
-      // Helpful debug (shows if tx is missing fields)
-      console.debug('[walletService] sendTransaction tx:', tx)
+// actions
+async getAccounts() {
+if (!eip1193) return []
+try { return await eip1193.request({ method: 'eth_accounts' }) }
+catch { return [] }
+},
 
-      const resp = await signer.sendTransaction(tx)
-      console.debug('[walletService] txHash:', resp.hash)
+async sendTransaction(tx) {
+try {
+if (!signer) {
+const res = await this.connect()
+if (!res.success) return { success: false, error: res.error }
+}
+const resp = await signer.sendTransaction(tx)
+return { success: true, txHash: resp.hash }
+} catch (err) {
+return { success: false, error: err?.message || 'Transaction failed' }
+}
+},
 
-      return { success: true, txHash: resp.hash }
-    } catch (err) {
-      console.error('[walletService] sendTransaction error:', err)
-      return { success: false, error: err?.shortMessage || err?.message || 'Transaction failed' }
-    }
-  },
+async signMessage(message) {
+try {
+if (!signer) {
+const res = await this.connect()
+if (!res.success) return { success: false, error: res.error }
+}
+const signature = await signer.signMessage(message)
+return { success: true, signature }
+} catch (err) {
+return { success: false, error: err?.message || 'Sign failed' }
+}
+},
 
-  async signMessage(message) {
-    try {
-      if (!signer) {
-        const res = await this.connect()
-        if (!res.success) return { success: false, error: res.error }
-      }
-      const signature = await signer.signMessage(message)
-      return { success: true, signature }
-    } catch (err) {
-      console.error('[walletService] signMessage error:', err)
-      return { success: false, error: err?.shortMessage || err?.message || 'Sign failed' }
-    }
-  },
+async switchChain(targetId) {
+if (!eip1193) return { success: false, error: 'Wallet not connected' }
+const hex = toHexChainId(targetId)
+try {
+await eip1193.request({
+method: 'wallet_switchEthereumChain',
+params: [{ chainId: hex }]
+})
+return { success: true }
+} catch (err) {
+if (err?.code === 4902) {
+const chain = SUPPORTED_CHAINS[targetId]
+if (!chain) return { success: false, error: 'Unsupported chain' }
+try {
+await eip1193.request({
+method: 'wallet_addEthereumChain',
+params: [{
+chainId: hex,
+chainName: chain.name,
+nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
+rpcUrls: [chain.rpcUrl],
+blockExplorerUrls: [chain.explorer]
+}]
+})
+return { success: true, added: true }
+} catch (addErr) {
+return { success: false, error: addErr?.message || 'Failed to add chain' }
+}
+}
+return { success: false, error: err?.message || 'Failed to switch chain' }
+}
+},
 
-  async switchChain(targetId) {
-    if (!eip1193) return { success: false, error: 'Wallet not connected' }
-    const hex = toHexChainId(targetId)
+// subscriptions
+onAccountsChanged(cb) { onAccChanged = cb },
+onChainChanged(cb) { onChainChanged = cb },
+onDisconnect(cb) { onDisconnected = cb },
 
-    try {
-      await eip1193.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: hex }]
-      })
-      return { success: true }
-    } catch (err) {
-      if (err?.code === 4902) {
-        const chain = SUPPORTED_CHAINS[targetId]
-        if (!chain) return { success: false, error: 'Unsupported chain' }
-
-        try {
-          await eip1193.request({
-            method: 'wallet_addEthereumChain',
-            params: [
-              {
-                chainId: hex,
-                chainName: chain.name,
-                nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
-                rpcUrls: [chain.rpcUrl],
-                blockExplorerUrls: [chain.explorer]
-              }
-            ]
-          })
-          return { success: true, added: true }
-        } catch (addErr) {
-          return { success: false, error: addErr?.message || 'Failed to add chain' }
-        }
-      }
-      return { success: false, error: err?.message || 'Failed to switch chain' }
-    }
-  },
-
-  // subscriptions
-  onAccountsChanged(cb) {
-    onAccChanged = cb
-  },
-  onChainChanged(cb) {
-    onChainChanged = cb
-  },
-  onDisconnect(cb) {
-    onDisconnected = cb
-  },
-
-  // cleanup
-  destroy() {
-    if (eip1193) {
-      eip1193.removeListener?.('accountsChanged', handleAccounts)
-      eip1193.removeListener?.('chainChanged', handleChain)
-      eip1193.removeListener?.('disconnect', handleDisconnect)
-    }
-    eip1193 = null
-    browserProvider = null
-    signer = null
-    accounts = []
-    chainId = null
-  }
+// cleanup
+destroy() {
+if (eip1193) {
+eip1193.removeListener?.('accountsChanged', handleAccounts)
+eip1193.removeListener?.('chainChanged', handleChain)
+eip1193.removeListener?.('disconnect', handleDisconnect)
+}
+eip1193 = null
+browserProvider = null
+signer = null
+accounts = []
+chainId = null
+}
 }
 
 export default walletService
