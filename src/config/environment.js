@@ -329,7 +329,7 @@ export const CHAIN_CONFIGS = {
   logo: "/logo/taiko.png"
 },
 
-28105: {
+2818: {
   name: "Morph",
   symbol: "ETH",
   rpcUrl: `https://morphl2.socialscan.io/`,

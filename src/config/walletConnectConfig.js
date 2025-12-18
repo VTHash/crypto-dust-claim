@@ -352,7 +352,7 @@ export const SUPPORTED_CHAINS = {
   logo: "/logo/taiko.png"
 },
 
-28105: {
+2818: {
   name: "Morph",
   symbol: "ETH",
   rpcUrl: `https://rpc.morphl2.io`,
