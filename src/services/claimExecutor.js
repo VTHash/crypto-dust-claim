@@ -23,6 +23,13 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   if (Number(chainPlan.chainId) !== Number(currentChainId)) {
     const sw = await walletService.switchChain(Number(chainPlan.chainId))
     if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
+
+    // Re-read to ensure the wallet actually switched (mobile wallets can lag)
+    const afterHex = await walletService.getChainId?.()
+    const afterId = typeof afterHex === 'string' ? parseInt(afterHex, 16) : Number(afterHex || 0)
+    if (Number(afterId) !== Number(chainPlan.chainId)) {
+      throw new Error(`Chain switch did not complete (expected ${chainPlan.chainId}, got ${afterId})`)
+    }
   }
 
   const from =
@@ -38,20 +45,20 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
   if (!dep?.dustClaimV3) throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
 
+  const provider = await walletService.getBrowserProvider?.()
+
   for (const step of chainPlan.steps) {
     const tokenIn = step.tokenIn
     const amountWei = BigInt(step.amount || 0)
 
-    // 1) APPROVE spender (0x allowance-holder spender) so DustClaimV3 can execute allowance-holder flow
+    // ---------------------------
+    // 1) APPROVE (if needed)
+    // ---------------------------
     if (step.needsApproval && !step.usePermit) {
-      // ✅ IMPORTANT: approve step.spender (from plan), fallback to routerSpender, last resort dep.dustClaimV3
-      const spender =
-        step.spender ||
-        step.routerSpender ||
-        dep.dustClaimV3
+      const spender = step.spender || step.routerSpender || dep.dustClaimV3
 
       try {
-        // Skip approval if already enough allowance
+        // Check allowance first
         let hasAllowance = false
         try {
           const allowanceData = encodeFunctionData({
@@ -60,11 +67,9 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             args: [from, spender]
           })
 
-          const provider = await walletService.getBrowserProvider?.()
           if (provider?.call) {
             const raw = await provider.call({ to: tokenIn, data: allowanceData })
-            // raw is hex-encoded uint256
-            const current = BigInt(raw)
+            const [current] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], raw)
             if (current >= amountWei) {
               hasAllowance = true
               receipts.push({
@@ -79,7 +84,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             }
           }
         } catch {
-          // If allowance call fails for weird tokens, just proceed with approve
+          // ignore allowance read failures; attempt approve
         }
 
         if (!hasAllowance) {
@@ -89,31 +94,37 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             args: [spender, amountWei]
           })
 
-          console.debug('[claimExecutor] approving', {
-            chainId: Number(chainPlan.chainId),
-            tokenIn,
-            spender,
-            amount: String(amountWei)
-          })
-
           const res = await walletService.sendTransaction({
-            from,
+            from,              // ✅ REQUIRED
             to: tokenIn,
             data: approvalData,
             value: 0n
           })
 
+          // ✅ Hard guard: no hash = not sent
+          if (res?.success && !res?.txHash) {
+            receipts.push({
+              type: 'approval',
+              ok: false,
+              error: 'Wallet returned success but no txHash (approval not submitted)',
+              tokenIn,
+              spender,
+              amount: String(amountWei)
+            })
+            continue
+          }
+
           receipts.push({
             type: 'approval',
-            ok: !!res.success,
-            txHash: res.txHash,
-            error: res.error,
+            ok: !!res?.success,
+            txHash: res?.txHash || null,
+            error: res?.error || null,
             tokenIn,
             spender,
             amount: String(amountWei)
           })
 
-          if (!res.success) continue
+          if (!res?.success) continue
         }
       } catch (err) {
         receipts.push({
@@ -121,20 +132,21 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           ok: false,
           error: err?.message || 'Approval failed',
           tokenIn,
-          spender: step.spender || step.routerSpender || dep.dustClaimV3,
+          spender,
           amount: String(amountWei)
         })
         continue
       }
     }
 
-    // 2) SWAP THROUGH DustClaimV3 using 0x calldata
+    // ---------------------------
+    // 2) SWAP via DustClaimV3 (0x)
+    // ---------------------------
     try {
       if (step.aggregator !== '0x') {
         throw new Error(`Unsupported aggregator: ${step.aggregator || 'none'} (only 0x supported)`)
       }
 
-      // Prefer plan’s data (best), fallback to re-quote via Netlify (safe)
       let routerSpender = step.routerSpender
       let swapCalldata = step.swapCalldata
       let gasFromQuote = null
@@ -145,7 +157,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           {
             chainId: Number(chainPlan.chainId),
             sellToken: step.tokenIn,
-            buyToken: step.tokenOut, // should be chain WETH
+            buyToken: step.tokenOut,
             sellAmount: String(step.amount),
             taker: dep.dustClaimV3,
             recipient: dep.dustClaimV3,
@@ -155,37 +167,33 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           { headers: { 'content-type': 'application/json' } }
         )
 
-        gasFromQuote = q?.transaction?.gas ?? null
-
-        const callTarget = q?.transaction?.to || null
-        const spender =
-          q?.issues?.allowance?.spender ||
-          q?.allowanceTarget ||
-          null
-        const calldata = q?.transaction?.data || null
-
-        // HARD GUARD — must come FIRST
-        if (!callTarget || !spender || !calldata) {
-          console.warn('[0x] invalid quote, missing fields', {
-            chainId: Number(chainPlan.chainId),
-            tokenIn: step.tokenIn,
-            callTarget,
-            spender,
-            calldataLen: calldata?.length || 0,
-            keys: Object.keys(q || {})
-          })
+        // Guard: no transaction means no route
+        if (!q?.transaction?.to || !q?.transaction?.data) {
           receipts.push({
             type: 'swap',
             ok: false,
-            error: '0x quote missing transaction fields (no route/liquidity?)',
+            error: q?.message || '0x quote has no transaction (no route/liquidity)',
             tokenIn: step.tokenIn
           })
           continue
         }
 
-        // Do NOT force spender == tx.to; allowance-holder commonly uses same, but we shouldn’t hard fail.
-        routerSpender = spender
-        swapCalldata = calldata
+        gasFromQuote = q?.transaction?.gas ?? null
+        routerSpender =
+          q?.issues?.allowance?.spender ||
+          q?.allowanceTarget ||
+          null
+        swapCalldata = q?.transaction?.data || null
+
+        if (!routerSpender || !swapCalldata) {
+          receipts.push({
+            type: 'swap',
+            ok: false,
+            error: '0x quote missing spender/calldata (no route/liquidity)',
+            tokenIn: step.tokenIn
+          })
+          continue
+        }
       }
 
       const data = encodeFunctionData({
@@ -196,31 +204,31 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
       const gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
 
-const tx = {
-  to: dep.dustClaimV3,
-  data,
-  value: 0n,
-  gasLimit
-}
-
-      console.debug('[claimExecutor] swap tx', {
-        chainId: Number(chainPlan.chainId),
-        from,
-        dustClaimV3: dep.dustClaimV3,
-        tokenIn: step.tokenIn,
-        amount: String(step.amount),
-        routerSpender,
-        calldataLen: swapCalldata?.length || 0,
-        gas: String(gasLimit)
+      const res = await walletService.sendTransaction({
+        from,                 // ✅ REQUIRED
+        to: dep.dustClaimV3,
+        data,
+        value: 0n,
+        gasLimit
       })
 
-      const res = await walletService.sendTransaction(tx)
+      // ✅ Hard guard: no hash = not sent
+      if (res?.success && !res?.txHash) {
+        receipts.push({
+          type: 'swap',
+          ok: false,
+          error: 'Wallet returned success but no txHash (swap not submitted)',
+          tokenIn: step.tokenIn,
+          routerSpender
+        })
+        continue
+      }
 
       receipts.push({
         type: 'swap',
-        ok: !!res.success,
-        txHash: res.txHash,
-        error: res.error,
+        ok: !!res?.success,
+        txHash: res?.txHash || null,
+        error: res?.error || null,
         tokenIn: step.tokenIn,
         routerSpender
       })
@@ -228,7 +236,11 @@ const tx = {
       receipts.push({
         type: 'swap',
         ok: false,
-        error: err?.response?.data?.error || err?.response?.data?.message || err?.message || 'Swap failed',
+        error:
+          err?.response?.data?.error ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'Swap failed',
         tokenIn: step.tokenIn
       })
     }
