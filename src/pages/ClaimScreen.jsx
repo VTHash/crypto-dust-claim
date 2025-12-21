@@ -104,19 +104,28 @@ const ClaimScreen = () => {
         setCurrentStep(i + 1)
 
         try {
-          const receipts = await executeChainPlan(chainPlan, address)
-          results.push({
-            chainId: chainPlan.chainId,
-            success: true,
-            receipts
-          })
-        } catch (err) {
-          results.push({
-            chainId: chainPlan.chainId,
-            success: false,
-            error: err?.message || 'Execution failed'
-          })
-        }
+  const receipts = await executeChainPlan(chainPlan, address)
+
+  const approvalsOk = receipts.filter(r => r.type === 'approval' && r.ok).length
+  const swapsOk = receipts.filter(r => r.type === 'swap' && r.ok && r.txHash).length
+  const anyOk = approvalsOk > 0 || swapsOk > 0
+
+  results.push({
+    chainId: chainPlan.chainId,
+    success: anyOk,
+    receipts,
+    approvalsOk,
+    swapsOk,
+    error: anyOk ? null : 'No transactions were sent (wallet rejected or tx request invalid)'
+  })
+} catch (err) {
+  results.push({
+    chainId: chainPlan.chainId,
+    success: false,
+    error: err?.message || 'Execution failed'
+  })
+}
+
 
         await new Promise(r => setTimeout(r, 150))
       }

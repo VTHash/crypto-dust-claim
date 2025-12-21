@@ -194,15 +194,14 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      const gas = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n // buffer
+      const gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
 
-      const tx = {
-        from,
-        to: dep.dustClaimV3,
-        data,
-        value: 0n,
-        gas
-      }
+const tx = {
+  to: dep.dustClaimV3,
+  data,
+  value: 0n,
+  gasLimit
+}
 
       console.debug('[claimExecutor] swap tx', {
         chainId: Number(chainPlan.chainId),
@@ -212,7 +211,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         amount: String(step.amount),
         routerSpender,
         calldataLen: swapCalldata?.length || 0,
-        gas: String(gas)
+        gas: String(gasLimit)
       })
 
       const res = await walletService.sendTransaction(tx)
