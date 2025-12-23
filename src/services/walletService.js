@@ -120,6 +120,22 @@ function normalizeTxError(err) {
   return msg
 }
 
+function normalizeTxError(err) {
+  const code = err?.code
+  const msg = err?.shortMessage ||
+  err?.reason ||
+  err?.message ||
+  'Transaction failed'
+  
+  if (code === 4001) {
+    return 'User rejected the request (4001)'
+    if (code === -32002) {
+      return 'Another request is already pending in MetaMask (-32002)'
+    }
+    return code ? `${msg} (${code})` : msg
+}
+}
+
 // ---- API ----
 const walletService = {
   // getters / helpers
