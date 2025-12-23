@@ -1,22 +1,24 @@
-// src/services/claimExecutor.js
 import axios from 'axios'
+import { ethers } from 'ethers'
 import walletService from './walletService'
 import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
-// Small helper to keep addresses normalized
-const lower = (x) => (x ? String(x).toLowerCase() : '')
+// Small delay helps MetaMask mobile not choke on back-to-back requests
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // Execute chain plan THROUGH DustClaimV3
 export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
 
+  // Ensure wallet connected
   const connected = await walletService.isConnected?.()
   if (!connected) {
     const res = await walletService.connect?.()
     if (!res?.success) throw new Error(res?.error || 'Wallet connection failed')
   }
 
+  // Ensure correct chain
   const currentChainHex = await walletService.getChainId?.()
   const currentChainId =
     typeof currentChainHex === 'string'
@@ -35,6 +37,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
     }
   }
 
+  // Resolve from address
   const from =
     fromAddress ||
     (await walletService.getAddress?.()) ||
@@ -48,10 +51,38 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
   if (!dep?.dustClaimV3) throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
 
+  // BrowserProvider (ethers v6)
   const provider = await walletService.getBrowserProvider?.()
+  if (!provider) throw new Error('Provider unavailable')
+
+  // Start reconciler (safe no-op if already running)
+  try {
+    walletService.startTxReconciler?.()
+  } catch {
+    // ignore
+  }
+
+  // Helper: best-effort allowance check via eth_call
+  async function hasSufficientAllowance(token, owner, spender, needed) {
+    try {
+      const allowanceData = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [owner, spender]
+      })
+
+      const raw = await provider.call({ to: token, data: allowanceData })
+      const [current] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], raw)
+      return BigInt(current.toString()) >= BigInt(needed)
+    } catch {
+      // If allowance read fails, we conservatively say "unknown" and try approve.
+      return false
+    }
+  }
 
   for (const step of chainPlan.steps) {
     const tokenIn = step.tokenIn
+    const tokenOut = step.tokenOut
     const amountWei = BigInt(step.amount || 0)
 
     // ---------------------------
@@ -61,79 +92,83 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       const spender = step.spender || step.routerSpender || dep.dustClaimV3
 
       try {
-        // Check allowance first
-        let hasAllowance = false
-        try {
-          const allowanceData = encodeFunctionData({
-            abi: erc20Abi,
-            functionName: 'allowance',
-            args: [from, spender]
+        const okAllowance = await hasSufficientAllowance(tokenIn, from, spender, amountWei)
+        if (okAllowance) {
+          receipts.push({
+            type: 'approval',
+            ok: true,
+            skipped: true,
+            reason: 'allowance already sufficient',
+            tokenIn,
+            spender,
+            amount: String(amountWei)
           })
-
-          if (provider?.call) {
-            const raw = await provider.call({ to: tokenIn, data: allowanceData })
-            const [current] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], raw)
-            if (current >= amountWei) {
-              hasAllowance = true
-              receipts.push({
-                type: 'approval',
-                ok: true,
-                skipped: true,
-                reason: 'allowance already sufficient',
-                tokenIn,
-                spender,
-                amount: String(amountWei)
-              })
-            }
-          }
-        } catch {
-          // ignore allowance read failures; attempt approve
-        }
-
-        if (!hasAllowance) {
+        } else {
           const approvalData = encodeFunctionData({
             abi: erc20Abi,
             functionName: 'approve',
             args: [spender, amountWei]
           })
 
-          const res = await walletService.sendTransaction({
-            from,              // ✅ REQUIRED
-            to: tokenIn,
-            data: approvalData,
-            value: 0n
-          })
+          // RELIABLE SENDER (stores hash immediately + waits best-effort)
+          const approvalRes = await walletService.sendTransactionWithReceipt(
+            {
+              from,
+              to: tokenIn,
+              data: approvalData,
+              value: 0n
+            },
+            {
+              kind: 'approval',
+              tokenAddress: tokenIn,
+              spender,
+              amount: String(amountWei),
+              waitConfirms: 1,
+              waitTimeoutMs: 180000
+            }
+          )
 
-          // ✅ Hard guard: no hash = not sent
-          if (res?.success && !res?.txHash) {
+          // Hard guard: "success" without hash should never happen now, but keep guard anyway.
+          if (approvalRes?.success && !approvalRes?.txHash) {
             receipts.push({
               type: 'approval',
               ok: false,
-              error: 'Wallet returned success but no txHash (approval not submitted)',
+              error: 'Approval: wallet returned success but no txHash (not submitted)',
               tokenIn,
               spender,
               amount: String(amountWei)
             })
+            // do not proceed to swap
             continue
           }
 
           receipts.push({
             type: 'approval',
-            ok: !!res?.success,
-            txHash: res?.txHash || null,
-            error: res?.error || null,
+            ok: !!approvalRes?.success,
+            txId: approvalRes?.txId || null,
+            txHash: approvalRes?.txHash || null,
+            status: approvalRes?.status || null,
+            chainId: Number(chainPlan.chainId),
             tokenIn,
             spender,
-            amount: String(amountWei)
+            amount: String(amountWei),
+            blockNumber: approvalRes?.receipt?.blockNumber ?? null,
+            error: approvalRes?.error || null
           })
 
-          if (!res?.success) continue
+          if (!approvalRes?.success) {
+            // do not proceed to swap if approval failed
+            continue
+          }
+
+          // Small delay so MetaMask mobile reliably presents the next prompt
+          await sleep(650)
         }
       } catch (err) {
         receipts.push({
           type: 'approval',
           ok: false,
-          error: err?.message || 'Approval failed',
+          error: err?.shortMessage || err?.reason || err?.message || 'Approval failed',
           tokenIn,
           spender,
           amount: String(amountWei)
@@ -159,10 +194,10 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           '/.netlify/functions/0x-quote',
           {
             chainId: Number(chainPlan.chainId),
-            sellToken: step.tokenIn,
-            buyToken: step.tokenOut,
+            sellToken: tokenIn,
+            buyToken: tokenOut,
             sellAmount: String(step.amount),
-            taker: dep.dustClaimV3,
+            taker: dep.dustClaimV3, // allowance-holder taker is your contract
             recipient: dep.dustClaimV3,
             txOrigin: from,
             slippageBps: Math.round(Number(step.slippage ?? 1) * 100)
@@ -176,16 +211,19 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             type: 'swap',
             ok: false,
             error: q?.message || '0x quote has no transaction (no route/liquidity)',
-            tokenIn: step.tokenIn
+            tokenIn,
+            tokenOut
           })
           continue
         }
 
         gasFromQuote = q?.transaction?.gas ?? null
+
         routerSpender =
           q?.issues?.allowance?.spender ||
           q?.allowanceTarget ||
           null
+
         swapCalldata = q?.transaction?.data || null
 
         if (!routerSpender || !swapCalldata) {
@@ -193,7 +231,8 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             type: 'swap',
             ok: false,
             error: '0x quote missing spender/calldata (no route/liquidity)',
-            tokenIn: step.tokenIn
+            tokenIn,
+            tokenOut
           })
           continue
         }
@@ -202,26 +241,38 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       const data = encodeFunctionData({
         abi: DUSTCLAIM_V3_ABI,
         functionName: 'claimDustUsingAggregator',
-        args: [step.tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
+        args: [tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
+      // Gas: use quote when available, otherwise conservative.
+      // Your walletService sender also estimates + buffers when gasLimit is missing.
       const gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
 
-      const res = await walletService.sendTransaction({
-        from,                 // ✅ REQUIRED
-        to: dep.dustClaimV3,
-        data,
-        value: 0n,
-        gasLimit
-      })
+      const swapRes = await walletService.sendTransactionWithReceipt(
+        {
+          from,
+          to: dep.dustClaimV3,
+          data,
+          value: 0n,
+          gasLimit
+        },
+        {
+          kind: 'swap',
+          tokenAddress: tokenIn,
+          spender: routerSpender,
+          amount: String(step.amount),
+          waitConfirms: 1,
+          waitTimeoutMs: 240000
+        }
+      )
 
-      // ✅ Hard guard: no hash = not sent
-      if (res?.success && !res?.txHash) {
+      if (swapRes?.success && !swapRes?.txHash) {
         receipts.push({
           type: 'swap',
           ok: false,
-          error: 'Wallet returned success but no txHash (swap not submitted)',
-          tokenIn: step.tokenIn,
+          error: 'Swap: wallet returned success but no txHash (not submitted)',
+          tokenIn,
+          tokenOut,
           routerSpender
         })
         continue
@@ -229,12 +280,20 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
       receipts.push({
         type: 'swap',
-        ok: !!res?.success,
-        txHash: res?.txHash || null,
-        error: res?.error || null,
-        tokenIn: step.tokenIn,
-        routerSpender
+        ok: !!swapRes?.success,
+        txId: swapRes?.txId || null,
+        txHash: swapRes?.txHash || null,
+        status: swapRes?.status || null,
+        chainId: Number(chainPlan.chainId),
+        tokenIn,
+        tokenOut,
+        routerSpender,
+        blockNumber: swapRes?.receipt?.blockNumber ?? null,
+        error: swapRes?.error || null
       })
+
+      // Small delay before next step, again for MetaMask mobile stability
+      await sleep(650)
     } catch (err) {
       receipts.push({
         type: 'swap',
@@ -242,9 +301,12 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         error:
           err?.response?.data?.error ||
           err?.response?.data?.message ||
+          err?.shortMessage ||
+          err?.reason ||
           err?.message ||
           'Swap failed',
-        tokenIn: step.tokenIn
+        tokenIn,
+        tokenOut
       })
     }
   }

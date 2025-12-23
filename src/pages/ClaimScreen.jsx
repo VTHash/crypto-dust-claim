@@ -1,11 +1,9 @@
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useEffect, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { ethers } from 'ethers'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
 import { executeChainPlan } from '../services/claimExecutor'
-import permSvc from '../services/permissionlessContractService' // kept (not used)
-import { buildDustClaimBatch } from '../services/dustClaimService' // kept (fallback only)
+import walletService from '../services/walletService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
@@ -18,11 +16,7 @@ const ClaimScreen = () => {
   const { results: scanResults } = useScan()
 
   // ---------------- state from scanner ----------------
-  const {
-    claimPlan = [],
-    batchTransactions = [],
-    batchSavings = null
-  } = location.state || {}
+  const { claimPlan = [], batchSavings = null } = location.state || {}
 
   // ---------------- hydrate scan snapshot ----------------
   const [scanSnapshot] = useState(() => {
@@ -64,10 +58,15 @@ const ClaimScreen = () => {
 
   const totalChains = planAvailable
     ? claimPlan.length
-    : new Set(dustResults.map(r => r.chainId)).size
+    : new Set(dustResults.map((r) => r.chainId)).size
 
-  const defaultChainId =
-    claimPlan?.[0]?.chainId || dustResults?.[0]?.chainId || 1
+  const defaultChainId = claimPlan?.[0]?.chainId || dustResults?.[0]?.chainId || 1
+
+  const getChainInfo = (chainId) =>
+    SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
+
+  const usdFmt = (n) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
 
   // ---------------- UI state ----------------
   const [claiming, setClaiming] = useState(false)
@@ -75,8 +74,105 @@ const ClaimScreen = () => {
   const [claimResults, setClaimResults] = useState([])
   const [error, setError] = useState(null)
 
-  const getChainInfo = (chainId) =>
-    SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
+  // ---------------- TX reconciliation UI state ----------------
+  const [txFeed, setTxFeed] = useState([]) // unified tx store view
+  const [reconciling, setReconciling] = useState(false)
+
+  const refreshTxFeed = useCallback(async () => {
+    try {
+      const list = await walletService.listTransactions?.()
+      if (Array.isArray(list)) {
+        // newest first
+        const sorted = [...list].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+        setTxFeed(sorted)
+      }
+    } catch {
+      // ignore
+    }
+  }, [])
+
+  // Start reconciler and keep UI in sync
+  useEffect(() => {
+    let timer = null
+    let mounted = true
+
+    const boot = async () => {
+      try {
+        walletService.startTxReconciler?.()
+      } catch {
+        // ignore
+      }
+      await refreshTxFeed()
+
+      // Light polling to update statuses in UI (mobile-friendly)
+      timer = setInterval(async () => {
+        if (!mounted) return
+        await refreshTxFeed()
+      }, 2000)
+    }
+
+    boot()
+
+    return () => {
+      mounted = false
+      if (timer) clearInterval(timer)
+    }
+  }, [refreshTxFeed])
+
+  // Helper: should we keep reconciling?
+  const hasPending = useMemo(() => {
+    return txFeed.some((t) => {
+      const st = String(t.status || '').toLowerCase()
+      return st === 'pending' || st === 'submitted' || st === 'broadcast'
+    })
+  }, [txFeed])
+
+  // Best-effort: force reconcile pass while there are pending txs (esp. after execution)
+  useEffect(() => {
+    if (!hasPending) return
+    let stopped = false
+
+    const loop = async () => {
+      setReconciling(true)
+      try {
+        while (!stopped) {
+          // If your walletService exposes reconcileOnce, use it; otherwise startTxReconciler handles it.
+          await walletService.reconcileOnce?.().catch(() => null)
+          await refreshTxFeed()
+          await new Promise((r) => setTimeout(r, 3000))
+          if (!hasPending) break
+        }
+      } finally {
+        if (!stopped) setReconciling(false)
+      }
+    }
+
+    loop()
+    return () => {
+      stopped = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPending, refreshTxFeed])
+
+  const explorerTxUrl = (chainId, txHash) => {
+    const info = getChainInfo(chainId || defaultChainId)
+    if (!info?.explorer || !txHash) return null
+    // explorer may be a base url, ensure /tx/
+    const base = String(info.explorer).replace(/\/$/, '')
+    return `${base}/tx/${txHash}`
+  }
+
+  const normalizeStatusLabel = (s) => {
+    const st = String(s || '').toLowerCase()
+    if (!st) return 'Unknown'
+    if (st === 'confirmed' || st === 'success') return 'Confirmed'
+    if (st === 'failed') return 'Failed'
+    if (st === 'replaced') return 'Replaced'
+    if (st === 'dropped') return 'Dropped'
+    if (st === 'submitted' || st === 'broadcast') return 'Submitted'
+    if (st === 'pending') return 'Pending'
+    return s
+  }
 
   // ============================================================================
   // MAIN EXECUTION — 0x ONLY
@@ -95,6 +191,7 @@ const ClaimScreen = () => {
     setClaiming(true)
     setError(null)
     setClaimResults([])
+    setCurrentStep(0)
 
     const results = []
 
@@ -104,33 +201,37 @@ const ClaimScreen = () => {
         setCurrentStep(i + 1)
 
         try {
-  const receipts = await executeChainPlan(chainPlan, address)
+          // Execute chain plan (now uses sendTransactionWithReceipt and persists hashes)
+          const receipts = await executeChainPlan(chainPlan, address)
 
-  const approvalsOk = receipts.filter(r => r.type === 'approval' && r.ok).length
-  const swapsOk = receipts.filter(r => r.type === 'swap' && r.ok && r.txHash).length
-  const anyOk = approvalsOk > 0 || swapsOk > 0
+          const approvalsOk = receipts.filter((r) => r.type === 'approval' && r.ok).length
+          const swapsOk = receipts.filter((r) => r.type === 'swap' && r.ok && r.txHash).length
+          const anyOk = approvalsOk > 0 || swapsOk > 0
 
-  results.push({
-    chainId: chainPlan.chainId,
-    success: anyOk,
-    receipts,
-    approvalsOk,
-    swapsOk,
-    error: anyOk ? null : 'No transactions were sent (wallet rejected or tx request invalid)'
-  })
-} catch (err) {
-  results.push({
-    chainId: chainPlan.chainId,
-    success: false,
-    error: err?.message || 'Execution failed'
-  })
-}
+          results.push({
+            chainId: chainPlan.chainId,
+            success: anyOk,
+            receipts,
+            approvalsOk,
+            swapsOk,
+            error: anyOk ? null : 'No transactions were sent (wallet rejected or tx request invalid)'
+          })
+        } catch (err) {
+          results.push({
+            chainId: chainPlan.chainId,
+            success: false,
+            error: err?.message || 'Execution failed'
+          })
+        }
 
-
-        await new Promise(r => setTimeout(r, 150))
+        // small pacing helps MM mobile
+        await new Promise((r) => setTimeout(r, 250))
       }
 
       setClaimResults(results)
+
+      // Immediately refresh tx feed so UI shows txs right away
+      await refreshTxFeed()
     } catch (err) {
       setError(err?.message || 'Claim execution error')
     } finally {
@@ -140,14 +241,23 @@ const ClaimScreen = () => {
   }
 
   // ---------------- render helpers ----------------
-  const successful = claimResults.filter(r => r.success).length
+  const successful = claimResults.filter((r) => r.success).length
   const failed = claimResults.length - successful
 
-  const usdFmt = (n) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(Number(n || 0))
+  // Recent txs relevant to this address (optional filter)
+  const relevantTxs = useMemo(() => {
+    const addr = (address || '').toLowerCase()
+    return txFeed.filter((t) => {
+      const from = String(t.from || '').toLowerCase()
+      const to = String(t.to || '').toLowerCase()
+      return addr && (from === addr || to === addr)
+    })
+  }, [txFeed, address])
+
+  const pendingCount = relevantTxs.filter((t) => {
+    const st = String(t.status || '').toLowerCase()
+    return st === 'pending' || st === 'submitted' || st === 'broadcast'
+  }).length
 
   return (
     <div className="claim-screen">
@@ -163,9 +273,7 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">
-                {usdFmt(computedTotalDustValue)}
-              </div>
+              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
             </div>
           </div>
 
@@ -182,9 +290,7 @@ const ClaimScreen = () => {
               <div className="summary-icon">🎯</div>
               <div className="summary-content">
                 <h3>Gas Savings</h3>
-                <div className="summary-value">
-                  {batchSavings.savingsPercentage}%
-                </div>
+                <div className="summary-value">{batchSavings.savingsPercentage}%</div>
               </div>
             </div>
           )}
@@ -198,10 +304,7 @@ const ClaimScreen = () => {
           <div className="chains-grid">
             {dustResults.map((r, idx) => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
-              const logo =
-                meta.logo ||
-                NATIVE_LOGOS[r.chainId] ||
-                '/logos/chains/generic.png'
+              const logo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
 
               return (
                 <div key={idx} className="chain-card">
@@ -210,9 +313,7 @@ const ClaimScreen = () => {
                       <img src={logo} className="chain-logo" alt={meta.name} />
                       <div>
                         <h3>{meta.name}</h3>
-                        <p className="chain-value">
-                          {usdFmt(r.totalValue || 0)}
-                        </p>
+                        <p className="chain-value">{usdFmt(r.totalValue || 0)}</p>
                       </div>
                     </div>
                   </div>
@@ -229,11 +330,7 @@ const ClaimScreen = () => {
 
       {/* ACTION */}
       <div className="action-section">
-        <button
-          onClick={handleExecuteClaim}
-          disabled={claiming}
-          className="execute-button"
-        >
+        <button onClick={handleExecuteClaim} disabled={claiming} className="execute-button">
           {claiming ? '⏳ Executing…' : '🚀 Execute Swap & Claim'}
         </button>
 
@@ -249,7 +346,7 @@ const ClaimScreen = () => {
         </div>
       )}
 
-      {/* Results */}
+      {/* Results (per chain plan execution) */}
       {claimResults.length > 0 && (
         <div className="results-card">
           <h3>Results</h3>
@@ -264,11 +361,115 @@ const ClaimScreen = () => {
               <div key={i} className={r.success ? 'success' : 'error'}>
                 <strong>{info.name}</strong>
                 {r.error && <p>{r.error}</p>}
+
+                {/* Inline receipts */}
+                {Array.isArray(r.receipts) && r.receipts.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {r.receipts.map((rcpt, j) => {
+                      const url = explorerTxUrl(r.chainId, rcpt.txHash)
+                      const label =
+                        rcpt.type === 'approval'
+                          ? 'Approval'
+                          : rcpt.type === 'swap'
+                            ? 'Swap'
+                            : rcpt.type || 'Tx'
+
+                      return (
+                        <div key={j} style={{ fontSize: 13, opacity: 0.95, marginTop: 6 }}>
+                          <span style={{ fontWeight: 600 }}>{label}:</span>{' '}
+                          {rcpt.txHash ? (
+                            url ? (
+                              <a href={url} target="_blank" rel="noreferrer">
+                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
+                              </a>
+                            ) : (
+                              <span>
+                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
+                              </span>
+                            )
+                          ) : (
+                            <span>{rcpt.ok ? 'OK' : 'Not submitted'}</span>
+                          )}
+                          {rcpt.error && <div style={{ marginTop: 2, opacity: 0.85 }}>{rcpt.error}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       )}
+
+      {/* Transaction Activity (authoritative: reconciled store) */}
+      <div className="results-card" style={{ marginTop: 16 }}>
+        <h3>
+          Transaction Activity{pendingCount > 0 ? ` (Pending: ${pendingCount})` : ''}
+        </h3>
+
+        <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 10 }}>
+          {reconciling || hasPending ? 'Reconciling receipts…' : 'Up to date.'}
+        </div>
+
+        {relevantTxs.length === 0 ? (
+          <div style={{ opacity: 0.85 }}>No transactions recorded yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {relevantTxs.slice(0, 20).map((t) => {
+              const chainId = t.chainId || defaultChainId
+              const info = getChainInfo(chainId)
+              const url = explorerTxUrl(chainId, t.hash)
+              const st = normalizeStatusLabel(t.status)
+              const kind = t.kind || t.type || 'tx'
+
+              return (
+                <div
+                  key={t.id || t.hash}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    padding: 12
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ fontWeight: 700 }}>
+                      {info?.name || 'Chain'} · {String(kind).toUpperCase()}
+                    </div>
+                    <div style={{ fontWeight: 700 }}>{st}</div>
+                  </div>
+
+                  <div style={{ marginTop: 8, fontSize: 13, opacity: 0.95 }}>
+                    {t.hash ? (
+                      url ? (
+                        <a href={url} target="_blank" rel="noreferrer">
+                          {t.hash}
+                        </a>
+                      ) : (
+                        <span>{t.hash}</span>
+                      )
+                    ) : (
+                      <span>Hash not available</span>
+                    )}
+                  </div>
+
+                  {t.error && (
+                    <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
+                      {t.error}
+                    </div>
+                  )}
+
+                  {t.blockNumber && (
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                      Block: {t.blockNumber}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
 
       <div className="footer-actions">
         <button onClick={() => navigate('/scanner')} className="btn btn-outline">

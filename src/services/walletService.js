@@ -9,6 +9,10 @@ import {
   SUPPORTED_CHAINS
 } from '../config/walletConnectConfig'
 
+import { TxReconciler } from './txReconciler'
+import { sendTransactionReliable } from './txSend'
+import { txStore } from './txStore'
+
 // ---- utils ----
 const toHexChainId = (id) => '0x' + Number(id).toString(16)
 
@@ -32,6 +36,9 @@ let signer = null // ethers.Signer
 let accounts = [] // string[]
 let chainId = null // hex string like "0x1"
 
+// reconciler
+let reconciler = null
+
 // event listeners wired by WalletContext
 let onAccChanged = null
 let onChainChanged = null
@@ -40,13 +47,11 @@ let onDisconnected = null
 // ---- event handlers ----
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
-  // If accounts changed, signer may be stale
   signer = null
   onAccChanged?.(accounts)
 }
 function handleChain(hexId) {
   chainId = hexId
-  // On chain change, signer/provider objects can become stale
   signer = null
   browserProvider = null
   onChainChanged?.(hexId)
@@ -114,13 +119,10 @@ async function ensureAccounts() {
 async function ensureEthers() {
   if (!eip1193) return { browserProvider: null, signer: null }
 
-  // Create provider if missing
   if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
 
-  // Make sure we have accounts; signer.getAddress() often fails without permissions
   if (!accounts?.length) await ensureAccounts()
 
-  // Create signer if missing
   if (!signer) {
     try {
       signer = await browserProvider.getSigner()
@@ -132,23 +134,61 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
+function hexToDec(hex) {
+  if (!hex) return null
+  try {
+    return Number.parseInt(hex, 16)
+  } catch {
+    return null
+  }
+}
+
+// ---- reconciler wiring ----
+async function providerFactory() {
+  if (!eip1193) await ensureProvider()
+  if (!eip1193) return null
+  if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
+  return browserProvider
+}
+
+function startTxReconciler() {
+  if (reconciler) return
+  reconciler = new TxReconciler(providerFactory, {
+    pollMs: 6000,
+    maxAgeMs: 24 * 60 * 60 * 1000
+  })
+  reconciler.start()
+}
+
+function stopTxReconciler() {
+  if (!reconciler) return
+  reconciler.stop()
+  reconciler = null
+}
+
 // ---- API ----
 const walletService = {
   // getters / helpers
   getAppKit: () => appKit,
+
   async getProvider() {
     return eip1193 || (await ensureProvider())
   },
+
+  // PUBLIC provider access (no signer requirement)
   async getBrowserProvider() {
     if (!eip1193) await ensureProvider()
-    await ensureEthers()
+    if (!eip1193) return null
+    if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
     return browserProvider
   },
+
   async getSigner() {
     if (!eip1193) await ensureProvider()
     await ensureEthers()
     return signer
   },
+
   async getAddress() {
     if (!accounts?.length) {
       if (!eip1193) await ensureProvider()
@@ -156,6 +196,7 @@ const walletService = {
     }
     return accounts?.[0] ?? null
   },
+
   async getChainId() {
     if (!chainId) {
       if (!eip1193) await ensureProvider()
@@ -166,6 +207,11 @@ const walletService = {
       }
     }
     return chainId
+  },
+
+  async getChainIdDec() {
+    const hex = await this.getChainId()
+    return hexToDec(hex)
   },
 
   // IMPORTANT: connected should not depend on signer existing
@@ -183,8 +229,24 @@ const walletService = {
   },
 
   async init() {
+    // Auto-start reconciliation so "MetaMask said failed" still resolves later.
+    try {
+      await ensureProvider()
+      startTxReconciler()
+    } catch {
+      // ignore
+    }
+
+    // On mobile, when app resumes, do an extra reconcile pass
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => reconciler?.reconcileOnce?.().catch(() => {}))
+      window.addEventListener('pageshow', () => reconciler?.reconcileOnce?.().catch(() => {}))
+    }
     return
   },
+
+  startTxReconciler,
+  stopTxReconciler,
 
   // Try to re-hydrate a previous session (called by WalletContext on mount)
   async restoreSession() {
@@ -197,6 +259,7 @@ const walletService = {
 
       chainId = await eip1193.request?.({ method: 'eth_chainId' }).catch(() => null)
       await ensureEthers()
+      startTxReconciler()
 
       return {
         accounts,
@@ -226,6 +289,7 @@ const walletService = {
         chainId = await eip1193.request?.({ method: 'eth_chainId' })
 
         await ensureEthers()
+        startTxReconciler()
 
         return {
           success: true,
@@ -239,7 +303,6 @@ const walletService = {
       // Otherwise use AppKit modal
       await appKit.open?.()
 
-      // wait for AppKit provider
       const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
         const start = Date.now()
         while (true) {
@@ -253,7 +316,6 @@ const walletService = {
       eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
       attachListeners()
 
-      // Request accounts
       const reqAccs = await waitFor(
         () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),
         (arr) => Array.isArray(arr) && arr.length > 0
@@ -262,9 +324,9 @@ const walletService = {
       chainId = await eip1193.request({ method: 'eth_chainId' })
 
       await ensureEthers()
+      startTxReconciler()
 
       console.debug('[walletService] connected', { accounts, chainId })
-
       return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
@@ -276,6 +338,7 @@ const walletService = {
     try {
       await appKit.disconnect?.()
     } finally {
+      stopTxReconciler()
       handleDisconnect()
     }
     return { success: true }
@@ -287,23 +350,81 @@ const walletService = {
     return await ensureAccounts()
   },
 
+  /**
+   * Legacy sendTransaction (kept) — returns only txHash.
+   * Prefer sendTransactionWithReceipt for robust behavior.
+   */
   async sendTransaction(tx) {
     try {
       if (!eip1193) await ensureProvider()
 
-      // Ensure we are connected (accounts exist)
       const ok = await this.isConnected()
       if (!ok) {
         const res = await this.connect()
         if (!res.success) return { success: false, error: res.error }
       }
 
-      // Ensure signer exists even if the UI already shows address
       await ensureEthers()
       if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
 
       const resp = await signer.sendTransaction(tx)
       return { success: true, txHash: resp.hash }
+    } catch (err) {
+      const code = err?.code
+      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
+      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
+      return { success: false, error: code ? `${msg} (code ${code})` : msg }
+    }
+  },
+
+  /**
+   * Reliable send: stores tx hash instantly + waits for receipt (best-effort)
+   * and reconciliation will finalize if UI disconnects.
+   *
+   * Returns:
+   * { success, txHash, receipt, status, txId }
+   */
+  async sendTransactionWithReceipt(tx, meta = {}) {
+    try {
+      if (!eip1193) await ensureProvider()
+
+      const ok = await this.isConnected()
+      if (!ok) {
+        const res = await this.connect()
+        if (!res.success) return { success: false, error: res.error }
+      }
+
+      const from = await this.getAddress()
+      const chainHex = await this.getChainId()
+      const chainDec = hexToDec(chainHex)
+
+      const bp = await this.getBrowserProvider()
+      if (!bp) return { success: false, error: 'Provider unavailable' }
+
+      // important: do NOT require signer pre-hydrated; sendTransactionReliable handles it
+      startTxReconciler()
+
+      const out = await sendTransactionReliable({
+        provider: bp,
+        chainId: chainDec ?? 1,
+        from,
+        kind: meta.kind || 'unknown',
+        request: tx,
+        tokenAddress: meta.tokenAddress,
+        spender: meta.spender,
+        amount: meta.amount,
+        waitConfirms: meta.waitConfirms ?? 1,
+        waitTimeoutMs: meta.waitTimeoutMs ?? 180000
+      })
+
+      return {
+        success: !!out.success,
+        txHash: out.txHash,
+        receipt: out.receipt,
+        status: out.status,
+        txId: out.id
+      }
     } catch (err) {
       const code = err?.code
       const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
@@ -369,6 +490,14 @@ const walletService = {
     }
   },
 
+  // ---- tx store helpers for UI ----
+  listTransactions(filters) {
+    return txStore.list(filters)
+  },
+  getTransactionById(id) {
+    return txStore.getById(id)
+  },
+
   // subscriptions
   onAccountsChanged(cb) {
     onAccChanged = cb
@@ -387,6 +516,7 @@ const walletService = {
       eip1193.removeListener?.('chainChanged', handleChain)
       eip1193.removeListener?.('disconnect', handleDisconnect)
     }
+    stopTxReconciler()
     eip1193 = null
     browserProvider = null
     signer = null
