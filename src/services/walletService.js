@@ -107,18 +107,6 @@ function handleDisconnect(err) {
 }
 
 // Helpful error formatting (MetaMask / WalletConnect)
-function normalizeTxError(err) {
-  const code = err?.code
-  const msg =
-    err?.shortMessage ||
-    err?.reason ||
-    err?.message ||
-    'Transaction failed'
-
-  if (code === 4001) return 'User rejected the request'
-  if (code === -32002) return 'Request already pending in wallet'
-  return msg
-}
 
 function normalizeTxError(err) {
   const code = err?.code
