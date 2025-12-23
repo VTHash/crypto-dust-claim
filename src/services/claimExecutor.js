@@ -12,7 +12,10 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
 
   const connected = await walletService.isConnected?.()
-  if (!connected) throw new Error('Wallet not connected')
+  if (!connected) {
+    const res = await walletService.connect?.()
+    if (!res?.success) throw new Error(res?.error || 'Wallet connection failed')
+  }
 
   const currentChainHex = await walletService.getChainId?.()
   const currentChainId =
