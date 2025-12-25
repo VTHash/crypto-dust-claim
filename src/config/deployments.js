@@ -25,7 +25,7 @@ export const ZEROX_HOST_BY_CHAIN = {
   81457: 'https://blast.api.0x.org',
   34443: 'https://mode.api.0x.org',
   8453: 'https://base.api.0x.org',
-  57073: 'https://ink.api.0x.org', 
+  57073: 'https://ink.api.0x.org'
 }
 
 //  DustClaimV3 contract + wrapped native per chain.
@@ -115,8 +115,13 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
     dustClaimV3: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
     weth: '0x4200000000000000000000000000000000000006',
   },
+  42170: {
+    dustClaimV3: '0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d',
+    weth: '0x722E8BdD2ce80A4422E880164f2079488e115365'
+  }
 }
 
+// 0x ABI (common for all chains)
 export { DUSTCLAIM_V3_ABI }
 
 // One unified deployments object (what the app should read)
