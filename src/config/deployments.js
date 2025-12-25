@@ -44,7 +44,7 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
     weth: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
   },
   100: {
-    dustClaimV3: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
+    dustClaimV3: '0x7692fDf5bbcA49ACE485D31B760e8A082d193D3d',
     weth: '0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d',
   },
   130: {
