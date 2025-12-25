@@ -41,7 +41,7 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
   },
   56: {
     dustClaimV3: '0xfD5a5Fcd2e93DE5D747776BFDAd7F1A612C21941',
-    wbnb: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+    weth: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
   },
   100: {
     dustClaimV3: '0xe7A0350d7D99441A0f67B4E4e7f8391f09c574dc',
@@ -53,7 +53,7 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
   },
   137: {
     dustClaimV3: '0x3D3Aa75dECBf2Baf919aec818514c02528167Bec',
-    wpol: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+    weth: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
   },
   250: {
     dustClaimV3: '0xe6292481711419e6035b8Ac263Fd91AF48142966',
