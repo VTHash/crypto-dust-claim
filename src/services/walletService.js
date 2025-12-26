@@ -20,17 +20,56 @@ function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
-// Detect MetaMask Mobile / in-app browser contexts (used for slight behavior tweaks)
 function isMetaMaskMobileUA() {
   if (typeof window === 'undefined') return false
   const ua = window.navigator?.userAgent || ''
   return /MetaMaskMobile/i.test(ua)
 }
 
-function isInAppBrowser() {
-  if (typeof window === 'undefined') return false
-  const ua = window.navigator?.userAgent || ''
-  return /MetaMaskMobile|Trust|CoinbaseWallet|Brave/i.test(ua)
+function hexToDec(hex) {
+  if (!hex) return null
+  try {
+    return Number.parseInt(hex, 16)
+  } catch {
+    return null
+  }
+}
+
+function toHexQuantity(v) {
+  if (v === null || v === undefined) return undefined
+  try {
+    if (typeof v === 'string') {
+      // already hex?
+      if (v.startsWith('0x')) return v
+      // numeric string -> BigInt
+      return '0x' + BigInt(v).toString(16)
+    }
+    if (typeof v === 'number') return '0x' + BigInt(v).toString(16)
+    if (typeof v === 'bigint') return '0x' + v.toString(16)
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeEip1193Tx(tx) {
+  // MetaMask expects hex quantities for numeric fields
+  // tx must include: from, to, data?, value?, gas?, gasPrice? OR maxFeePerGas/maxPriorityFeePerGas
+  const out = {
+    from: tx.from,
+    to: tx.to,
+    data: tx.data ?? undefined,
+    value: tx.value !== undefined ? toHexQuantity(tx.value) : undefined,
+    gas: tx.gas !== undefined ? toHexQuantity(tx.gas) : undefined,
+    gasPrice: tx.gasPrice !== undefined ? toHexQuantity(tx.gasPrice) : undefined,
+    maxFeePerGas: tx.maxFeePerGas !== undefined ? toHexQuantity(tx.maxFeePerGas) : undefined,
+    maxPriorityFeePerGas:
+      tx.maxPriorityFeePerGas !== undefined ? toHexQuantity(tx.maxPriorityFeePerGas) : undefined
+  }
+
+  // Remove undefined keys (MetaMask can be picky)
+  Object.keys(out).forEach((k) => out[k] === undefined && delete out[k])
+  return out
 }
 
 // ---- single AppKit instance (do not create anywhere else) ----
@@ -147,15 +186,6 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
-function hexToDec(hex) {
-  if (!hex) return null
-  try {
-    return Number.parseInt(hex, 16)
-  } catch {
-    return null
-  }
-}
-
 // ---- reconciler wiring ----
 async function providerFactory() {
   if (!eip1193) await ensureProvider()
@@ -179,14 +209,86 @@ function stopTxReconciler() {
   reconciler = null
 }
 
-// Gas buffer helper (BigInt-safe)
-function applyGasBump(gas, bumpPct = 30) {
-  try {
-    const pct = BigInt(Math.max(0, Number(bumpPct) || 0))
-    return (gas * (100n + pct)) / 100n
-  } catch {
-    return gas
+// ---- MetaMask Mobile safe send path ----
+async function sendViaMetaMaskEip1193(txRequest, meta = {}) {
+  if (!eip1193) await ensureProvider()
+  if (!eip1193) throw new Error('Provider unavailable')
+
+  const injected = typeof window !== 'undefined' ? window.ethereum : null
+  const useInjected = isInjectedMetaMask(eip1193) || isInjectedMetaMask(injected)
+
+  if (!useInjected) throw new Error('Not an injected MetaMask provider')
+
+  // Hard re-hydrate permissions on mobile to avoid “silent no-op”
+  // If the wallet shows a pending request, MetaMask returns -32002.
+  await eip1193.request({ method: 'eth_requestAccounts' })
+
+  const bp = await walletService.getBrowserProvider()
+  if (!bp) throw new Error('BrowserProvider unavailable')
+
+  const from = txRequest.from || (await walletService.getAddress())
+  if (!from) throw new Error('Missing from address')
+
+  // Build base tx
+  const base = {
+    from,
+    to: txRequest.to,
+    data: txRequest.data ?? '0x',
+    value: txRequest.value ?? 0n
   }
+
+  // Chain safety: ensure the wallet is on the chain we think it is.
+  const chainHex = await walletService.getChainId()
+  const chainDec = hexToDec(chainHex)
+  if (!chainDec) throw new Error('Unable to read chainId from wallet')
+
+  // Gas estimation (critical on mobile)
+  let gasLimit = txRequest.gasLimit ?? txRequest.gas ?? null
+  try {
+    if (!gasLimit) {
+      const est = await bp.estimateGas(base)
+      // +30% buffer
+      gasLimit = (BigInt(est) * 130n) / 100n
+    }
+  } catch (e) {
+    // If estimation fails, still try with a conservative ceiling if user supplied none
+    if (!gasLimit) gasLimit = 1_200_000n
+  }
+
+  // Fees (prefer EIP-1559 if available; otherwise gasPrice)
+  const feeData = await bp.getFeeData().catch(() => null)
+  const maxFeePerGas =
+    txRequest.maxFeePerGas ?? feeData?.maxFeePerGas ?? null
+  const maxPriorityFeePerGas =
+    txRequest.maxPriorityFeePerGas ?? feeData?.maxPriorityFeePerGas ?? null
+  const gasPrice = txRequest.gasPrice ?? feeData?.gasPrice ?? null
+
+  const mmTx = normalizeEip1193Tx({
+    ...base,
+    gas: gasLimit,
+    // choose fee model
+    ...(maxFeePerGas && maxPriorityFeePerGas
+      ? { maxFeePerGas, maxPriorityFeePerGas }
+      : gasPrice
+        ? { gasPrice }
+        : {})
+  })
+
+  // Submit — MetaMask returns tx hash if broadcasted
+  const txHash = await eip1193.request({
+    method: 'eth_sendTransaction',
+    params: [mmTx]
+  })
+
+  if (!txHash || typeof txHash !== 'string') {
+    throw new Error('No tx hash returned by MetaMask (not broadcast)')
+  }
+
+  // Wait for receipt (best-effort)
+  const receipt = await bp.waitForTransaction(txHash, meta.waitConfirms ?? 1, meta.waitTimeoutMs ?? 180000)
+  const status = receipt?.status === 1 ? 'success' : receipt?.status === 0 ? 'reverted' : 'unknown'
+
+  return { txHash, receipt, status }
 }
 
 // ---- API ----
@@ -252,7 +354,6 @@ const walletService = {
   },
 
   async init() {
-    // Auto-start reconciliation so "MetaMask said failed" still resolves later.
     try {
       await ensureProvider()
       startTxReconciler()
@@ -260,14 +361,9 @@ const walletService = {
       // ignore
     }
 
-    // On mobile, when app resumes, do an extra reconcile pass
     if (typeof window !== 'undefined') {
-      window.addEventListener('focus', () =>
-        reconciler?.reconcileOnce?.().catch(() => {})
-      )
-      window.addEventListener('pageshow', () =>
-        reconciler?.reconcileOnce?.().catch(() => {})
-      )
+      window.addEventListener('focus', () => reconciler?.reconcileOnce?.().catch(() => {}))
+      window.addEventListener('pageshow', () => reconciler?.reconcileOnce?.().catch(() => {}))
     }
     return
   },
@@ -275,7 +371,6 @@ const walletService = {
   startTxReconciler,
   stopTxReconciler,
 
-  // Try to re-hydrate a previous session (called by WalletContext on mount)
   async restoreSession() {
     try {
       await ensureProvider()
@@ -284,9 +379,7 @@ const walletService = {
       const accs = await ensureAccounts()
       if (!accs?.length) return null
 
-      chainId = await eip1193
-        .request?.({ method: 'eth_chainId' })
-        .catch(() => null)
+      chainId = await eip1193.request?.({ method: 'eth_chainId' }).catch(() => null)
       await ensureEthers()
       startTxReconciler()
 
@@ -308,14 +401,11 @@ const walletService = {
     try {
       const injected = typeof window !== 'undefined' ? window.ethereum : null
 
-      // If MetaMask injected, request permissions directly (most reliable inside MetaMask)
       if (isInjectedMetaMask(injected)) {
         eip1193 = injected
         attachListeners()
 
-        const reqAccs = await eip1193.request?.({
-          method: 'eth_requestAccounts'
-        })
+        const reqAccs = await eip1193.request?.({ method: 'eth_requestAccounts' })
         accounts = Array.isArray(reqAccs) ? reqAccs : []
         chainId = await eip1193.request?.({ method: 'eth_chainId' })
 
@@ -331,7 +421,6 @@ const walletService = {
         }
       }
 
-      // Otherwise use AppKit modal
       await appKit.open?.()
 
       const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
@@ -339,8 +428,7 @@ const walletService = {
         while (true) {
           const val = await fn().catch(() => null)
           if (predicate(val)) return val
-          if (Date.now() - start > timeoutMs)
-            throw new Error('Wallet connect timed out')
+          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
           await new Promise((r) => setTimeout(r, intervalMs))
         }
       }
@@ -359,13 +447,7 @@ const walletService = {
       startTxReconciler()
 
       console.debug('[walletService] connected', { accounts, chainId })
-      return {
-        success: true,
-        accounts,
-        chainId,
-        address: accounts[0] ?? null,
-        signer
-      }
+      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
       return { success: false, error: err?.message || 'Connect failed' }
@@ -382,16 +464,11 @@ const walletService = {
     return { success: true }
   },
 
-  // actions
   async getAccounts() {
     if (!eip1193) await ensureProvider()
     return await ensureAccounts()
   },
 
-  /**
-   * Legacy sendTransaction (kept) — returns only txHash.
-   * Prefer sendTransactionWithReceipt for robust behavior.
-   */
   async sendTransaction(tx) {
     try {
       if (!eip1193) await ensureProvider()
@@ -403,38 +480,23 @@ const walletService = {
       }
 
       await ensureEthers()
-      if (!signer)
-        return {
-          success: false,
-          error: 'Signer unavailable (provider not hydrated)'
-        }
+      if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
 
       const resp = await signer.sendTransaction(tx)
       return { success: true, txHash: resp.hash }
     } catch (err) {
       const code = err?.code
-      const msg =
-        err?.shortMessage ||
-        err?.reason ||
-        err?.message ||
-        'Transaction failed'
-      if (code === 4001)
-        return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002)
-        return {
-          success: false,
-          error: 'Request already pending in wallet (-32002)'
-        }
+      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
+      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
       return { success: false, error: code ? `${msg} (code ${code})` : msg }
     }
   },
 
   /**
-   * Reliable send: stores tx hash instantly + waits for receipt (best-effort)
-   * and reconciliation will finalize if UI disconnects.
-   *
-   * Returns:
-   * { success, txHash, receipt, status, txId }
+   * Reliable send:
+   * - On MetaMask injected (esp. mobile): use eth_sendTransaction to guarantee txHash.
+   * - Otherwise: use existing sendTransactionReliable (WalletConnect path).
    */
   async sendTransactionWithReceipt(tx, meta = {}) {
     try {
@@ -446,15 +508,35 @@ const walletService = {
         if (!res.success) return { success: false, error: res.error }
       }
 
+      startTxReconciler()
+
+      // If we are in MetaMask injected context, prefer EIP-1193 send.
+      // This is the core fix for “mobile sends but no hash”.
+      const injected = typeof window !== 'undefined' ? window.ethereum : null
+      const useMmPath = isInjectedMetaMask(eip1193) || isInjectedMetaMask(injected) || isMetaMaskMobileUA()
+
+      if (useMmPath) {
+        const out = await sendViaMetaMaskEip1193(tx, {
+          waitConfirms: meta.waitConfirms ?? 1,
+          waitTimeoutMs: meta.waitTimeoutMs ?? 180000
+        })
+
+        return {
+          success: true,
+          txHash: out.txHash,
+          receipt: out.receipt,
+          status: out.status,
+          txId: null
+        }
+      }
+
+      // WalletConnect/AppKit path (keeps your existing tx store & reconciling)
       const from = await this.getAddress()
       const chainHex = await this.getChainId()
       const chainDec = hexToDec(chainHex)
 
       const bp = await this.getBrowserProvider()
       if (!bp) return { success: false, error: 'Provider unavailable' }
-
-      // important: do NOT require signer pre-hydrated; sendTransactionReliable handles it
-      startTxReconciler()
 
       const out = await sendTransactionReliable({
         provider: bp,
@@ -478,138 +560,9 @@ const walletService = {
       }
     } catch (err) {
       const code = err?.code
-      const msg =
-        err?.shortMessage ||
-        err?.reason ||
-        err?.message ||
-        'Transaction failed'
-      if (code === 4001)
-        return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002)
-        return {
-          success: false,
-          error: 'Request already pending in wallet (-32002)'
-        }
-      return { success: false, error: code ? `${msg} (code ${code})` : msg }
-    }
-  },
-
-  /**
-   * NEW: Reliable send for a txRequest that was built via populateTransaction.
-   * This is the safest path for MetaMask Mobile because we avoid any ambiguity
-   * around contract wrappers returning a tx response without broadcast.
-   */
-  async sendPopulatedTransactionWithReceipt(txRequest, meta = {}) {
-    if (!txRequest || typeof txRequest !== 'object') {
-      return { success: false, error: 'Invalid txRequest' }
-    }
-
-    // Ensure from is set (MetaMask Mobile can be picky)
-    const from = await this.getAddress()
-    const req = { ...txRequest, from: txRequest.from || from }
-
-    // If no gasLimit was provided, attempt estimate with buffer.
-    // This uses BrowserProvider (provider-based estimate) not signer-based estimate.
-    if (!req.gasLimit) {
-      try {
-        const bp = await this.getBrowserProvider()
-        if (bp) {
-          const est = await bp.estimateGas(req)
-          req.gasLimit = applyGasBump(est, meta.gasBumpPct ?? 30)
-        }
-      } catch {
-        // If estimate fails, do not block. Caller may already set gasLimit.
-      }
-    } else {
-      try {
-        req.gasLimit = applyGasBump(BigInt(req.gasLimit), meta.gasBumpPct ?? 30)
-      } catch {
-        // ignore
-      }
-    }
-
-    return await this.sendTransactionWithReceipt(req, meta)
-  },
-
-  /**
-   * NEW: One-stop helper for contract calls with MetaMask Mobile reliability.
-   *
-   * - Builds tx via populateTransaction
-   * - Best-effort gas estimate + buffer
-   * - Broadcasts via sendTransactionWithReceipt (reconciler-safe)
-   *
-   * Usage from claimExecutor:
-   * walletService.sendContractCallWithReceipt(
-   * contract,
-   * 'claimDustUsingAggregator',
-   * argsArray,
-   * overrides,
-   * { kind: 'claimDustUsingAggregator', waitTimeoutMs: 240000 }
-   * )
-   */
-  async sendContractCallWithReceipt(
-    contract,
-    methodName,
-    args = [],
-    overrides = {},
-    meta = {}
-  ) {
-    try {
-      if (!contract || !methodName) {
-        return { success: false, error: 'Missing contract or methodName' }
-      }
-
-      // Ensure we are connected and on the correct provider
-      const ok = await this.isConnected()
-      if (!ok) {
-        const res = await this.connect()
-        if (!res.success) return { success: false, error: res.error }
-      }
-
-      // Populate transaction
-      const pop = contract?.[methodName]?.populateTransaction
-      if (typeof pop !== 'function') {
-        return {
-          success: false,
-          error: `Method not found or not populateTransaction-capable: ${methodName}`
-        }
-      }
-
-      const txReq = await pop(...(Array.isArray(args) ? args : []), overrides)
-
-      // Force to address present (some providers require it)
-      if (!txReq.to && contract?.target) txReq.to = contract.target
-
-      // MetaMask Mobile: ensure chain/provider is hydrated before estimate/send
-      // (Light-touch; does not change your architecture)
-      if (isMetaMaskMobileUA() || isInAppBrowser()) {
-        try {
-          const bp = await this.getBrowserProvider()
-          await bp?.getNetwork?.()
-        } catch {
-          // ignore
-        }
-      }
-
-      // Send via reliable path
-      return await this.sendPopulatedTransactionWithReceipt(txReq, {
-        ...meta,
-        kind: meta.kind || methodName
-      })
-    } catch (err) {
-      const code = err?.code
-      const msg =
-        err?.shortMessage ||
-        err?.reason ||
-        err?.message ||
-        'Contract call failed'
-      if (code === 4001)
-        return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002)
-        return {
-          success: false,
-          error: 'Request already pending in wallet (-32002)'
-        }
+      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
+      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
       return { success: false, error: code ? `${msg} (code ${code})` : msg }
     }
   },
@@ -624,11 +577,7 @@ const walletService = {
       }
 
       await ensureEthers()
-      if (!signer)
-        return {
-          success: false,
-          error: 'Signer unavailable (provider not hydrated)'
-        }
+      if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
 
       const signature = await signer.signMessage(message)
       return { success: true, signature }
@@ -659,11 +608,7 @@ const walletService = {
               {
                 chainId: hex,
                 chainName: chain.name,
-                nativeCurrency: {
-                  name: chain.symbol,
-                  symbol: chain.symbol,
-                  decimals: 18
-                },
+                nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
                 rpcUrls: [chain.rpcUrl],
                 blockExplorerUrls: [chain.explorer]
               }
@@ -671,10 +616,7 @@ const walletService = {
           })
           return { success: true, added: true }
         } catch (addErr) {
-          return {
-            success: false,
-            error: addErr?.message || 'Failed to add chain'
-          }
+          return { success: false, error: addErr?.message || 'Failed to add chain' }
         }
       }
       return { success: false, error: err?.message || 'Failed to switch chain' }
