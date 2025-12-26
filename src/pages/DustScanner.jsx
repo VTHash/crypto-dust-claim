@@ -12,7 +12,7 @@ import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
 import Shimmer from '../components/Shimmer.jsx'
 import './DustScanner.css'
-import TxStepsPanel from '../components/TxStepsPanel.jsx'
+
 
 export default function DustScanner() {
   const { address } = useWallet()
@@ -358,7 +358,7 @@ export default function DustScanner() {
 
           {/* ✅ Superbridge-like Steps UI (shows live tx progress from txStore) */}
           <div style={{ marginTop: 16 }}>
-            <TxStepsPanel />
+            
           </div>
         </div>
       </div>
