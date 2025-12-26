@@ -7,7 +7,10 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
-export async function executeChainPlan(chainPlan, fromAddress) {
+// ------------------------------
+// NEW: Flow-aware version (returns { flowId, receipts })
+// ------------------------------
+export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
   const receipts = []
   const flowId = newFlowId()
 
@@ -19,9 +22,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
   const currentChainHex = await walletService.getChainId?.()
   const currentChainId =
-    typeof currentChainHex === 'string'
-      ? parseInt(currentChainHex, 16)
-      : Number(currentChainHex || 0)
+    typeof currentChainHex === 'string' ? parseInt(currentChainHex, 16) : Number(currentChainHex || 0)
 
   if (Number(chainPlan.chainId) !== Number(currentChainId)) {
     const sw = await walletService.switchChain(Number(chainPlan.chainId))
@@ -211,9 +212,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         args: [tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
       })
 
-      // Gas strategy:
-      // - baseline from quote if present
-      // - plus contract-level estimateGas buffer (Mobile-safe)
       let gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
 
       try {
@@ -283,4 +281,13 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   }
 
   return { flowId, receipts }
+}
+
+// ------------------------------
+// Backwards-compatible version (returns receipts[])
+// This prevents UI crashes if your UI expects an array and does .map()
+// ------------------------------
+export async function executeChainPlan(chainPlan, fromAddress) {
+  const { receipts } = await executeChainPlanWithFlow(chainPlan, fromAddress)
+  return receipts
 }

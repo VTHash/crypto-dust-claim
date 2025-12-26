@@ -50,57 +50,66 @@ export default function DustScanner() {
   }, [results.length, setResults])
 
   const handleScan = async () => {
-    if (!address) return
-    setScanning(true)
+  if (!address) return
+  setScanning(true)
+
+  try {
+    const scan = await web3Service.scanChains(selectedIds, address, settings)
+    console.log('scanChains returned:', scan, 'isArray?', Array.isArray(scan))
+    // ✅ Normalize output to an array no matter what scanChains returns
+    const dustResults = Array.isArray(scan)
+      ? scan
+      : Array.isArray(scan?.dustResults)
+        ? scan.dustResults
+        : Array.isArray(scan?.results)
+          ? scan.results
+          : []
+
+    setResults(dustResults)
+
+    const total = dustResults.reduce((s, x) => s + (Number(x.totalValue) || 0), 0)
+
+    // cache
     try {
-      // Pass settings as optional 3rd arg (web3Service can ignore it or use it)
-      const scan = await web3Service.scanChains(selectedIds, address, settings)
-      setResults(scan)
-
-      const total = scan.reduce((s, x) => s + (x.totalValue || 0), 0)
-      // BigInt-safe JSON.stringify for lastScan cache
-      try {
-        sessionStorage.setItem(
-          'dustclaim:lastScan',
-          JSON.stringify(
-            { dustResults: scan, total },
-            (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
-          )
+      sessionStorage.setItem(
+        'dustclaim:lastScan',
+        JSON.stringify(
+          { dustResults, total },
+          (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
         )
-      } catch (err) {
-        console.warn('Failed to store lastScan in sessionStorage:', err)
-      }
-
-      // --- NEW: report scan statistics to Netlify (global stats / top chains) ---
-      try {
-        // Extract actual scanned chain IDs from the real scan results
-        const usedChainIdsArray = Array.from(
-          new Set(
-            (scan || [])
-              .map((chain) => Number(chain.chainId))
-              .filter((id) => Number.isFinite(id) && id > 0)
-          )
-        )
-
-        console.log('stats-scan-supabase chains payload:', usedChainIdsArray)
-
-        if (usedChainIdsArray.length > 0) {
-          await fetch('/.netlify/functions/stats-scan-supabase', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chains: usedChainIdsArray
-            })
-          })
-        }
-      } catch (err) {
-        console.error('stats-scan client-supabase error:', err)
-      }
-      // --- END NEW PART ---
-    } finally {
-      setScanning(false)
+      )
+    } catch (err) {
+      console.warn('Failed to store lastScan in sessionStorage:', err)
     }
+
+    // stats
+    try {
+      const usedChainIdsArray = Array.from(
+        new Set(
+          dustResults
+            .map((chain) => Number(chain.chainId))
+            .filter((id) => Number.isFinite(id) && id > 0)
+        )
+      )
+
+      if (usedChainIdsArray.length > 0) {
+        await fetch('/.netlify/functions/stats-scan-supabase', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chains: usedChainIdsArray })
+        })
+      }
+    } catch (err) {
+      console.error('stats-scan client-supabase error:', err)
+    }
+  } catch (err) {
+    // ✅ This is the missing piece. Without it, one throw = blank UI.
+    console.error('[DustScanner] Scan failed:', err)
+    // optional: you can also surface it in the UI via toast/state
+  } finally {
+    setScanning(false)
   }
+}
 
   /**
    * Build the list of items to act on based on settings:
