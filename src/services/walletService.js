@@ -20,58 +20,6 @@ function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
-function isMetaMaskMobileUA() {
-  if (typeof window === 'undefined') return false
-  const ua = window.navigator?.userAgent || ''
-  return /MetaMaskMobile/i.test(ua)
-}
-
-function hexToDec(hex) {
-  if (!hex) return null
-  try {
-    return Number.parseInt(hex, 16)
-  } catch {
-    return null
-  }
-}
-
-function toHexQuantity(v) {
-  if (v === null || v === undefined) return undefined
-  try {
-    if (typeof v === 'string') {
-      // already hex?
-      if (v.startsWith('0x')) return v
-      // numeric string -> BigInt
-      return '0x' + BigInt(v).toString(16)
-    }
-    if (typeof v === 'number') return '0x' + BigInt(v).toString(16)
-    if (typeof v === 'bigint') return '0x' + v.toString(16)
-    return undefined
-  } catch {
-    return undefined
-  }
-}
-
-function normalizeEip1193Tx(tx) {
-  // MetaMask expects hex quantities for numeric fields
-  // tx must include: from, to, data?, value?, gas?, gasPrice? OR maxFeePerGas/maxPriorityFeePerGas
-  const out = {
-    from: tx.from,
-    to: tx.to,
-    data: tx.data ?? undefined,
-    value: tx.value !== undefined ? toHexQuantity(tx.value) : undefined,
-    gas: tx.gas !== undefined ? toHexQuantity(tx.gas) : undefined,
-    gasPrice: tx.gasPrice !== undefined ? toHexQuantity(tx.gasPrice) : undefined,
-    maxFeePerGas: tx.maxFeePerGas !== undefined ? toHexQuantity(tx.maxFeePerGas) : undefined,
-    maxPriorityFeePerGas:
-      tx.maxPriorityFeePerGas !== undefined ? toHexQuantity(tx.maxPriorityFeePerGas) : undefined
-  }
-
-  // Remove undefined keys (MetaMask can be picky)
-  Object.keys(out).forEach((k) => out[k] === undefined && delete out[k])
-  return out
-}
-
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
@@ -82,21 +30,18 @@ const appKit = createAppKit({
 })
 
 // ---- internal state ----
-let eip1193 = null // EIP-1193 provider
-let browserProvider = null // ethers.BrowserProvider
-let signer = null // ethers.Signer
-let accounts = [] // string[]
-let chainId = null // hex string like "0x1"
+let eip1193 = null
+let browserProvider = null
+let signer = null
+let accounts = []
+let chainId = null
 
-// reconciler
 let reconciler = null
 
-// event listeners wired by WalletContext
 let onAccChanged = null
 let onChainChanged = null
 let onDisconnected = null
 
-// ---- event handlers ----
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
   signer = null
@@ -126,9 +71,7 @@ function attachListeners() {
   eip1193.on?.('disconnect', handleDisconnect)
 }
 
-// ---- internal helpers ----
 async function ensureProvider() {
-  // Prefer injected provider in MetaMask in-app browser
   const injected = typeof window !== 'undefined' ? window.ethereum : null
   if (isInjectedMetaMask(injected)) {
     eip1193 = injected
@@ -136,7 +79,6 @@ async function ensureProvider() {
     return eip1193
   }
 
-  // Otherwise try AppKit provider (WalletConnect, etc.)
   const maybeProvider = await appKit.getProvider?.()
   if (maybeProvider) {
     eip1193 = maybeProvider
@@ -144,7 +86,6 @@ async function ensureProvider() {
     return eip1193
   }
 
-  // Fallback to any injected provider
   if (injected) {
     eip1193 = injected
     attachListeners()
@@ -170,11 +111,8 @@ async function ensureAccounts() {
 
 async function ensureEthers() {
   if (!eip1193) return { browserProvider: null, signer: null }
-
   if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
-
   if (!accounts?.length) await ensureAccounts()
-
   if (!signer) {
     try {
       signer = await browserProvider.getSigner()
@@ -182,8 +120,33 @@ async function ensureEthers() {
       signer = null
     }
   }
-
   return { browserProvider, signer }
+}
+
+function hexToDec(hex) {
+  if (!hex) return null
+  try {
+    return Number.parseInt(hex, 16)
+  } catch {
+    return null
+  }
+}
+
+// ---- NEW: MetaMask Mobile hydration before sending ----
+async function ensureHydratedForSend() {
+  if (!eip1193) await ensureProvider()
+  if (!eip1193) return false
+
+  // Explicit requestAccounts often fixes “no prompt / no broadcast” on mobile
+  try {
+    await eip1193.request?.({ method: 'eth_requestAccounts' })
+  } catch {
+    // ignore (WalletConnect providers may reject here)
+  }
+
+  await ensureAccounts()
+  await ensureEthers()
+  return true
 }
 
 // ---- reconciler wiring ----
@@ -209,98 +172,14 @@ function stopTxReconciler() {
   reconciler = null
 }
 
-// ---- MetaMask Mobile safe send path ----
-async function sendViaMetaMaskEip1193(txRequest, meta = {}) {
-  if (!eip1193) await ensureProvider()
-  if (!eip1193) throw new Error('Provider unavailable')
-
-  const injected = typeof window !== 'undefined' ? window.ethereum : null
-  const useInjected = isInjectedMetaMask(eip1193) || isInjectedMetaMask(injected)
-
-  if (!useInjected) throw new Error('Not an injected MetaMask provider')
-
-  // Hard re-hydrate permissions on mobile to avoid “silent no-op”
-  // If the wallet shows a pending request, MetaMask returns -32002.
-  await eip1193.request({ method: 'eth_requestAccounts' })
-
-  const bp = await walletService.getBrowserProvider()
-  if (!bp) throw new Error('BrowserProvider unavailable')
-
-  const from = txRequest.from || (await walletService.getAddress())
-  if (!from) throw new Error('Missing from address')
-
-  // Build base tx
-  const base = {
-    from,
-    to: txRequest.to,
-    data: txRequest.data ?? '0x',
-    value: txRequest.value ?? 0n
-  }
-
-  // Chain safety: ensure the wallet is on the chain we think it is.
-  const chainHex = await walletService.getChainId()
-  const chainDec = hexToDec(chainHex)
-  if (!chainDec) throw new Error('Unable to read chainId from wallet')
-
-  // Gas estimation (critical on mobile)
-  let gasLimit = txRequest.gasLimit ?? txRequest.gas ?? null
-  try {
-    if (!gasLimit) {
-      const est = await bp.estimateGas(base)
-      // +30% buffer
-      gasLimit = (BigInt(est) * 130n) / 100n
-    }
-  } catch (e) {
-    // If estimation fails, still try with a conservative ceiling if user supplied none
-    if (!gasLimit) gasLimit = 1_200_000n
-  }
-
-  // Fees (prefer EIP-1559 if available; otherwise gasPrice)
-  const feeData = await bp.getFeeData().catch(() => null)
-  const maxFeePerGas =
-    txRequest.maxFeePerGas ?? feeData?.maxFeePerGas ?? null
-  const maxPriorityFeePerGas =
-    txRequest.maxPriorityFeePerGas ?? feeData?.maxPriorityFeePerGas ?? null
-  const gasPrice = txRequest.gasPrice ?? feeData?.gasPrice ?? null
-
-  const mmTx = normalizeEip1193Tx({
-    ...base,
-    gas: gasLimit,
-    // choose fee model
-    ...(maxFeePerGas && maxPriorityFeePerGas
-      ? { maxFeePerGas, maxPriorityFeePerGas }
-      : gasPrice
-        ? { gasPrice }
-        : {})
-  })
-
-  // Submit — MetaMask returns tx hash if broadcasted
-  const txHash = await eip1193.request({
-    method: 'eth_sendTransaction',
-    params: [mmTx]
-  })
-
-  if (!txHash || typeof txHash !== 'string') {
-    throw new Error('No tx hash returned by MetaMask (not broadcast)')
-  }
-
-  // Wait for receipt (best-effort)
-  const receipt = await bp.waitForTransaction(txHash, meta.waitConfirms ?? 1, meta.waitTimeoutMs ?? 180000)
-  const status = receipt?.status === 1 ? 'success' : receipt?.status === 0 ? 'reverted' : 'unknown'
-
-  return { txHash, receipt, status }
-}
-
 // ---- API ----
 const walletService = {
-  // getters / helpers
   getAppKit: () => appKit,
 
   async getProvider() {
     return eip1193 || (await ensureProvider())
   },
 
-  // PUBLIC provider access (no signer requirement)
   async getBrowserProvider() {
     if (!eip1193) await ensureProvider()
     if (!eip1193) return null
@@ -339,7 +218,6 @@ const walletService = {
     return hexToDec(hex)
   },
 
-  // IMPORTANT: connected should not depend on signer existing
   async isConnected() {
     if (!eip1193) await ensureProvider()
     const accs = await ensureAccounts()
@@ -396,7 +274,6 @@ const walletService = {
     }
   },
 
-  // Connect (MetaMask injected preferred; AppKit modal as fallback)
   async connect() {
     try {
       const injected = typeof window !== 'undefined' ? window.ethereum : null
@@ -479,6 +356,7 @@ const walletService = {
         if (!res.success) return { success: false, error: res.error }
       }
 
+      await ensureHydratedForSend()
       await ensureEthers()
       if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
 
@@ -493,11 +371,6 @@ const walletService = {
     }
   },
 
-  /**
-   * Reliable send:
-   * - On MetaMask injected (esp. mobile): use eth_sendTransaction to guarantee txHash.
-   * - Otherwise: use existing sendTransactionReliable (WalletConnect path).
-   */
   async sendTransactionWithReceipt(tx, meta = {}) {
     try {
       if (!eip1193) await ensureProvider()
@@ -508,35 +381,17 @@ const walletService = {
         if (!res.success) return { success: false, error: res.error }
       }
 
-      startTxReconciler()
-
-      // If we are in MetaMask injected context, prefer EIP-1193 send.
-      // This is the core fix for “mobile sends but no hash”.
-      const injected = typeof window !== 'undefined' ? window.ethereum : null
-      const useMmPath = isInjectedMetaMask(eip1193) || isInjectedMetaMask(injected) || isMetaMaskMobileUA()
-
-      if (useMmPath) {
-        const out = await sendViaMetaMaskEip1193(tx, {
-          waitConfirms: meta.waitConfirms ?? 1,
-          waitTimeoutMs: meta.waitTimeoutMs ?? 180000
-        })
-
-        return {
-          success: true,
-          txHash: out.txHash,
-          receipt: out.receipt,
-          status: out.status,
-          txId: null
-        }
-      }
-
-      // WalletConnect/AppKit path (keeps your existing tx store & reconciling)
       const from = await this.getAddress()
       const chainHex = await this.getChainId()
       const chainDec = hexToDec(chainHex)
 
       const bp = await this.getBrowserProvider()
       if (!bp) return { success: false, error: 'Provider unavailable' }
+
+      // NEW: hydrate before send (helps MetaMask Mobile)
+      await ensureHydratedForSend()
+
+      startTxReconciler()
 
       const out = await sendTransactionReliable({
         provider: bp,
@@ -547,6 +402,9 @@ const walletService = {
         tokenAddress: meta.tokenAddress,
         spender: meta.spender,
         amount: meta.amount,
+        flowId: meta.flowId || null,
+        title: meta.title || null,
+        step: meta.step || null,
         waitConfirms: meta.waitConfirms ?? 1,
         waitTimeoutMs: meta.waitTimeoutMs ?? 180000
       })
@@ -576,6 +434,7 @@ const walletService = {
         if (!res.success) return { success: false, error: res.error }
       }
 
+      await ensureHydratedForSend()
       await ensureEthers()
       if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
 
@@ -623,7 +482,6 @@ const walletService = {
     }
   },
 
-  // ---- tx store helpers for UI ----
   listTransactions(filters) {
     return txStore.list(filters)
   },
@@ -631,7 +489,6 @@ const walletService = {
     return txStore.getById(id)
   },
 
-  // subscriptions
   onAccountsChanged(cb) {
     onAccChanged = cb
   },
@@ -642,7 +499,6 @@ const walletService = {
     onDisconnected = cb
   },
 
-  // cleanup
   destroy() {
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)

@@ -53,6 +53,10 @@ function getById(id) {
 function list(filters = {}) {
   let all = readAll()
 
+  if (filters.flowId) {
+    all = all.filter((t) => t.flowId === filters.flowId)
+  }
+
   if (filters.chainId != null) all = all.filter((t) => t.chainId === filters.chainId)
 
   if (filters.from) {

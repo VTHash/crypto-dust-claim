@@ -4,21 +4,19 @@ import walletService from './walletService'
 import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
-// Small delay helps MetaMask mobile not choke on back-to-back requests
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
-// Execute chain plan THROUGH DustClaimV3
 export async function executeChainPlan(chainPlan, fromAddress) {
   const receipts = []
+  const flowId = newFlowId()
 
-  // Ensure wallet connected
   const connected = await walletService.isConnected?.()
   if (!connected) {
     const res = await walletService.connect?.()
     if (!res?.success) throw new Error(res?.error || 'Wallet connection failed')
   }
 
-  // Ensure correct chain
   const currentChainHex = await walletService.getChainId?.()
   const currentChainId =
     typeof currentChainHex === 'string'
@@ -29,15 +27,15 @@ export async function executeChainPlan(chainPlan, fromAddress) {
     const sw = await walletService.switchChain(Number(chainPlan.chainId))
     if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
 
-    // Re-read to ensure the wallet actually switched (mobile wallets can lag)
     const afterHex = await walletService.getChainId?.()
     const afterId = typeof afterHex === 'string' ? parseInt(afterHex, 16) : Number(afterHex || 0)
     if (Number(afterId) !== Number(chainPlan.chainId)) {
       throw new Error(`Chain switch did not complete (expected ${chainPlan.chainId}, got ${afterId})`)
     }
+
+    await sleep(400)
   }
 
-  // Resolve from address
   const from =
     fromAddress ||
     (await walletService.getAddress?.()) ||
@@ -51,18 +49,15 @@ export async function executeChainPlan(chainPlan, fromAddress) {
   const dep = DEPLOYMENTS?.[Number(chainPlan.chainId)]
   if (!dep?.dustClaimV3) throw new Error(`Missing DustClaimV3 deployment for chain ${chainPlan.chainId}`)
 
-  // BrowserProvider (ethers v6)
   const provider = await walletService.getBrowserProvider?.()
   if (!provider) throw new Error('Provider unavailable')
 
-  // Start reconciler (safe no-op if already running)
   try {
     walletService.startTxReconciler?.()
   } catch {
     // ignore
   }
 
-  // Helper: best-effort allowance check via eth_call
   async function hasSufficientAllowance(token, owner, spender, needed) {
     try {
       const allowanceData = encodeFunctionData({
@@ -75,7 +70,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       const [current] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], raw)
       return BigInt(current.toString()) >= BigInt(needed)
     } catch {
-      // If allowance read fails, we conservatively say "unknown" and try approve.
       return false
     }
   }
@@ -85,9 +79,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
     const tokenOut = step.tokenOut
     const amountWei = BigInt(step.amount || 0)
 
-    // ---------------------------
-    // 1) APPROVE (if needed)
-    // ---------------------------
+    // 1) APPROVE
     if (step.needsApproval && !step.usePermit) {
       const spender = step.spender || step.routerSpender || dep.dustClaimV3
 
@@ -95,6 +87,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         const okAllowance = await hasSufficientAllowance(tokenIn, from, spender, amountWei)
         if (okAllowance) {
           receipts.push({
+            flowId,
             type: 'approval',
             ok: true,
             skipped: true,
@@ -110,16 +103,13 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             args: [spender, amountWei]
           })
 
-          // RELIABLE SENDER (stores hash immediately + waits best-effort)
           const approvalRes = await walletService.sendTransactionWithReceipt(
+            { from, to: tokenIn, data: approvalData, value: 0n },
             {
-              from,
-              to: tokenIn,
-              data: approvalData,
-              value: 0n
-            },
-            {
+              flowId,
               kind: 'approval',
+              title: 'Approve token',
+              step: 'approval',
               tokenAddress: tokenIn,
               spender,
               amount: String(amountWei),
@@ -128,19 +118,8 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             }
           )
 
-          if (approvalRes?.success && !approvalRes?.txHash) {
-            receipts.push({
-              type: 'approval',
-              ok: false,
-              error: 'Approval: wallet returned success but no txHash (not submitted)',
-              tokenIn,
-              spender,
-              amount: String(amountWei)
-            })
-            continue
-          }
-
           receipts.push({
+            flowId,
             type: 'approval',
             ok: !!approvalRes?.success,
             txId: approvalRes?.txId || null,
@@ -155,12 +134,11 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           })
 
           if (!approvalRes?.success) continue
-
-          // Small delay so MetaMask mobile reliably presents the next prompt
           await sleep(650)
         }
       } catch (err) {
         receipts.push({
+          flowId,
           type: 'approval',
           ok: false,
           error: err?.shortMessage || err?.reason || err?.message || 'Approval failed',
@@ -172,9 +150,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
       }
     }
 
-    // ---------------------------
     // 2) SWAP via DustClaimV3 (0x)
-    // ---------------------------
     try {
       if (step.aggregator !== '0x') {
         throw new Error(`Unsupported aggregator: ${step.aggregator || 'none'} (only 0x supported)`)
@@ -202,6 +178,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
 
         if (!q?.transaction?.to || !q?.transaction?.data) {
           receipts.push({
+            flowId,
             type: 'swap',
             ok: false,
             error: q?.message || '0x quote has no transaction (no route/liquidity)',
@@ -212,16 +189,12 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         }
 
         gasFromQuote = q?.transaction?.gas ?? null
-
-        routerSpender =
-          q?.issues?.allowance?.spender ||
-          q?.allowanceTarget ||
-          null
-
+        routerSpender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
         swapCalldata = q?.transaction?.data || null
 
         if (!routerSpender || !swapCalldata) {
           receipts.push({
+            flowId,
             type: 'swap',
             ok: false,
             error: '0x quote missing spender/calldata (no route/liquidity)',
@@ -232,74 +205,68 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         }
       }
 
-      // ---------------------------
-      // IMPORTANT CHANGE (MetaMask Mobile-safe):
-      // Use ethers.Contract + signer + estimateGas + buffered gasLimit.
-      // ---------------------------
-      const signer = await walletService.getSigner?.()
-      if (!signer) {
-        throw new Error('Signer unavailable (wallet not hydrated). Reconnect wallet and retry.')
-      }
+      const data = encodeFunctionData({
+        abi: DUSTCLAIM_V3_ABI,
+        functionName: 'claimDustUsingAggregator',
+        args: [tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
+      })
 
-      const contract = new ethers.Contract(dep.dustClaimV3, DUSTCLAIM_V3_ABI, signer)
+      // Gas strategy:
+      // - baseline from quote if present
+      // - plus contract-level estimateGas buffer (Mobile-safe)
+      let gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
 
-      // estimate gas from the contract call
-      let estGas
       try {
-        estGas = await contract.claimDustUsingAggregator.estimateGas(
-          tokenIn,
-          BigInt(step.amount),
-          routerSpender,
-          swapCalldata
-        )
-      } catch (e) {
-        // If estimate fails, we still proceed with a conservative limit,
-        // but we do NOT hide the reason from logs.
-        estGas = null
+        const signer = await walletService.getSigner?.()
+        if (signer) {
+          const contract = new ethers.Contract(dep.dustClaimV3, DUSTCLAIM_V3_ABI, signer)
+          const est = await contract.claimDustUsingAggregator.estimateGas(
+            tokenIn,
+            BigInt(step.amount),
+            routerSpender,
+            swapCalldata
+          )
+          const bumped = (BigInt(est) * 130n) / 100n
+          if (bumped > gasLimit) gasLimit = bumped
+        }
+      } catch {
+        // keep fallback gas
       }
 
-      // Base gas: prefer quote if provided; otherwise conservative 900k.
-      const baseGas = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
-
-      // If estimation worked, use max(baseGas, estGas * 1.30).
-      let gasLimit = baseGas
-      if (estGas != null) {
-        const bumped = (BigInt(estGas) * 130n) / 100n
-        if (bumped > gasLimit) gasLimit = bumped
-      }
-
-      const tx = await contract.claimDustUsingAggregator(
-        tokenIn,
-        BigInt(step.amount),
-        routerSpender,
-        swapCalldata,
-        { gasLimit }
+      const swapRes = await walletService.sendTransactionWithReceipt(
+        { from, to: dep.dustClaimV3, data, value: 0n, gasLimit },
+        {
+          flowId,
+          kind: 'swap',
+          title: 'Swap via 0x',
+          step: 'swap',
+          tokenAddress: tokenIn,
+          spender: routerSpender,
+          amount: String(step.amount),
+          waitConfirms: 1,
+          waitTimeoutMs: 240000
+        }
       )
 
-      if (!tx?.hash) {
-        throw new Error('No tx hash (MetaMask Mobile did not broadcast)')
-      }
-
-      const receipt = await tx.wait()
-
       receipts.push({
+        flowId,
         type: 'swap',
-        ok: true,
-        txId: null,
-        txHash: tx.hash,
-        status: receipt?.status ?? null,
+        ok: !!swapRes?.success,
+        txId: swapRes?.txId || null,
+        txHash: swapRes?.txHash || null,
+        status: swapRes?.status || null,
         chainId: Number(chainPlan.chainId),
         tokenIn,
         tokenOut,
         routerSpender,
-        blockNumber: receipt?.blockNumber ?? null,
-        error: null
+        blockNumber: swapRes?.receipt?.blockNumber ?? null,
+        error: swapRes?.error || null
       })
 
-      // Small delay before next step, again for MetaMask mobile stability
       await sleep(650)
     } catch (err) {
       receipts.push({
+        flowId,
         type: 'swap',
         ok: false,
         error:
@@ -315,5 +282,5 @@ export async function executeChainPlan(chainPlan, fromAddress) {
     }
   }
 
-  return receipts
+  return { flowId, receipts }
 }
