@@ -20,6 +20,19 @@ function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
+// Detect MetaMask Mobile / in-app browser contexts (used for slight behavior tweaks)
+function isMetaMaskMobileUA() {
+  if (typeof window === 'undefined') return false
+  const ua = window.navigator?.userAgent || ''
+  return /MetaMaskMobile/i.test(ua)
+}
+
+function isInAppBrowser() {
+  if (typeof window === 'undefined') return false
+  const ua = window.navigator?.userAgent || ''
+  return /MetaMaskMobile|Trust|CoinbaseWallet|Brave/i.test(ua)
+}
+
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
@@ -166,6 +179,16 @@ function stopTxReconciler() {
   reconciler = null
 }
 
+// Gas buffer helper (BigInt-safe)
+function applyGasBump(gas, bumpPct = 30) {
+  try {
+    const pct = BigInt(Math.max(0, Number(bumpPct) || 0))
+    return (gas * (100n + pct)) / 100n
+  } catch {
+    return gas
+  }
+}
+
 // ---- API ----
 const walletService = {
   // getters / helpers
@@ -239,8 +262,12 @@ const walletService = {
 
     // On mobile, when app resumes, do an extra reconcile pass
     if (typeof window !== 'undefined') {
-      window.addEventListener('focus', () => reconciler?.reconcileOnce?.().catch(() => {}))
-      window.addEventListener('pageshow', () => reconciler?.reconcileOnce?.().catch(() => {}))
+      window.addEventListener('focus', () =>
+        reconciler?.reconcileOnce?.().catch(() => {})
+      )
+      window.addEventListener('pageshow', () =>
+        reconciler?.reconcileOnce?.().catch(() => {})
+      )
     }
     return
   },
@@ -257,7 +284,9 @@ const walletService = {
       const accs = await ensureAccounts()
       if (!accs?.length) return null
 
-      chainId = await eip1193.request?.({ method: 'eth_chainId' }).catch(() => null)
+      chainId = await eip1193
+        .request?.({ method: 'eth_chainId' })
+        .catch(() => null)
       await ensureEthers()
       startTxReconciler()
 
@@ -284,7 +313,9 @@ const walletService = {
         eip1193 = injected
         attachListeners()
 
-        const reqAccs = await eip1193.request?.({ method: 'eth_requestAccounts' })
+        const reqAccs = await eip1193.request?.({
+          method: 'eth_requestAccounts'
+        })
         accounts = Array.isArray(reqAccs) ? reqAccs : []
         chainId = await eip1193.request?.({ method: 'eth_chainId' })
 
@@ -308,7 +339,8 @@ const walletService = {
         while (true) {
           const val = await fn().catch(() => null)
           if (predicate(val)) return val
-          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
+          if (Date.now() - start > timeoutMs)
+            throw new Error('Wallet connect timed out')
           await new Promise((r) => setTimeout(r, intervalMs))
         }
       }
@@ -327,7 +359,13 @@ const walletService = {
       startTxReconciler()
 
       console.debug('[walletService] connected', { accounts, chainId })
-      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
+      return {
+        success: true,
+        accounts,
+        chainId,
+        address: accounts[0] ?? null,
+        signer
+      }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
       return { success: false, error: err?.message || 'Connect failed' }
@@ -365,15 +403,28 @@ const walletService = {
       }
 
       await ensureEthers()
-      if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
+      if (!signer)
+        return {
+          success: false,
+          error: 'Signer unavailable (provider not hydrated)'
+        }
 
       const resp = await signer.sendTransaction(tx)
       return { success: true, txHash: resp.hash }
     } catch (err) {
       const code = err?.code
-      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
-      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
+      const msg =
+        err?.shortMessage ||
+        err?.reason ||
+        err?.message ||
+        'Transaction failed'
+      if (code === 4001)
+        return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002)
+        return {
+          success: false,
+          error: 'Request already pending in wallet (-32002)'
+        }
       return { success: false, error: code ? `${msg} (code ${code})` : msg }
     }
   },
@@ -427,9 +478,138 @@ const walletService = {
       }
     } catch (err) {
       const code = err?.code
-      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
-      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
+      const msg =
+        err?.shortMessage ||
+        err?.reason ||
+        err?.message ||
+        'Transaction failed'
+      if (code === 4001)
+        return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002)
+        return {
+          success: false,
+          error: 'Request already pending in wallet (-32002)'
+        }
+      return { success: false, error: code ? `${msg} (code ${code})` : msg }
+    }
+  },
+
+  /**
+   * NEW: Reliable send for a txRequest that was built via populateTransaction.
+   * This is the safest path for MetaMask Mobile because we avoid any ambiguity
+   * around contract wrappers returning a tx response without broadcast.
+   */
+  async sendPopulatedTransactionWithReceipt(txRequest, meta = {}) {
+    if (!txRequest || typeof txRequest !== 'object') {
+      return { success: false, error: 'Invalid txRequest' }
+    }
+
+    // Ensure from is set (MetaMask Mobile can be picky)
+    const from = await this.getAddress()
+    const req = { ...txRequest, from: txRequest.from || from }
+
+    // If no gasLimit was provided, attempt estimate with buffer.
+    // This uses BrowserProvider (provider-based estimate) not signer-based estimate.
+    if (!req.gasLimit) {
+      try {
+        const bp = await this.getBrowserProvider()
+        if (bp) {
+          const est = await bp.estimateGas(req)
+          req.gasLimit = applyGasBump(est, meta.gasBumpPct ?? 30)
+        }
+      } catch {
+        // If estimate fails, do not block. Caller may already set gasLimit.
+      }
+    } else {
+      try {
+        req.gasLimit = applyGasBump(BigInt(req.gasLimit), meta.gasBumpPct ?? 30)
+      } catch {
+        // ignore
+      }
+    }
+
+    return await this.sendTransactionWithReceipt(req, meta)
+  },
+
+  /**
+   * NEW: One-stop helper for contract calls with MetaMask Mobile reliability.
+   *
+   * - Builds tx via populateTransaction
+   * - Best-effort gas estimate + buffer
+   * - Broadcasts via sendTransactionWithReceipt (reconciler-safe)
+   *
+   * Usage from claimExecutor:
+   * walletService.sendContractCallWithReceipt(
+   * contract,
+   * 'claimDustUsingAggregator',
+   * argsArray,
+   * overrides,
+   * { kind: 'claimDustUsingAggregator', waitTimeoutMs: 240000 }
+   * )
+   */
+  async sendContractCallWithReceipt(
+    contract,
+    methodName,
+    args = [],
+    overrides = {},
+    meta = {}
+  ) {
+    try {
+      if (!contract || !methodName) {
+        return { success: false, error: 'Missing contract or methodName' }
+      }
+
+      // Ensure we are connected and on the correct provider
+      const ok = await this.isConnected()
+      if (!ok) {
+        const res = await this.connect()
+        if (!res.success) return { success: false, error: res.error }
+      }
+
+      // Populate transaction
+      const pop = contract?.[methodName]?.populateTransaction
+      if (typeof pop !== 'function') {
+        return {
+          success: false,
+          error: `Method not found or not populateTransaction-capable: ${methodName}`
+        }
+      }
+
+      const txReq = await pop(...(Array.isArray(args) ? args : []), overrides)
+
+      // Force to address present (some providers require it)
+      if (!txReq.to && contract?.target) txReq.to = contract.target
+
+      // MetaMask Mobile: ensure chain/provider is hydrated before estimate/send
+      // (Light-touch; does not change your architecture)
+      if (isMetaMaskMobileUA() || isInAppBrowser()) {
+        try {
+          const bp = await this.getBrowserProvider()
+          await bp?.getNetwork?.()
+        } catch {
+          // ignore
+        }
+      }
+
+      // Send via reliable path
+      return await this.sendPopulatedTransactionWithReceipt(txReq, {
+        ...meta,
+        kind: meta.kind || methodName
+      })
+    } catch (err) {
+      const code = err?.code
+      const msg =
+        err?.shortMessage ||
+        err?.reason ||
+        err?.message ||
+        'Contract call failed'
+      if (code === 4001)
+        return { success: false, error: 'User rejected the request (4001)' }
+      if (code === -32002)
+        return {
+          success: false,
+          error: 'Request already pending in wallet (-32002)'
+        }
       return { success: false, error: code ? `${msg} (code ${code})` : msg }
     }
   },
@@ -444,7 +624,11 @@ const walletService = {
       }
 
       await ensureEthers()
-      if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
+      if (!signer)
+        return {
+          success: false,
+          error: 'Signer unavailable (provider not hydrated)'
+        }
 
       const signature = await signer.signMessage(message)
       return { success: true, signature }
@@ -475,7 +659,11 @@ const walletService = {
               {
                 chainId: hex,
                 chainName: chain.name,
-                nativeCurrency: { name: chain.symbol, symbol: chain.symbol, decimals: 18 },
+                nativeCurrency: {
+                  name: chain.symbol,
+                  symbol: chain.symbol,
+                  decimals: 18
+                },
                 rpcUrls: [chain.rpcUrl],
                 blockExplorerUrls: [chain.explorer]
               }
@@ -483,7 +671,10 @@ const walletService = {
           })
           return { success: true, added: true }
         } catch (addErr) {
-          return { success: false, error: addErr?.message || 'Failed to add chain' }
+          return {
+            success: false,
+            error: addErr?.message || 'Failed to add chain'
+          }
         }
       }
       return { success: false, error: err?.message || 'Failed to switch chain' }

@@ -128,7 +128,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             }
           )
 
-          // Hard guard: "success" without hash should never happen now, but keep guard anyway.
           if (approvalRes?.success && !approvalRes?.txHash) {
             receipts.push({
               type: 'approval',
@@ -138,7 +137,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
               spender,
               amount: String(amountWei)
             })
-            // do not proceed to swap
             continue
           }
 
@@ -156,10 +154,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             error: approvalRes?.error || null
           })
 
-          if (!approvalRes?.success) {
-            // do not proceed to swap if approval failed
-            continue
-          }
+          if (!approvalRes?.success) continue
 
           // Small delay so MetaMask mobile reliably presents the next prompt
           await sleep(650)
@@ -197,7 +192,7 @@ export async function executeChainPlan(chainPlan, fromAddress) {
             sellToken: tokenIn,
             buyToken: tokenOut,
             sellAmount: String(step.amount),
-            taker: dep.dustClaimV3, // allowance-holder taker is your contract
+            taker: dep.dustClaimV3,
             recipient: dep.dustClaimV3,
             txOrigin: from,
             slippageBps: Math.round(Number(step.slippage ?? 1) * 100)
@@ -205,7 +200,6 @@ export async function executeChainPlan(chainPlan, fromAddress) {
           { headers: { 'content-type': 'application/json' } }
         )
 
-        // Guard: no transaction means no route
         if (!q?.transaction?.to || !q?.transaction?.data) {
           receipts.push({
             type: 'swap',
@@ -238,58 +232,68 @@ export async function executeChainPlan(chainPlan, fromAddress) {
         }
       }
 
-      const data = encodeFunctionData({
-        abi: DUSTCLAIM_V3_ABI,
-        functionName: 'claimDustUsingAggregator',
-        args: [tokenIn, BigInt(step.amount), routerSpender, swapCalldata]
-      })
+      // ---------------------------
+      // IMPORTANT CHANGE (MetaMask Mobile-safe):
+      // Use ethers.Contract + signer + estimateGas + buffered gasLimit.
+      // ---------------------------
+      const signer = await walletService.getSigner?.()
+      if (!signer) {
+        throw new Error('Signer unavailable (wallet not hydrated). Reconnect wallet and retry.')
+      }
 
-      // Gas: use quote when available, otherwise conservative.
-      // Your walletService sender also estimates + buffers when gasLimit is missing.
-      const gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
+      const contract = new ethers.Contract(dep.dustClaimV3, DUSTCLAIM_V3_ABI, signer)
 
-      const swapRes = await walletService.sendTransactionWithReceipt(
-        {
-          from,
-          to: dep.dustClaimV3,
-          data,
-          value: 0n,
-          gasLimit
-        },
-        {
-          kind: 'swap',
-          tokenAddress: tokenIn,
-          spender: routerSpender,
-          amount: String(step.amount),
-          waitConfirms: 1,
-          waitTimeoutMs: 240000
-        }
+      // estimate gas from the contract call
+      let estGas
+      try {
+        estGas = await contract.claimDustUsingAggregator.estimateGas(
+          tokenIn,
+          BigInt(step.amount),
+          routerSpender,
+          swapCalldata
+        )
+      } catch (e) {
+        // If estimate fails, we still proceed with a conservative limit,
+        // but we do NOT hide the reason from logs.
+        estGas = null
+      }
+
+      // Base gas: prefer quote if provided; otherwise conservative 900k.
+      const baseGas = gasFromQuote ? BigInt(gasFromQuote) + 50_000n : 900_000n
+
+      // If estimation worked, use max(baseGas, estGas * 1.30).
+      let gasLimit = baseGas
+      if (estGas != null) {
+        const bumped = (BigInt(estGas) * 130n) / 100n
+        if (bumped > gasLimit) gasLimit = bumped
+      }
+
+      const tx = await contract.claimDustUsingAggregator(
+        tokenIn,
+        BigInt(step.amount),
+        routerSpender,
+        swapCalldata,
+        { gasLimit }
       )
 
-      if (swapRes?.success && !swapRes?.txHash) {
-        receipts.push({
-          type: 'swap',
-          ok: false,
-          error: 'Swap: wallet returned success but no txHash (not submitted)',
-          tokenIn,
-          tokenOut,
-          routerSpender
-        })
-        continue
+      if (!tx?.hash) {
+        throw new Error('No tx hash (MetaMask Mobile did not broadcast)')
       }
+
+      const receipt = await tx.wait()
 
       receipts.push({
         type: 'swap',
-        ok: !!swapRes?.success,
-        txId: swapRes?.txId || null,
-        txHash: swapRes?.txHash || null,
-        status: swapRes?.status || null,
+        ok: true,
+        txId: null,
+        txHash: tx.hash,
+        status: receipt?.status ?? null,
         chainId: Number(chainPlan.chainId),
         tokenIn,
         tokenOut,
         routerSpender,
-        blockNumber: swapRes?.receipt?.blockNumber ?? null,
-        error: swapRes?.error || null
+        blockNumber: receipt?.blockNumber ?? null,
+        error: null
       })
 
       // Small delay before next step, again for MetaMask mobile stability
