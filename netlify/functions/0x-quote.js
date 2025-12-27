@@ -1,10 +1,6 @@
 // netlify/functions/0x-quote.js
-// POST-only 0x Swap API v2 proxy for DustClaimV3
-// - avoids CORS
-// - keeps API key off the browser
-// - cache + retry + timeout for production stability
-//
-// IMPORTANT: This implementation calls 0x via POST (no upstream GET).
+// Browser -> Netlify: POST only (CORS + hide API key)
+// Netlify -> 0x: GET only (0x allowance-holder quote is GET with query params)
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
@@ -99,11 +95,10 @@ async function fetch0xWithRetry(url, headers, reqId) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let resp;
     try {
-      // 0x allowance-holder quote is GET-only
       resp = await fetchWithTimeout(url, { method: "GET", headers }, 12_000);
     } catch (e) {
       const msg = e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
-      console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg);
+      console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg, { reqId });
       if (attempt === maxAttempts) throw e;
       await sleep(250 * attempt);
       continue;
@@ -134,12 +129,10 @@ exports.handler = async (event) => {
   console.log("[0x] ua:", event.headers?.["user-agent"] || "n/a");
 
   try {
-    // CORS preflight
     if (event.httpMethod === "OPTIONS") {
       return { statusCode: 204, headers: CORS_HEADERS, body: "" };
     }
 
-    // POST only (browser -> function)
     if (event.httpMethod !== "POST") {
       console.log("[0x] Rejected: method not allowed");
       return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
@@ -162,7 +155,7 @@ exports.handler = async (event) => {
     const chainId = Number(body.chainId);
     const sellToken = body.sellToken;
     const buyToken = body.buyToken;
-    const sellAmount = body.sellAmount ?? body.sellAmountWei; // defensive
+    const sellAmount = body.sellAmount ?? body.sellAmountWei;
     const taker = body.taker;
     const txOrigin = body.txOrigin;
     const recipient = body.recipient;
@@ -172,14 +165,19 @@ exports.handler = async (event) => {
       chainId,
       sellToken: safeAddr(sellToken),
       buyToken: safeAddr(buyToken),
-      sellAmount,
+      sellAmount: sellAmount ? String(sellAmount) : sellAmount,
       taker: safeAddr(taker),
       txOrigin: safeAddr(txOrigin),
       recipient: safeAddr(recipient),
       slippageBps,
     });
 
-    const host = "https://api.0x.org";
+    // Validate + pick correct 0x host for chain
+    if (!Number.isFinite(chainId) || chainId <= 0) {
+      return json(400, { error: "Invalid chainId" }, { "x-req-id": reqId });
+    }
+
+    const host = ZEROX_HOST_BY_CHAIN[chainId];
     if (!host) {
       console.log("[0x] ERROR: unsupported chainId:", chainId);
       return json(400, { error: `0x unsupported chainId: ${chainId}` }, { "x-req-id": reqId });
@@ -203,10 +201,6 @@ exports.handler = async (event) => {
       );
     }
 
-    // Strong input sanity (helps catch malformed scans)
-    if (!Number.isFinite(chainId) || chainId <= 0) {
-      return json(400, { error: "Invalid chainId" }, { "x-req-id": reqId });
-    }
     if (!isNonZeroAddress(sellToken) || !isNonZeroAddress(buyToken)) {
       return json(400, { error: "Invalid sellToken or buyToken address" }, { "x-req-id": reqId });
     }
@@ -214,27 +208,9 @@ exports.handler = async (event) => {
       return json(400, { error: "Invalid taker/recipient/txOrigin address" }, { "x-req-id": reqId });
     }
 
-    const bps = Number.isFinite(Number(slippageBps))
-      ? String(Math.trunc(Number(slippageBps)))
-      : "100";
+    const bps = Number.isFinite(Number(slippageBps)) ? String(Math.trunc(Number(slippageBps))) : "100";
 
-    // Upstream endpoint (0x)
-    const upstreamUrl = `${host}/swap/allowance-holder/quote`;
-
-    // POST body to 0x (no GET)
-    // Keep chainId in body for parity with your current logging and multi-chain proxy usage.
-    const upstreamBody = {
-      chainId,
-      sellToken,
-      buyToken,
-      sellAmount: String(sellAmount),
-      taker,
-      recipient,
-      slippageBps: bps,
-      txOrigin,
-    };
-
-    // Cache key based on request body (stable order)
+    // Cache key (stable)
     const cacheKey = JSON.stringify([
       chainId,
       sellToken.toLowerCase(),
@@ -252,12 +228,28 @@ exports.handler = async (event) => {
       return json(200, cached, { "x-req-id": reqId, "x-cache": "HIT" });
     }
 
-    console.log("[0x] Calling URL (POST):", upstreamUrl);
+    // Build 0x GET URL with query params
+    const upstream = new URL(`${host}/swap/allowance-holder/quote`);
+    upstream.search = new URLSearchParams({
+      chainId: String(chainId),
+      sellToken,
+      buyToken,
+      sellAmount: String(sellAmount),
+      taker,
+      recipient,
+      slippageBps: bps,
+      txOrigin,
+    }).toString();
+
+    console.log("[0x] Calling URL (GET):", upstream.toString());
 
     const resp = await fetch0xWithRetry(
-      upstreamUrl,
-      { "0x-api-key": apiKey, "0x-version": "v2" },
-      upstreamBody,
+      upstream.toString(),
+      {
+        "0x-api-key": apiKey,
+        "0x-version": "v2",
+        accept: "application/json",
+      },
       reqId
     );
 
@@ -295,11 +287,7 @@ exports.handler = async (event) => {
 
     if (!resp.ok) {
       console.log("[0x] 0x ERROR body (capped 12k):", (text || "").slice(0, 12000));
-      return json(
-        resp.status,
-        { error: "0x error", status: resp.status, data, note: "Upstream called via POST only." },
-        { "x-req-id": reqId }
-      );
+      return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
     }
 
     setCache(cacheKey, data);
