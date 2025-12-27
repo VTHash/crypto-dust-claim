@@ -78,7 +78,7 @@ async function get0xQuoteStrict({ chainId, sellToken, buyToken, sellAmount, take
   }
 
   // allowance-holder spender used inside DustClaimV3
-  const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
+  const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || q?.transaction?.to || null
   if (!isNonZeroAddress(spender)) {
     return { ok: false, reason: '0x quote missing allowance spender', quote: q }
   }
