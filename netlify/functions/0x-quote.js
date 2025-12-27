@@ -2,7 +2,9 @@
 // POST-only 0x Swap API v2 proxy for DustClaimV3
 // - avoids CORS
 // - keeps API key off the browser
-// - adds cache + retry + timeout for production stability
+// - cache + retry + timeout for production stability
+//
+// IMPORTANT: This implementation calls 0x via POST (no upstream GET).
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
@@ -51,9 +53,18 @@ function safeAddr(x) {
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
+function isHexAddress(a) {
+  return typeof a === "string" && /^0x[0-9a-fA-F]{40}$/.test(a);
+}
+
+function isNonZeroAddress(a) {
+  return isHexAddress(a) && a.toLowerCase() !== "0x0000000000000000000000000000000000000000";
+}
+
 // ---------- tiny in-memory cache (warm lambda) ----------
-const CACHE_TTL_MS = 25_000; // reduces burst rate limiting during scans
+const CACHE_TTL_MS = 25_000;
 const cache = new Map(); // key -> { ts, data }
+
 function getCache(key) {
   const v = cache.get(key);
   if (!v) return null;
@@ -82,15 +93,29 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function fetch0xWithRetry(url, headers, reqId) {
+// POST-only upstream retry
+async function fetch0xWithRetry(url, headers, bodyJson, reqId) {
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let resp;
     try {
-      resp = await fetchWithTimeout(url, { method: "GET", headers }, 12_000);
+      resp = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: {
+            ...headers,
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body: JSON.stringify(bodyJson),
+        },
+        12_000
+      );
     } catch (e) {
-      const msg = e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
+      const msg =
+        e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
       console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg);
       if (attempt === maxAttempts) throw e;
       await sleep(250 * attempt);
@@ -98,7 +123,10 @@ async function fetch0xWithRetry(url, headers, reqId) {
     }
 
     if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
-      console.log(`[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`, { reqId });
+      console.log(
+        `[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`,
+        { reqId }
+      );
       if (attempt === maxAttempts) return resp;
       await sleep(300 * attempt);
       continue;
@@ -127,7 +155,7 @@ exports.handler = async (event) => {
       return { statusCode: 204, headers: CORS_HEADERS, body: "" };
     }
 
-    // POST only
+    // POST only (browser -> function)
     if (event.httpMethod !== "POST") {
       console.log("[0x] Rejected: method not allowed");
       return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
@@ -191,32 +219,61 @@ exports.handler = async (event) => {
       );
     }
 
+    // Strong input sanity (helps catch malformed scans)
+    if (!Number.isFinite(chainId) || chainId <= 0) {
+      return json(400, { error: "Invalid chainId" }, { "x-req-id": reqId });
+    }
+    if (!isNonZeroAddress(sellToken) || !isNonZeroAddress(buyToken)) {
+      return json(400, { error: "Invalid sellToken or buyToken address" }, { "x-req-id": reqId });
+    }
+    if (!isNonZeroAddress(taker) || !isNonZeroAddress(recipient) || !isNonZeroAddress(txOrigin)) {
+      return json(400, { error: "Invalid taker/recipient/txOrigin address" }, { "x-req-id": reqId });
+    }
+
     const bps = Number.isFinite(Number(slippageBps))
       ? String(Math.trunc(Number(slippageBps)))
       : "100";
 
-    const url = new URL(`${host}/swap/allowance-holder/quote`);
-    url.searchParams.set("chainId", String(chainId));
-    url.searchParams.set("sellToken", sellToken);
-    url.searchParams.set("buyToken", buyToken);
-    url.searchParams.set("sellAmount", String(sellAmount));
-    url.searchParams.set("taker", taker);
-    url.searchParams.set("recipient", recipient);
-    url.searchParams.set("slippageBps", bps);
-    url.searchParams.set("txOrigin", txOrigin);
+    // Upstream endpoint (0x)
+    const upstreamUrl = `${host}/swap/allowance-holder/quote`;
 
-    const cacheKey = url.toString();
+    // POST body to 0x (no GET)
+    // Keep chainId in body for parity with your current logging and multi-chain proxy usage.
+    const upstreamBody = {
+      chainId,
+      sellToken,
+      buyToken,
+      sellAmount: String(sellAmount),
+      taker,
+      recipient,
+      slippageBps: bps,
+      txOrigin,
+    };
+
+    // Cache key based on request body (stable order)
+    const cacheKey = JSON.stringify([
+      chainId,
+      sellToken.toLowerCase(),
+      buyToken.toLowerCase(),
+      String(sellAmount),
+      taker.toLowerCase(),
+      recipient.toLowerCase(),
+      bps,
+      txOrigin.toLowerCase(),
+    ]);
+
     const cached = getCache(cacheKey);
     if (cached) {
       console.log("[0x] cache hit", { reqId });
       return json(200, cached, { "x-req-id": reqId, "x-cache": "HIT" });
     }
 
-    console.log("[0x] Calling URL:", url.toString());
+    console.log("[0x] Calling URL (POST):", upstreamUrl);
 
     const resp = await fetch0xWithRetry(
-      url.toString(),
+      upstreamUrl,
       { "0x-api-key": apiKey, "0x-version": "v2" },
+      upstreamBody,
       reqId
     );
 
@@ -254,7 +311,11 @@ exports.handler = async (event) => {
 
     if (!resp.ok) {
       console.log("[0x] 0x ERROR body (capped 12k):", (text || "").slice(0, 12000));
-      return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
+      return json(
+        resp.status,
+        { error: "0x error", status: resp.status, data, note: "Upstream called via POST only." },
+        { "x-req-id": reqId }
+      );
     }
 
     setCache(cacheKey, data);
