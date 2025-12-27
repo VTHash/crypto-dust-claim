@@ -208,7 +208,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
           chainId: planChainId,
           sellToken: tokenIn,
           buyToken: tokenOut,
-          sellAmount: String(step.amount),
+          sellAmount: String(amountWei),
           taker: dep.dustClaimV3,
           recipient: dep.dustClaimV3,
           txOrigin: from,
