@@ -155,9 +155,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
 
     if (!from) throw new Error('No wallet address')
 
-    // IMPORTANT MINIMAL MULTICHAIN FIX:
-    // DEPLOYMENTS might be keyed by "8453" (string) not 8453 (number)
-    const dep = DEPLOYMENTS?.[planChainId] || DEPLOYMENTS?.[String(planChainId)]
+    const dep = DEPLOYMENTS?.[planChainId]
     if (!dep?.dustClaimV3 || !isNonZeroAddress(dep.dustClaimV3)) {
       throw new Error(`Missing DustClaimV3 deployment for chain ${planChainId}`)
     }
