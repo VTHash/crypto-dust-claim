@@ -10,7 +10,6 @@ import {
 } from '../config/walletConnectConfig'
 
 import { TxReconciler } from './txReconciler'
-import { sendTransactionReliable } from './txSend'
 import { txStore } from './txStore'
 
 // ---- utils ----
@@ -18,6 +17,51 @@ const toHexChainId = (id) => '0x' + Number(id).toString(16)
 
 function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
+}
+
+function hexToDec(hex) {
+  if (!hex) return null
+  try {
+    return Number.parseInt(hex, 16)
+  } catch {
+    return null
+  }
+}
+
+const isNonZeroAddress = (a) =>
+  typeof a === 'string' &&
+  /^0x[0-9a-fA-F]{40}$/.test(a) &&
+  a.toLowerCase() !== '0x0000000000000000000000000000000000000000'
+
+const toBigIntSafe = (v) => {
+  try {
+    if (v === null || v === undefined) return undefined
+    if (typeof v === 'bigint') return v
+    if (typeof v === 'number') return BigInt(Math.trunc(v))
+    if (typeof v === 'string') {
+      const s = v.trim()
+      if (!s) return undefined
+      if (s.startsWith('0x')) return BigInt(s)
+      return BigInt(s)
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+const raceTimeout = async (p, ms, label = 'timeout') => {
+  let t
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error(label)), ms)
+  })
+  try {
+    return await Promise.race([p, timeout])
+  } finally {
+    clearTimeout(t)
+  }
 }
 
 // ---- single AppKit instance (do not create anywhere else) ----
@@ -123,25 +167,16 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
-function hexToDec(hex) {
-  if (!hex) return null
-  try {
-    return Number.parseInt(hex, 16)
-  } catch {
-    return null
-  }
-}
-
 // ---- NEW: MetaMask Mobile hydration before sending ----
 async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
 
-  // Explicit requestAccounts often fixes “no prompt / no broadcast” on mobile
+  // MetaMask Mobile: this often fixes “no prompt / no broadcast”
   try {
     await eip1193.request?.({ method: 'eth_requestAccounts' })
   } catch {
-    // ignore (WalletConnect providers may reject here)
+    // ignore (WalletConnect providers may reject)
   }
 
   await ensureAccounts()
@@ -243,7 +278,6 @@ const walletService = {
       window.addEventListener('focus', () => reconciler?.reconcileOnce?.().catch(() => {}))
       window.addEventListener('pageshow', () => reconciler?.reconcileOnce?.().catch(() => {}))
     }
-    return
   },
 
   startTxReconciler,
@@ -306,7 +340,7 @@ const walletService = {
           const val = await fn().catch(() => null)
           if (predicate(val)) return val
           if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
-          await new Promise((r) => setTimeout(r, intervalMs))
+          await sleep(intervalMs)
         }
       }
 
@@ -317,13 +351,13 @@ const walletService = {
         () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),
         (arr) => Array.isArray(arr) && arr.length > 0
       )
+
       accounts = reqAccs
       chainId = await eip1193.request({ method: 'eth_chainId' })
 
       await ensureEthers()
       startTxReconciler()
 
-      console.debug('[walletService] connected', { accounts, chainId })
       return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
@@ -346,6 +380,7 @@ const walletService = {
     return await ensureAccounts()
   },
 
+  // SIMPLE SEND (hash only)
   async sendTransaction(tx) {
     try {
       if (!eip1193) await ensureProvider()
@@ -367,290 +402,210 @@ const walletService = {
       const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
       if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
       if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
-      return { success: false, error: code ? `${msg} (code ${code})` : msg }
+
+      const errMsg = code ? `${msg} (code ${code})` : msg
+      return { success: false, error: errMsg }
     }
-    async sendTransactionWithReceipt(tx, meta = {}) {
-  // meta supports: flowId, kind, title, step, waitConfirms, waitTimeoutMs, ...
-  const waitConfirms = Number(meta.waitConfirms ?? 1)
-  const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
+  },
 
-  const fail = (error, extra = {}) => ({
-    success: false,
-    error: error?.shortMessage || error?.reason || error?.message || String(error || 'Transaction failed'),
-    ...extra
-  })
+  // BULLETPROOF SEND (hash + receipt)
+  async sendTransactionWithReceipt(tx, meta = {}) {
+    const waitConfirms = Number(meta.waitConfirms ?? 1)
+    const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
 
-  const toBigIntSafe = (v) => {
+    const fail = (error, extra = {}) => {
+      const message =
+        error?.shortMessage ||
+        error?.reason ||
+        error?.message ||
+        String(error || 'Transaction failed')
+      return { success: false, error: message, ...extra }
+    }
+
     try {
-      if (v === null || v === undefined) return undefined
-      if (typeof v === 'bigint') return v
-      if (typeof v === 'number') return BigInt(Math.trunc(v))
-      if (typeof v === 'string') {
-        if (v.startsWith('0x')) return BigInt(v)
-        // decimal string
-        if (v.trim() === '') return undefined
-        return BigInt(v)
+      if (!eip1193) await ensureProvider()
+
+      const ok = await this.isConnected()
+      if (!ok) {
+        const res = await this.connect()
+        if (!res?.success) return fail(res?.error || 'Wallet connection failed')
       }
-      return undefined
-    } catch {
-      return undefined
-    }
-  }
 
-  const isNonZeroAddress = (a) =>
-    typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) && a.toLowerCase() !== '0x0000000000000000000000000000000000000000'
-
-  const raceTimeout = async (p, ms, label = 'timeout') => {
-    let t
-    const timeout = new Promise((_, rej) => {
-      t = setTimeout(() => rej(new Error(label)), ms)
-    })
-    try {
-      return await Promise.race([p, timeout])
-    } finally {
-      clearTimeout(t)
-    }
-  }
-
-  try {
-    // Ensure EIP-1193 exists
-    if (!eip1193) await ensureProvider()
-
-    // Ensure wallet connected
-    const ok = await this.isConnected?.()
-    if (!ok) {
-      const res = await this.connect?.()
-      if (!res?.success) return fail(res?.error || 'Wallet connection failed')
-    }
-
-    const from = await this.getAddress?.()
-    if (!isNonZeroAddress(from)) return fail('No wallet address')
-
-    const chainHex = await this.getChainId?.()
-    const chainDec = hexToDec(chainHex)
-
-    const bp = await this.getBrowserProvider?.()
-    if (!bp) return fail('Provider unavailable')
-
-    // Get signer (preferred on MetaMask mobile)
-    let signer
-    try {
-      signer = await bp.getSigner()
-    } catch (e) {
-      signer = null
-    }
-    if (!signer) return fail('Signer unavailable (wallet not hydrated)')
-
-    // Normalize tx fields
-    const to = tx?.to
-    if (!isNonZeroAddress(to)) return fail('Invalid "to" address')
-
-    const data = typeof tx?.data === 'string' ? tx.data : '0x'
-    const value = toBigIntSafe(tx?.value) ?? 0n
-
-    // gas fields (optional)
-    const gasLimit = toBigIntSafe(tx?.gasLimit)
-    const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
-    const maxPriorityFeePerGas = toBigIntSafe(tx?.maxPriorityFeePerGas)
-    const gasPrice = toBigIntSafe(tx?.gasPrice)
-
-    // Build ethers tx request (ethers will format correctly for MM mobile)
-    const req = {
-      from,          // harmless; signer will set too
-      to,
-      data,
-      value
-    }
-
-    // If caller provided gas/fee hints, apply them
-    if (gasLimit && gasLimit > 0n) req.gasLimit = gasLimit
-    if (maxFeePerGas && maxFeePerGas > 0n) req.maxFeePerGas = maxFeePerGas
-    if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n) req.maxPriorityFeePerGas = maxPriorityFeePerGas
-    if (gasPrice && gasPrice > 0n) req.gasPrice = gasPrice
-
-    // If no gasLimit provided, estimate and add a buffer (mobile-safe)
-    if (!req.gasLimit) {
-      try {
-        const est = await bp.estimateGas({ to, from, data, value })
-        const bumped = (BigInt(est) * 130n) / 100n
-        req.gasLimit = bumped
-      } catch {
-        // fallback conservative
-        req.gasLimit = 900_000n
-      }
-    }
-
-    // If no fee fields provided, use feeData (EIP-1559 preferred)
-    if (!req.maxFeePerGas && !req.maxPriorityFeePerGas && !req.gasPrice) {
-      try {
-        const fee = await bp.getFeeData()
-        // feeData fields may be null depending on chain/provider
-        if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
-          req.maxFeePerGas = BigInt(fee.maxFeePerGas)
-          req.maxPriorityFeePerGas = BigInt(fee.maxPriorityFeePerGas)
-        } else if (fee?.gasPrice) {
-          req.gasPrice = BigInt(fee.gasPrice)
-        }
-      } catch {
-        // ignore; MetaMask will fill fees
-      }
-    }
-
-    // Optional: record "created" step in your txStore (if you have one)
-    try {
-      if (meta?.flowId && txStore?.upsert) {
-        txStore.upsert({
-          flowId: meta.flowId,
-          kind: meta.kind || 'tx',
-          title: meta.title || meta.kind || 'Transaction',
-          step: meta.step || meta.kind || 'tx',
-          status: 'created',
-          chainId: chainDec,
-          from,
-          to,
-          txHash: null,
-          createdAt: Date.now()
-        })
-      }
-    } catch {
-      // no-op
-    }
-
-    // SEND (Signer path)
-    const txResp = await signer.sendTransaction(req)
-
-    const txHash = txResp?.hash || null
-    if (!txHash) {
-      // This is the exact scenario that causes your “Hash not available” UI.
-      return fail('Transaction sent but no hash returned (MetaMask mobile did not broadcast)')
-    }
-
-    // Store hash immediately (important for Steps UI)
-    try {
-      if (meta?.flowId && txStore?.setHashForFlow) {
-        txStore.setHashForFlow(meta.flowId, txHash)
-      } else if (meta?.flowId && txStore?.upsert) {
-        txStore.upsert({
-          flowId: meta.flowId,
-          txHash,
-          status: 'submitted',
-          chainId: chainDec,
-          from,
-          to,
-          updatedAt: Date.now()
-        })
-      }
-    } catch {
-      // no-op
-    }
-
-    // WAIT for receipt with timeout (do NOT rely solely on txResp.wait on mobile)
-    let receipt = null
-    try {
-      receipt = await raceTimeout(bp.waitForTransaction(txHash, waitConfirms), waitTimeoutMs, 'waitForTransaction timeout')
-    } catch (e) {
-      // If we time out, still return success with hash (tx may confirm later)
-      return {
-        success: true,
-        txHash,
-        txId: null,
-        status: 'submitted',
-        chainId: chainDec,
-        receipt: null,
-        error: null,
-        warning: e?.message || 'Confirmation timeout'
-      }
-    }
-
-    const status = receipt?.status === 1 ? 'confirmed' : 'failed'
-
-    // Update store with final status
-    try {
-      if (meta?.flowId && txStore?.upsert) {
-        txStore.upsert({
-          flowId: meta.flowId,
-          txHash,
-          status,
-          chainId: chainDec,
-          blockNumber: receipt?.blockNumber ?? null,
-          updatedAt: Date.now()
-        })
-      }
-    } catch {
-      // no-op
-    }
-
-    return {
-      success: receipt?.status === 1,
-      txHash,
-      txId: null,
-      status,
-      chainId: chainDec,
-      receipt,
-      error: receipt?.status === 1 ? null : 'Transaction reverted'
-    }
-  } catch (e) {
-    // Handle user rejection distinctly (MetaMask codes vary)
-    const msg = e?.message || ''
-    const code = e?.code
-    const rejected =
-      code === 4001 ||
-      /user rejected/i.test(msg) ||
-      /denied transaction/i.test(msg) ||
-      /rejected/i.test(msg)
-
-    // Update store
-    try {
-      if (meta?.flowId && txStore?.upsert) {
-        txStore.upsert({
-          flowId: meta.flowId,
-          status: rejected ? 'rejected' : 'error',
-          error: msg,
-          updatedAt: Date.now()
-        })
-      }
-    } catch {
-      // no-op
-    }
-
-    return fail(rejected ? 'User rejected the transaction' : e)
-  }
-        }
-
-      // NEW: hydrate before send (helps MetaMask Mobile)
       await ensureHydratedForSend()
 
-      startTxReconciler()
+      const from = await this.getAddress()
+      if (!isNonZeroAddress(from)) return fail('No wallet address')
 
-      const out = await sendTransactionReliable({
-        provider: bp,
-        chainId: chainDec ?? 1,
-        from,
-        kind: meta.kind || 'unknown',
-        request: tx,
-        tokenAddress: meta.tokenAddress,
-        spender: meta.spender,
-        amount: meta.amount,
-        flowId: meta.flowId || null,
-        title: meta.title || null,
-        step: meta.step || null,
-        waitConfirms: meta.waitConfirms ?? 1,
-        waitTimeoutMs: meta.waitTimeoutMs ?? 180000
-      })
+      const chainHex = await this.getChainId()
+      const chainDec = hexToDec(chainHex)
+
+      const bp = await this.getBrowserProvider()
+      if (!bp) return fail('Provider unavailable')
+
+      let s
+      try {
+        s = await bp.getSigner()
+      } catch {
+        s = null
+      }
+      if (!s) return fail('Signer unavailable (wallet not hydrated)')
+
+      const to = tx?.to
+      if (!isNonZeroAddress(to)) return fail('Invalid "to" address')
+
+      const data = typeof tx?.data === 'string' ? tx.data : '0x'
+      const value = toBigIntSafe(tx?.value) ?? 0n
+
+      const req = { to, data, value }
+
+      const gasLimit = toBigIntSafe(tx?.gasLimit)
+      const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
+      const maxPriorityFeePerGas = toBigIntSafe(tx?.maxPriorityFeePerGas)
+      const gasPrice = toBigIntSafe(tx?.gasPrice)
+
+      if (gasLimit && gasLimit > 0n) req.gasLimit = gasLimit
+      if (maxFeePerGas && maxFeePerGas > 0n) req.maxFeePerGas = maxFeePerGas
+      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n) req.maxPriorityFeePerGas = maxPriorityFeePerGas
+      if (gasPrice && gasPrice > 0n) req.gasPrice = gasPrice
+
+      // Estimate gas if missing (buffered for mobile)
+      if (!req.gasLimit) {
+        try {
+          const est = await bp.estimateGas({ to, from, data, value })
+          req.gasLimit = (BigInt(est) * 130n) / 100n
+        } catch {
+          req.gasLimit = 900_000n
+        }
+      }
+
+      // Fee data if missing (let MM fill if not available)
+      if (!req.maxFeePerGas && !req.maxPriorityFeePerGas && !req.gasPrice) {
+        try {
+          const fee = await bp.getFeeData()
+          if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
+            req.maxFeePerGas = BigInt(fee.maxFeePerGas)
+            req.maxPriorityFeePerGas = BigInt(fee.maxPriorityFeePerGas)
+          } else if (fee?.gasPrice) {
+            req.gasPrice = BigInt(fee.gasPrice)
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      // Store created step (optional)
+      try {
+        if (meta?.flowId && txStore?.upsert) {
+          txStore.upsert({
+            flowId: meta.flowId,
+            kind: meta.kind || 'tx',
+            title: meta.title || meta.kind || 'Transaction',
+            step: meta.step || meta.kind || 'tx',
+            status: 'created',
+            chainId: chainDec,
+            from,
+            to,
+            txHash: null,
+            createdAt: Date.now()
+          })
+        }
+      } catch {
+        // no-op
+      }
+
+      const txResp = await s.sendTransaction(req)
+      const txHash = txResp?.hash || null
+
+      if (!txHash) {
+        return fail('Transaction submitted but no hash returned (wallet did not broadcast)')
+      }
+
+      try {
+        if (meta?.flowId && txStore?.upsert) {
+          txStore.upsert({
+            flowId: meta.flowId,
+            txHash,
+            status: 'submitted',
+            chainId: chainDec,
+            from,
+            to,
+            updatedAt: Date.now()
+          })
+        }
+      } catch {
+        // no-op
+      }
+
+      // Wait receipt (timeout-safe)
+      let receipt = null
+      try {
+        receipt = await raceTimeout(
+          bp.waitForTransaction(txHash, waitConfirms),
+          waitTimeoutMs,
+          'waitForTransaction timeout'
+        )
+      } catch (e) {
+        return {
+          success: true,
+          txHash,
+          txId: null,
+          status: 'submitted',
+          chainId: chainDec,
+          receipt: null,
+          error: null,
+          warning: e?.message || 'Confirmation timeout'
+        }
+      }
+
+      const status = receipt?.status === 1 ? 'confirmed' : 'failed'
+
+      try {
+        if (meta?.flowId && txStore?.upsert) {
+          txStore.upsert({
+            flowId: meta.flowId,
+            txHash,
+            status,
+            chainId: chainDec,
+            blockNumber: receipt?.blockNumber ?? null,
+            updatedAt: Date.now()
+          })
+        }
+      } catch {
+        // no-op
+      }
 
       return {
-        success: !!out.success,
-        txHash: out.txHash,
-        receipt: out.receipt,
-        status: out.status,
-        txId: out.id
+        success: receipt?.status === 1,
+        txHash,
+        txId: null,
+        status,
+        chainId: chainDec,
+        receipt,
+        error: receipt?.status === 1 ? null : 'Transaction reverted'
       }
-    } catch (err) {
-      const code = err?.code
-      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
-      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
-      return { success: false, error: code ? `${msg} (code ${code})` : msg }
+    } catch (e) {
+      const msg = e?.message || ''
+      const code = e?.code
+      const rejected =
+        code === 4001 ||
+        /user rejected/i.test(msg) ||
+        /denied transaction/i.test(msg) ||
+        /rejected/i.test(msg)
+
+      try {
+        if (meta?.flowId && txStore?.upsert) {
+          txStore.upsert({
+            flowId: meta.flowId,
+            status: rejected ? 'rejected' : 'error',
+            error: msg,
+            updatedAt: Date.now()
+          })
+        }
+      } catch {
+        // no-op
+      }
+
+      return fail(rejected ? 'User rejected the transaction' : e)
     }
   },
 
