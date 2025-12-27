@@ -93,29 +93,16 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// POST-only upstream retry
-async function fetch0xWithRetry(url, headers, bodyJson, reqId) {
+async function fetch0xWithRetry(url, headers, reqId) {
   const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     let resp;
     try {
-      resp = await fetchWithTimeout(
-        url,
-        {
-          method: "POST",
-          headers: {
-            ...headers,
-            "content-type": "application/json",
-            accept: "application/json",
-          },
-          body: JSON.stringify(bodyJson),
-        },
-        12_000
-      );
+      // 0x allowance-holder quote is GET-only
+      resp = await fetchWithTimeout(url, { method: "GET", headers }, 12_000);
     } catch (e) {
-      const msg =
-        e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
+      const msg = e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
       console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg);
       if (attempt === maxAttempts) throw e;
       await sleep(250 * attempt);
@@ -123,10 +110,7 @@ async function fetch0xWithRetry(url, headers, bodyJson, reqId) {
     }
 
     if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
-      console.log(
-        `[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`,
-        { reqId }
-      );
+      console.log(`[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`, { reqId });
       if (attempt === maxAttempts) return resp;
       await sleep(300 * attempt);
       continue;
@@ -195,7 +179,7 @@ exports.handler = async (event) => {
       slippageBps,
     });
 
-    const host = ZEROX_HOST_BY_CHAIN[chainId];
+    const host = "https://api.0x.org";
     if (!host) {
       console.log("[0x] ERROR: unsupported chainId:", chainId);
       return json(400, { error: `0x unsupported chainId: ${chainId}` }, { "x-req-id": reqId });
