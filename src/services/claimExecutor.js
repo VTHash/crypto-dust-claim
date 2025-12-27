@@ -6,21 +6,18 @@ import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
 /**
- * Requirements (strict):
- * - Every swap MUST be a tx to DustClaimV3 (tx hash = DustClaimV3 interaction)
- * - User approvals MUST be to DustClaimV3 (because DustClaimV3 pulls user tokens)
- * - DustClaimV3 MUST be the only executor of swap calldata (no direct 0x tx from EOA)
- * - Mobile-safe: strictly serialize wallet prompts (no overlapping MetaMask prompts)
- * - Prefetch quotes BEFORE any approval prompt (reduce mobile prompt timing issues)
- * - Skip tokens with no route cleanly (do not crash the flow)
+ * Mobile-safe behavior goals:
+ * - Always send SWAP as a tx to DustClaimV3 (so tx hash = DustClaimV3 interaction)
+ * - Prefetch quote BEFORE approval prompt (no wasted time between prompts)
+ * - Strictly serialize wallet prompts (MetaMask Mobile will break if overlapping)
+ * - Skip tokens with no route safely
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
 const isHexAddress = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a)
-const isNonZeroAddress = (a) =>
-  isHexAddress(a) && a.toLowerCase() !== '0x0000000000000000000000000000000000000000'
+const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== '0x0000000000000000000000000000000000000000'
 
 function normalizeChainId(chainIdLike) {
   if (typeof chainIdLike === 'string') {
@@ -45,7 +42,7 @@ function normalizeBigInt(v) {
 }
 
 // ------------------------------
-// Internal mutex to prevent overlapping MetaMask prompts
+// NEW: internal mutex to prevent overlapping MetaMask prompts
 // ------------------------------
 let _txQueue = Promise.resolve()
 function runExclusive(fn) {
@@ -54,26 +51,9 @@ function runExclusive(fn) {
 }
 
 // ------------------------------
-// Quote helper (STRICT validation for DustClaimV3 execution)
+// NEW: quote helper (strict “route exists” validation)
 // ------------------------------
-// IMPORTANT:
-// DustClaimV3 function shape: claimDustUsingAggregator(token, amount, spender, swapCalldata)
-// Inside the contract: it "forceApproves(spender)" and then "calls(spender, swapCalldata)".
-// That means spender MUST be the SAME address that the calldata is meant to be sent to.
-// Therefore we take spender = quote.transaction.to and require it be valid.
-//
-// Your Netlify function MUST return a quote that contains `transaction.to` + `transaction.data`
-// for the swap route. If it returns no transaction (liquidityAvailable false / no route), we skip.
-async function get0xQuoteStrict({
-  chainId,
-  sellToken,
-  buyToken,
-  sellAmount,
-  taker,
-  recipient,
-  txOrigin,
-  slippageBps
-}) {
+async function get0xQuoteStrict({ chainId, sellToken, buyToken, sellAmount, taker, recipient, txOrigin, slippageBps }) {
   const { data: q } = await axios.post(
     '/.netlify/functions/0x-quote',
     {
@@ -81,8 +61,6 @@ async function get0xQuoteStrict({
       sellToken,
       buyToken,
       sellAmount: String(sellAmount),
-      // Keep these for your current backend contract-style quoting model.
-      // taker/recipient are set to DustClaimV3 so the generated calldata is compatible with contract execution.
       taker,
       recipient,
       txOrigin,
@@ -91,48 +69,31 @@ async function get0xQuoteStrict({
     { headers: { 'content-type': 'application/json' } }
   )
 
-  const callTarget = q?.transaction?.to
-  const calldata = q?.transaction?.data
+  const to = q?.transaction?.to
+  const data = q?.transaction?.data
 
   // Must have transaction fields to proceed
-  if (!isNonZeroAddress(callTarget) || typeof calldata !== 'string' || calldata.length < 10) {
-    return {
-      ok: false,
-      reason: q?.message || q?.reason || 'No route / quote missing transaction',
-      quote: q
-    }
+  if (!isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
+    return { ok: false, reason: q?.message || 'No route / quote missing transaction', quote: q }
   }
 
-  // DustClaimV3 requires spender == call target (approve + call same address).
-  // So spender MUST be the transaction.to.
-  const spender = callTarget
-
+  // allowance-holder spender used inside DustClaimV3
+  const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
   if (!isNonZeroAddress(spender)) {
-    return { ok: false, reason: '0x quote missing transaction.to (spender)', quote: q }
-  }
-
-  // Optional: if allowanceTarget is present and differs, we do NOT try to execute,
-  // because the contract cannot approve A then call B.
-  const allowanceTarget = q?.allowanceTarget || q?.issues?.allowance?.spender || null
-  if (isNonZeroAddress(allowanceTarget) && allowanceTarget.toLowerCase() !== spender.toLowerCase()) {
-    return {
-      ok: false,
-      reason: `Quote spender mismatch (allowanceTarget != transaction.to). allowanceTarget=${allowanceTarget} tx.to=${spender}`,
-      quote: q
-    }
+    return { ok: false, reason: '0x quote missing allowance spender', quote: q }
   }
 
   return {
     ok: true,
     spender,
-    calldata,
+    calldata: data,
     gas: q?.transaction?.gas ?? null,
     quote: q
   }
 }
 
 // ------------------------------
-// Allowance check (MUST be for DustClaimV3, since it pulls user tokens)
+// NEW: allowance check (MUST be for DustClaimV3, since it pulls user tokens)
 // ------------------------------
 async function hasSufficientAllowanceToDustClaim(provider, token, owner, dustClaimV3, needed) {
   try {
@@ -194,7 +155,9 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
 
     if (!from) throw new Error('No wallet address')
 
-    const dep = DEPLOYMENTS?.[planChainId]
+    // IMPORTANT MINIMAL MULTICHAIN FIX:
+    // DEPLOYMENTS might be keyed by "8453" (string) not 8453 (number)
+    const dep = DEPLOYMENTS?.[planChainId] || DEPLOYMENTS?.[String(planChainId)]
     if (!dep?.dustClaimV3 || !isNonZeroAddress(dep.dustClaimV3)) {
       throw new Error(`Missing DustClaimV3 deployment for chain ${planChainId}`)
     }
@@ -210,7 +173,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
 
     /**
      * STEP 0: Prefetch quotes for all steps FIRST (no wallet prompts).
-     * Reduces wasted time between approval -> swap on mobile.
+     * This removes wasted time between approval -> swap on mobile.
      */
     const prepared = []
     for (const step of chainPlan.steps || []) {
@@ -224,18 +187,13 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         continue
       }
 
-      // only 0x supported in this executor
       if (step.aggregator && step.aggregator !== '0x') {
         prepared.push({ step, ok: false, skipReason: `unsupported aggregator: ${step.aggregator}` })
         continue
       }
 
-      // allow pre-provided quote (must still satisfy DustClaimV3 requirement: spender is the call target)
-      if (
-        isNonZeroAddress(step.routerSpender) &&
-        typeof step.swapCalldata === 'string' &&
-        step.swapCalldata.length >= 10
-      ) {
+      // allow pre-provided quote
+      if (isNonZeroAddress(step.routerSpender) && typeof step.swapCalldata === 'string' && step.swapCalldata.length >= 10) {
         prepared.push({
           step,
           ok: true,
@@ -265,7 +223,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
           prepared.push({
             step,
             ok: true,
-            routerSpender: q.spender, // IMPORTANT: must be the call target DustClaimV3 will approve+call
+            routerSpender: q.spender,
             swapCalldata: q.calldata,
             gasFromQuote: q.gas
           })
@@ -284,7 +242,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
     }
 
     /**
-     * STEP LOOP: wallet prompts strictly sequential.
+     * STEP LOOP: now do wallet prompts strictly sequentially.
      * For each prepared item:
      * - If no route, skip cleanly
      * - Approve DustClaimV3 (if needed)
@@ -401,10 +359,10 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         }
       }
 
-      // tiny yield between prompts (do not overlap MetaMask prompts)
+      // tiny yield between prompts (NOT long pacing)
       await sleep(120)
 
-      // 2) SWAP via DustClaimV3 (THIS tx hash must be DustClaimV3)
+      // 2) SWAP via DustClaimV3 (THIS is the tx hash you want to show)
       try {
         const claimData = encodeFunctionData({
           abi: DUSTCLAIM_V3_ABI,
@@ -482,6 +440,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         })
       }
 
+      // tiny yield; do not “pace” heavily
       await sleep(120)
     }
 

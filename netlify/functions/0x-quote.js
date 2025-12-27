@@ -1,16 +1,6 @@
 // netlify/functions/0x-quote.js
 // Browser -> Netlify: POST only (CORS + hide API key)
 // Netlify -> 0x: GET only (0x allowance-holder quote is GET with query params)
-//
-// DUSTCLAIMV3 COMPATIBILITY (HARD REQUIREMENTS):
-// - Frontend must ALWAYS submit: taker = DustClaimV3, recipient = DustClaimV3, txOrigin = user EOA
-// - This function enforces taker === recipient (DustClaimV3), and returns 0x quote as-is.
-// - ClaimExecutor MUST use: spender = quote.transaction.to AND calldata = quote.transaction.data
-// (DustClaimV3 approves+calls the SAME address; it cannot approve A then call B).
-//
-// NOTE:
-// 0x may return 200 with liquidityAvailable:false and no `transaction`.
-// That is a valid "no route" response; ClaimExecutor should skip safely.
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
@@ -64,10 +54,7 @@ function isHexAddress(a) {
 }
 
 function isNonZeroAddress(a) {
-  return (
-    isHexAddress(a) &&
-    a.toLowerCase() !== "0x0000000000000000000000000000000000000000"
-  );
+  return isHexAddress(a) && a.toLowerCase() !== "0x0000000000000000000000000000000000000000";
 }
 
 // ---------- tiny in-memory cache (warm lambda) ----------
@@ -110,21 +97,15 @@ async function fetch0xWithRetry(url, headers, reqId) {
     try {
       resp = await fetchWithTimeout(url, { method: "GET", headers }, 12_000);
     } catch (e) {
-      const msg =
-        e?.name === "AbortError" ? "fetch timeout" : e?.message || String(e);
-      console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg, {
-        reqId,
-      });
+      const msg = e?.name === "AbortError" ? "fetch timeout" : (e?.message || String(e));
+      console.log(`[0x] fetch error attempt ${attempt}/${maxAttempts}:`, msg, { reqId });
       if (attempt === maxAttempts) throw e;
       await sleep(250 * attempt);
       continue;
     }
 
     if (resp.status === 429 || (resp.status >= 500 && resp.status <= 599)) {
-      console.log(
-        `[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`,
-        { reqId }
-      );
+      console.log(`[0x] upstream status ${resp.status} attempt ${attempt}/${maxAttempts} (retrying)`, { reqId });
       if (attempt === maxAttempts) return resp;
       await sleep(300 * attempt);
       continue;
@@ -148,29 +129,19 @@ exports.handler = async (event) => {
   console.log("[0x] ua:", event.headers?.["user-agent"] || "n/a");
 
   try {
-    // CORS preflight
     if (event.httpMethod === "OPTIONS") {
       return { statusCode: 204, headers: CORS_HEADERS, body: "" };
     }
 
-    // POST only (browser -> function)
     if (event.httpMethod !== "POST") {
       console.log("[0x] Rejected: method not allowed");
-      return json(
-        405,
-        { error: "Method not allowed. Use POST" },
-        { "x-req-id": reqId }
-      );
+      return json(405, { error: "Method not allowed. Use POST" }, { "x-req-id": reqId });
     }
 
     const apiKey = process.env.ZEROX_API_KEY || process.env.VITE_0X_API_KEY;
     if (!apiKey) {
       console.log("[0x] ERROR: missing ZEROX_API_KEY / VITE_0X_API_KEY in env");
-      return json(
-        500,
-        { error: "Missing 0x API key in Netlify env vars." },
-        { "x-req-id": reqId }
-      );
+      return json(500, { error: "Missing 0x API key in Netlify env vars." }, { "x-req-id": reqId });
     }
 
     let body = {};
@@ -185,9 +156,9 @@ exports.handler = async (event) => {
     const sellToken = body.sellToken;
     const buyToken = body.buyToken;
     const sellAmount = body.sellAmount ?? body.sellAmountWei;
-    const taker = body.taker;
-    const recipient = body.recipient;
-    const txOrigin = body.txOrigin;
+    const taker = body.taker; // DustClaimV3
+    const recipient = body.recipient; // DustClaimV3
+    const txOrigin = body.txOrigin; // user EOA
     const slippageBps = body.slippageBps;
 
     console.log("[0x] REQUEST PARAMS:", {
@@ -196,75 +167,39 @@ exports.handler = async (event) => {
       buyToken: safeAddr(buyToken),
       sellAmount: sellAmount ? String(sellAmount) : sellAmount,
       taker: safeAddr(taker),
-      recipient: safeAddr(recipient),
       txOrigin: safeAddr(txOrigin),
+      recipient: safeAddr(recipient),
       slippageBps,
     });
 
-    // Validate chain + host
     if (!Number.isFinite(chainId) || chainId <= 0) {
       return json(400, { error: "Invalid chainId" }, { "x-req-id": reqId });
     }
+
     const host = ZEROX_HOST_BY_CHAIN[chainId];
     if (!host) {
       console.log("[0x] ERROR: unsupported chainId:", chainId);
-      return json(
-        400,
-        { error: `0x unsupported chainId: ${chainId}` },
-        { "x-req-id": reqId }
-      );
+      return json(400, { error: `0x unsupported chainId: ${chainId}` }, { "x-req-id": reqId });
     }
 
-    // Required fields
     if (!sellToken || !buyToken || !sellAmount || !taker || !recipient || !txOrigin) {
       console.log("[0x] ERROR: missing required fields");
       return json(
         400,
-        {
-          error:
-            "Missing required fields: chainId,sellToken,buyToken,sellAmount,taker,recipient,txOrigin",
-        },
+        { error: "Missing required fields: chainId,sellToken,buyToken,sellAmount,taker,recipient,txOrigin" },
         { "x-req-id": reqId }
       );
     }
 
-    // Strong input sanity
     if (!isNonZeroAddress(sellToken) || !isNonZeroAddress(buyToken)) {
-      return json(
-        400,
-        { error: "Invalid sellToken or buyToken address" },
-        { "x-req-id": reqId }
-      );
+      return json(400, { error: "Invalid sellToken or buyToken address" }, { "x-req-id": reqId });
     }
     if (!isNonZeroAddress(taker) || !isNonZeroAddress(recipient) || !isNonZeroAddress(txOrigin)) {
-      return json(
-        400,
-        { error: "Invalid taker/recipient/txOrigin address" },
-        { "x-req-id": reqId }
-      );
+      return json(400, { error: "Invalid taker/recipient/txOrigin address" }, { "x-req-id": reqId });
     }
 
-    // HARD REQUIREMENT for DustClaimV3 execution model
-    // taker MUST equal recipient (both must be DustClaimV3), because:
-    // - quote must be compatible with a contract caller (DustClaimV3),
-    // - proceeds should land back to DustClaimV3 for unwrap + payout.
-    if (String(taker).toLowerCase() !== String(recipient).toLowerCase()) {
-      return json(
-        400,
-        {
-          error:
-            "DustClaimV3 mode requires taker === recipient (both must be the DustClaimV3 address).",
-        },
-        { "x-req-id": reqId }
-      );
-    }
+    const bps = Number.isFinite(Number(slippageBps)) ? String(Math.trunc(Number(slippageBps))) : "100";
 
-    // Slippage
-    const bps = Number.isFinite(Number(slippageBps))
-      ? String(Math.trunc(Number(slippageBps)))
-      : "100";
-
-    // Cache key (stable)
     const cacheKey = JSON.stringify([
       chainId,
       sellToken.toLowerCase(),
@@ -272,8 +207,8 @@ exports.handler = async (event) => {
       String(sellAmount),
       taker.toLowerCase(),
       recipient.toLowerCase(),
-      txOrigin.toLowerCase(),
       bps,
+      txOrigin.toLowerCase(),
     ]);
 
     const cached = getCache(cacheKey);
@@ -283,7 +218,6 @@ exports.handler = async (event) => {
     }
 
     // Build 0x GET URL with query params
-    // NOTE: allowance-holder quote expects query params; we keep chainId for parity (works in your logs).
     const upstream = new URL(`${host}/swap/allowance-holder/quote`);
     upstream.search = new URLSearchParams({
       chainId: String(chainId),
@@ -292,8 +226,8 @@ exports.handler = async (event) => {
       sellAmount: String(sellAmount),
       taker,
       recipient,
-      txOrigin,
       slippageBps: bps,
+      txOrigin,
     }).toString();
 
     console.log("[0x] Calling URL (GET):", upstream.toString());
@@ -309,13 +243,7 @@ exports.handler = async (event) => {
     );
 
     const elapsed = Date.now() - started;
-    console.log(
-      "[0x] 0x response status:",
-      resp.status,
-      resp.statusText,
-      "elapsed(ms):",
-      elapsed
-    );
+    console.log("[0x] 0x response status:", resp.status, resp.statusText, "elapsed(ms):", elapsed);
 
     const text = await resp.text();
     let data;
@@ -325,38 +253,30 @@ exports.handler = async (event) => {
       data = { raw: text };
     }
 
-    // Optional: emit a strict DustClaimV3-compatibility hint (does not change response)
-    // ClaimExecutor will enforce spender == transaction.to.
-    const txTo = data?.transaction?.to;
-    const allowanceTarget = data?.allowanceTarget || data?.issues?.allowance?.spender || null;
-
     const summary = {
       ok: resp.ok,
       status: resp.status,
+      allowanceTarget: safeAddr(data?.allowanceTarget),
+      issues_allowance_spender: safeAddr(data?.issues?.allowance?.spender),
       hasTransaction: !!data?.transaction,
-      liquidityAvailable: data?.liquidityAvailable ?? null,
-      tx_to: safeAddr(txTo),
+      tx_to: safeAddr(data?.transaction?.to),
       tx_data_len: data?.transaction?.data ? String(data.transaction.data.length) : "0",
-      allowanceTarget: safeAddr(allowanceTarget),
-      spenderMatchesTxTo:
-        isNonZeroAddress(txTo) && isNonZeroAddress(allowanceTarget)
-          ? String(txTo).toLowerCase() === String(allowanceTarget).toLowerCase()
-          : null,
+      tx_value: data?.transaction?.value ?? null,
+      buyAmount: data?.buyAmount ?? null,
+      sellAmount: data?.sellAmount ?? null,
+      liquidityAvailable: data?.liquidityAvailable ?? null,
       issuesKeys: data?.issues ? Object.keys(data.issues) : [],
-      message: data?.message ?? null,
-      reason: data?.reason ?? null,
+      validationErrors: data?.validationErrors ?? null,
       code: data?.code ?? null,
+      reason: data?.reason ?? null,
+      message: data?.message ?? null,
     };
 
     console.log("[0x] Response summary:", summary);
 
     if (!resp.ok) {
       console.log("[0x] 0x ERROR body (capped 12k):", (text || "").slice(0, 12000));
-      return json(
-        resp.status,
-        { error: "0x error", status: resp.status, data },
-        { "x-req-id": reqId }
-      );
+      return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
     }
 
     setCache(cacheKey, data);
