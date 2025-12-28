@@ -19,6 +19,20 @@ function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
+// NEW: pick a single injected provider (avoids multi-provider stream collisions on PC)
+function pickInjectedProvider() {
+  const eth = typeof window !== 'undefined' ? window.ethereum : null
+  if (!eth) return null
+
+  // If multiple providers exist, pick MetaMask explicitly
+  if (Array.isArray(eth.providers) && eth.providers.length) {
+    const mm = eth.providers.find((p) => p?.isMetaMask || p?._metamask)
+    return mm || eth.providers[0] || eth
+  }
+
+  return eth
+}
+
 function hexToDec(hex) {
   if (!hex) return null
   try {
@@ -80,6 +94,10 @@ let signer = null
 let accounts = []
 let chainId = null
 
+// NEW: dedicated read-only provider for polling (do NOT use MetaMask stream)
+let readProvider = null
+let readProviderChainDec = null
+
 let reconciler = null
 
 let onAccChanged = null
@@ -95,6 +113,11 @@ function handleChain(hexId) {
   chainId = hexId
   signer = null
   browserProvider = null
+
+  // NEW: reset read provider on chain changes
+  readProvider = null
+  readProviderChainDec = null
+
   onChainChanged?.(hexId)
 }
 function handleDisconnect(err) {
@@ -103,6 +126,11 @@ function handleDisconnect(err) {
   signer = null
   browserProvider = null
   eip1193 = null
+
+  // NEW: reset read provider on disconnect
+  readProvider = null
+  readProviderChainDec = null
+
   onDisconnected?.(err)
 }
 function attachListeners() {
@@ -116,13 +144,16 @@ function attachListeners() {
 }
 
 async function ensureProvider() {
-  const injected = typeof window !== 'undefined' ? window.ethereum : null
+  const injected = pickInjectedProvider()
+
+  // Prefer injected MetaMask if present
   if (isInjectedMetaMask(injected)) {
     eip1193 = injected
     attachListeners()
     return eip1193
   }
 
+  // Otherwise use AppKit/WalletConnect provider
   const maybeProvider = await appKit.getProvider?.()
   if (maybeProvider) {
     eip1193 = maybeProvider
@@ -130,6 +161,7 @@ async function ensureProvider() {
     return eip1193
   }
 
+  // Last resort: any injected provider
   if (injected) {
     eip1193 = injected
     attachListeners()
@@ -172,11 +204,13 @@ async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
 
-  // MetaMask Mobile: this often fixes “no prompt / no broadcast”
-  try {
-    await eip1193.request?.({ method: 'eth_requestAccounts' })
-  } catch {
-    // ignore (WalletConnect providers may reject)
+  // Only request accounts if we don't already have them (prevents -32002 & stream issues)
+  if (!accounts?.length) {
+    try {
+      await eip1193.request?.({ method: 'eth_requestAccounts' })
+    } catch {
+      // ignore (WalletConnect providers may reject)
+    }
   }
 
   await ensureAccounts()
@@ -184,12 +218,31 @@ async function ensureHydratedForSend() {
   return true
 }
 
+// ---- NEW: read-only provider for reconciler (RPC URL from SUPPORTED_CHAINS) ----
+function getRpcUrlForChain(chainDec) {
+  const c = SUPPORTED_CHAINS?.[chainDec]
+  return c?.rpcUrl || null
+}
+
+async function getReadProvider() {
+  const hex = chainId || (await walletService.getChainId?.())
+  const dec = hexToDec(hex)
+  if (!dec) return null
+
+  if (readProvider && readProviderChainDec === dec) return readProvider
+
+  const url = getRpcUrlForChain(dec)
+  if (!url) return null
+
+  readProvider = new ethers.JsonRpcProvider(url)
+  readProviderChainDec = dec
+  return readProvider
+}
+
 // ---- reconciler wiring ----
 async function providerFactory() {
-  if (!eip1193) await ensureProvider()
-  if (!eip1193) return null
-  if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
-  return browserProvider
+  // IMPORTANT: reconciler should not use BrowserProvider (MetaMask inpage stream)
+  return await getReadProvider()
 }
 
 function startTxReconciler() {
@@ -310,7 +363,7 @@ const walletService = {
 
   async connect() {
     try {
-      const injected = typeof window !== 'undefined' ? window.ethereum : null
+      const injected = pickInjectedProvider()
 
       if (isInjectedMetaMask(injected)) {
         eip1193 = injected
@@ -456,7 +509,7 @@ const walletService = {
       const data = typeof tx?.data === 'string' ? tx.data : '0x'
       const value = toBigIntSafe(tx?.value) ?? 0n
 
-      const req = { from, to, data, value }
+      const req = { to, data, value }
 
       const gasLimit = toBigIntSafe(tx?.gasLimit)
       const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
@@ -479,12 +532,14 @@ const walletService = {
       }
 
       // Fee data if missing (let MM fill if not available)
-      if (!req.maxFeePerGas && !req.maxPriorityFeePerGas) {
+      if (!req.maxFeePerGas && !req.maxPriorityFeePerGas && !req.gasPrice) {
         try {
           const fee = await bp.getFeeData()
           if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
             req.maxFeePerGas = BigInt(fee.maxFeePerGas)
             req.maxPriorityFeePerGas = BigInt(fee.maxPriorityFeePerGas)
+          } else if (fee?.gasPrice) {
+            req.gasPrice = BigInt(fee.gasPrice)
           }
         } catch {
           // ignore
@@ -693,6 +748,9 @@ const walletService = {
     signer = null
     accounts = []
     chainId = null
+
+    readProvider = null
+    readProviderChainDec = null
   }
 }
 
