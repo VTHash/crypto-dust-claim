@@ -6,13 +6,26 @@ import { encodeFunctionData, erc20Abi } from 'viem'
 import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
 /**
- * Mobile-safe behavior goals:
- * - Always send SWAP as a tx to DustClaimV3 (so tx hash = DustClaimV3 interaction)
- * - Prefetch quote BEFORE approval prompt (no wasted time between prompts)
- * - Strictly serialize wallet prompts (MetaMask Mobile will break if overlapping)
- * - Skip tokens with no route safely
+ * DEVICE-AWARE UX (Desktop vs Mobile)
+ * ----------------------------------
+ * Goal: Make MetaMask Mobile reliable by NEVER sending approval + swap back-to-back automatically.
+ *
+ * - Desktop: default can do "one click" (approval -> swap) sequentially.
+ * - Mobile: MUST split into 2 user actions:
+ * 1) Approve required tokens
+ * 2) Claim Dust (swap) for prepared routes
+ *
+ * This file now exposes a 2-step API while keeping backwards compatibility:
+ * - prepareChainPlanWithFlow(chainPlan, fromAddress)
+ * - executeApprovalsWithFlow(preparedCtx)
+ * - executeSwapsWithFlow(preparedCtx)
+ * - executeChainPlanWithFlow(chainPlan, fromAddress) // device-aware wrapper
+ * - executeChainPlan(chainPlan, fromAddress) // receipts[] wrapper
  */
 
+// ----------------------------------
+// utils
+// ----------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
@@ -41,19 +54,38 @@ function normalizeBigInt(v) {
   }
 }
 
-// ------------------------------
-// NEW: internal mutex to prevent overlapping MetaMask prompts
-// ------------------------------
+function isProbablyMobile() {
+  if (typeof navigator === 'undefined') return false
+  const ua = (navigator.userAgent || '').toLowerCase()
+  // broad mobile heuristics
+  if (/android|iphone|ipad|ipod|iemobile|windows phone|mobile/.test(ua)) return true
+  // MetaMask Mobile UA often includes "MetaMaskMobile"
+  if (/metamaskmobile/.test(ua)) return true
+  return false
+}
+
+// ----------------------------------
+// internal mutex: prevent overlapping wallet prompts (critical on mobile)
+// ----------------------------------
 let _txQueue = Promise.resolve()
 function runExclusive(fn) {
   _txQueue = _txQueue.then(fn, fn)
   return _txQueue
 }
 
-// ------------------------------
-// NEW: quote helper (strict “route exists” validation)
-// ------------------------------
-async function get0xQuoteStrict({ chainId, sellToken, buyToken, sellAmount, taker, recipient, txOrigin, slippageBps }) {
+// ----------------------------------
+// 0x quote helper (strict route validation)
+// ----------------------------------
+async function get0xQuoteStrict({
+  chainId,
+  sellToken,
+  buyToken,
+  sellAmount,
+  taker,
+  recipient,
+  txOrigin,
+  slippageBps
+}) {
   const { data: q } = await axios.post(
     '/.netlify/functions/0x-quote',
     {
@@ -92,9 +124,9 @@ async function get0xQuoteStrict({ chainId, sellToken, buyToken, sellAmount, take
   }
 }
 
-// ------------------------------
-// NEW: allowance check (MUST be for DustClaimV3, since it pulls user tokens)
-// ------------------------------
+// ----------------------------------
+// allowance check (spender MUST be DustClaimV3, since it pulls user tokens)
+// ----------------------------------
 async function hasSufficientAllowanceToDustClaim(provider, token, owner, dustClaimV3, needed) {
   try {
     const allowanceData = encodeFunctionData({
@@ -111,15 +143,15 @@ async function hasSufficientAllowanceToDustClaim(provider, token, owner, dustCla
   }
 }
 
-// ------------------------------
-// Flow-aware version (returns { flowId, receipts })
-// ------------------------------
-export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
+// ----------------------------------
+// STEP A: Prepare plan (NO wallet prompts)
+// ----------------------------------
+export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
+  // preparation does not require exclusivity, but keep it consistent and safe
   return runExclusive(async () => {
-    const receipts = []
     const flowId = newFlowId()
 
-    // Ensure wallet connection
+    // Ensure wallet connection (needed for from + chain switching UX consistency)
     const connected = await walletService.isConnected?.()
     if (!connected) {
       const res = await walletService.connect?.()
@@ -141,7 +173,6 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         throw new Error(`Chain switch did not complete (expected ${planChainId}, got ${afterId})`)
       }
 
-      // tiny yield only
       await sleep(150)
     }
 
@@ -170,8 +201,8 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
     }
 
     /**
-     * STEP 0: Prefetch quotes for all steps FIRST (no wallet prompts).
-     * This removes wasted time between approval -> swap on mobile.
+     * Prefetch quotes for all steps FIRST (no wallet prompts).
+     * IMPORTANT: txOrigin MUST be the user address (from).
      */
     const prepared = []
     for (const step of chainPlan.steps || []) {
@@ -211,7 +242,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
           sellAmount: String(amountWei),
           taker: dep.dustClaimV3,
           recipient: dep.dustClaimV3,
-          txOrigin: from,
+          txOrigin: from, // CRITICAL FIX: user is txOrigin
           slippageBps: step.slippageBps ?? 100
         })
 
@@ -239,18 +270,205 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
       }
     }
 
-    /**
-     * STEP LOOP: now do wallet prompts strictly sequentially.
-     * For each prepared item:
-     * - If no route, skip cleanly
-     * - Approve DustClaimV3 (if needed)
-     * - Immediately call DustClaimV3.claimDustUsingAggregator(...)
-     */
+    // Summaries for UI: which tokens need approval, and which swaps are available
+    const approvalSet = new Map() // tokenIn -> needed amount (max)
+    const swappable = []
+
     for (const p of prepared) {
       const step = p.step
-      const tokenIn = step.tokenIn
-      const tokenOut = step.tokenOut
-      const amountWei = normalizeBigInt(step.amount || 0)
+      const tokenIn = step?.tokenIn
+      const amountWei = normalizeBigInt(step?.amount || 0)
+
+      if (!p.ok) continue
+      if (!isNonZeroAddress(p.routerSpender) || typeof p.swapCalldata !== 'string' || p.swapCalldata.length < 10) continue
+
+      swappable.push(p)
+
+      if (step?.needsApproval && !step?.usePermit && isNonZeroAddress(tokenIn) && amountWei > 0n) {
+        const prev = approvalSet.get(tokenIn) || 0n
+        if (amountWei > prev) approvalSet.set(tokenIn, amountWei) // approve max needed for that token
+      }
+    }
+
+    const approvalsNeeded = Array.from(approvalSet.entries()).map(([tokenAddress, amountWei]) => ({
+      tokenAddress,
+      amountWei
+    }))
+
+    return {
+      flowId,
+      chainId: planChainId,
+      from,
+      dustClaimV3: dep.dustClaimV3,
+      prepared,
+      approvalsNeeded,
+      swappableCount: swappable.length,
+      isMobile: isProbablyMobile()
+    }
+  })
+}
+
+// ----------------------------------
+// STEP B: Execute approvals ONLY
+// ----------------------------------
+export async function executeApprovalsWithFlow(preparedCtx) {
+  return runExclusive(async () => {
+    const receipts = []
+
+    const flowId = preparedCtx?.flowId || newFlowId()
+    const planChainId = normalizeChainId(preparedCtx?.chainId)
+    const from = preparedCtx?.from || (await walletService.getAddress?.())
+    const dustClaimV3 = preparedCtx?.dustClaimV3
+
+    if (!from) throw new Error('No wallet address')
+    if (!planChainId) throw new Error('Missing chainId in prepared context')
+    if (!isNonZeroAddress(dustClaimV3)) throw new Error('Missing DustClaimV3 in prepared context')
+
+    // Ensure still on correct chain
+    const currentChainHex = await walletService.getChainId?.()
+    const currentChainId = normalizeChainId(currentChainHex)
+    if (currentChainId !== planChainId) {
+      const sw = await walletService.switchChain(planChainId)
+      if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
+      await sleep(150)
+    }
+
+    const provider = await walletService.getBrowserProvider?.()
+    if (!provider) throw new Error('Provider unavailable')
+
+    const approvalsNeeded = Array.isArray(preparedCtx?.approvalsNeeded) ? preparedCtx.approvalsNeeded : []
+
+    for (const a of approvalsNeeded) {
+      const tokenIn = a?.tokenAddress
+      const amountWei = normalizeBigInt(a?.amountWei)
+
+      if (!isNonZeroAddress(tokenIn) || amountWei <= 0n) {
+        receipts.push({
+          flowId,
+          type: 'approval',
+          ok: true,
+          skipped: true,
+          reason: 'invalid token/amount',
+          chainId: planChainId,
+          tokenIn,
+          spender: dustClaimV3,
+          amount: String(amountWei)
+        })
+        continue
+      }
+
+      try {
+        const okAllowance = await hasSufficientAllowanceToDustClaim(provider, tokenIn, from, dustClaimV3, amountWei)
+        if (okAllowance) {
+          receipts.push({
+            flowId,
+            type: 'approval',
+            ok: true,
+            skipped: true,
+            reason: 'allowance already sufficient',
+            chainId: planChainId,
+            tokenIn,
+            spender: dustClaimV3,
+            amount: String(amountWei)
+          })
+          continue
+        }
+
+        const approvalData = encodeFunctionData({
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [dustClaimV3, amountWei]
+        })
+
+        const approvalRes = await walletService.sendTransactionWithReceipt(
+          { from, to: tokenIn, data: approvalData, value: 0n },
+          {
+            flowId,
+            kind: 'approval',
+            title: 'Approve token',
+            step: 'approval',
+            tokenAddress: tokenIn,
+            spender: dustClaimV3,
+            amount: String(amountWei),
+            waitConfirms: 1,
+            waitTimeoutMs: 240000
+          }
+        )
+
+        receipts.push({
+          flowId,
+          type: 'approval',
+          ok: !!approvalRes?.success,
+          txHash: approvalRes?.txHash || null,
+          status: approvalRes?.status || null,
+          chainId: planChainId,
+          tokenIn,
+          spender: dustClaimV3,
+          amount: String(amountWei),
+          blockNumber: approvalRes?.receipt?.blockNumber ?? null,
+          error: approvalRes?.error || null,
+          warning: approvalRes?.warning || null
+        })
+
+        if (!approvalRes?.success) {
+          // if an approval fails, stop further approvals on mobile-friendly UX,
+          // but on desktop you might want to continue; safest is stop here.
+          break
+        }
+      } catch (err) {
+        receipts.push({
+          flowId,
+          type: 'approval',
+          ok: false,
+          chainId: planChainId,
+          tokenIn,
+          spender: dustClaimV3,
+          amount: String(amountWei),
+          error: err?.shortMessage || err?.reason || err?.message || 'Approval failed'
+        })
+        break
+      }
+
+      // tiny yield between prompts
+      await sleep(150)
+    }
+
+    return { flowId, receipts }
+  })
+}
+
+// ----------------------------------
+// STEP C: Execute swaps ONLY (DustClaimV3.claimDustUsingAggregator)
+// ----------------------------------
+export async function executeSwapsWithFlow(preparedCtx) {
+  return runExclusive(async () => {
+    const receipts = []
+
+    const flowId = preparedCtx?.flowId || newFlowId()
+    const planChainId = normalizeChainId(preparedCtx?.chainId)
+    const from = preparedCtx?.from || (await walletService.getAddress?.())
+    const dustClaimV3 = preparedCtx?.dustClaimV3
+
+    if (!from) throw new Error('No wallet address')
+    if (!planChainId) throw new Error('Missing chainId in prepared context')
+    if (!isNonZeroAddress(dustClaimV3)) throw new Error('Missing DustClaimV3 in prepared context')
+
+    // Ensure still on correct chain
+    const currentChainHex = await walletService.getChainId?.()
+    const currentChainId = normalizeChainId(currentChainHex)
+    if (currentChainId !== planChainId) {
+      const sw = await walletService.switchChain(planChainId)
+      if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
+      await sleep(150)
+    }
+
+    const prepared = Array.isArray(preparedCtx?.prepared) ? preparedCtx.prepared : []
+
+    for (const p of prepared) {
+      const step = p.step
+      const tokenIn = step?.tokenIn
+      const tokenOut = step?.tokenOut
+      const amountWei = normalizeBigInt(step?.amount || 0)
 
       if (!p.ok) {
         receipts.push({
@@ -284,84 +502,11 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         continue
       }
 
-      // 1) APPROVE (spender = DustClaimV3)
-      if (step.needsApproval && !step.usePermit) {
-        try {
-          const okAllowance = await hasSufficientAllowanceToDustClaim(provider, tokenIn, from, dep.dustClaimV3, amountWei)
-          if (!okAllowance) {
-            const approvalData = encodeFunctionData({
-              abi: erc20Abi,
-              functionName: 'approve',
-              args: [dep.dustClaimV3, amountWei]
-            })
+      // Minimal mobile-safe yield before prompting
+      await sleep(150)
 
-            const approvalRes = await walletService.sendTransactionWithReceipt(
-              { from, to: tokenIn, data: approvalData, value: 0n },
-              {
-                flowId,
-                kind: 'approval',
-                title: 'Approve token',
-                step: 'approval',
-                tokenAddress: tokenIn,
-                spender: dep.dustClaimV3,
-                amount: String(amountWei),
-                waitConfirms: 1,
-                waitTimeoutMs: 240000
-              }
-            )
-
-            receipts.push({
-              flowId,
-              type: 'approval',
-              ok: !!approvalRes?.success,
-              txHash: approvalRes?.txHash || null,
-              status: approvalRes?.status || null,
-              chainId: planChainId,
-              tokenIn,
-              spender: dep.dustClaimV3,
-              amount: String(amountWei),
-              blockNumber: approvalRes?.receipt?.blockNumber ?? null,
-              error: approvalRes?.error || null,
-              warning: approvalRes?.warning || null
-            })
-
-            if (!approvalRes?.success) {
-              // approval failed: skip swap, proceed to next
-              continue
-            }
-          } else {
-            receipts.push({
-              flowId,
-              type: 'approval',
-              ok: true,
-              skipped: true,
-              reason: 'allowance already sufficient',
-              chainId: planChainId,
-              tokenIn,
-              spender: dep.dustClaimV3,
-              amount: String(amountWei)
-            })
-          }
-        } catch (err) {
-          receipts.push({
-            flowId,
-            type: 'approval',
-            ok: false,
-            chainId: planChainId,
-            tokenIn,
-            spender: dep.dustClaimV3,
-            amount: String(amountWei),
-            error: err?.shortMessage || err?.reason || err?.message || 'Approval failed'
-          })
-          continue
-        }
-      }
-
-      // tiny yield between prompts (NOT long pacing)
-      await sleep(120)
-
-      // 2) SWAP via DustClaimV3 (THIS is the tx hash you want to show)
       try {
+        // IMPORTANT: this must call claimDustUsingAggregator (as you requested)
         const claimData = encodeFunctionData({
           abi: DUSTCLAIM_V3_ABI,
           functionName: 'claimDustUsingAggregator',
@@ -375,7 +520,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         try {
           const signer = await walletService.getSigner?.()
           if (signer) {
-            const contract = new ethers.Contract(dep.dustClaimV3, DUSTCLAIM_V3_ABI, signer)
+            const contract = new ethers.Contract(dustClaimV3, DUSTCLAIM_V3_ABI, signer)
             const est = await contract.claimDustUsingAggregator.estimateGas(tokenIn, amountWei, routerSpender, swapCalldata)
             const bumped = (BigInt(est) * 135n) / 100n
             if (bumped > gasLimit) gasLimit = bumped
@@ -387,7 +532,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         const swapRes = await walletService.sendTransactionWithReceipt(
           {
             from,
-            to: dep.dustClaimV3, // IMPORTANT: interaction hash will be DustClaimV3
+            to: dustClaimV3, // tx hash is DustClaimV3 interaction
             data: claimData,
             value: 0n,
             gasLimit
@@ -415,7 +560,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
           tokenIn,
           tokenOut,
           routerSpender,
-          dustClaimV3: dep.dustClaimV3,
+          dustClaimV3,
           blockNumber: swapRes?.receipt?.blockNumber ?? null,
           error: swapRes?.error || null,
           warning: swapRes?.warning || null
@@ -438,17 +583,58 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         })
       }
 
-      // tiny yield; do not “pace” heavily
-      await sleep(120)
+      await sleep(150)
     }
 
     return { flowId, receipts }
   })
 }
 
-// ------------------------------
+// ----------------------------------
+// DEVICE-AWARE WRAPPER: One-click on desktop, split on mobile
+// ----------------------------------
+export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
+  return runExclusive(async () => {
+    // Step 1: Prepare (quotes, chain, from)
+    const preparedCtx = await prepareChainPlanWithFlow(chainPlan, fromAddress)
+
+    // Step 2: Approvals first (always safe)
+    const approvals = await executeApprovalsWithFlow(preparedCtx)
+
+    // If mobile: stop here and instruct UI to show "Claim Dust" button next
+    if (preparedCtx.isMobile) {
+      const receipts = [...(approvals?.receipts || [])]
+
+      // Add an explicit UX marker receipt so UI can show the next action deterministically
+      receipts.push({
+        flowId: preparedCtx.flowId,
+        type: 'ux',
+        ok: true,
+        chainId: preparedCtx.chainId,
+        nextAction: 'swap',
+        message: 'Approvals complete. On mobile, proceed with Claim Dust as a separate action.'
+      })
+
+      return {
+        flowId: preparedCtx.flowId,
+        receipts,
+        preparedCtx,
+        nextAction: 'swap'
+      }
+    }
+
+    // Desktop: proceed to swaps automatically
+    const swaps = await executeSwapsWithFlow(preparedCtx)
+    return {
+      flowId: preparedCtx.flowId,
+      receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])],
+      preparedCtx,
+      nextAction: null
+    }
+  })
+}
+
 // Backwards-compatible version (returns receipts[])
-// ------------------------------
 export async function executeChainPlan(chainPlan, fromAddress) {
   const { receipts } = await executeChainPlanWithFlow(chainPlan, fromAddress)
   return receipts
