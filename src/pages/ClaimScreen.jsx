@@ -13,14 +13,69 @@ import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
 import './ClaimScreen.css'
 
+// storage keys
+const LS_LAST_CLAIM_PLAN = 'dustclaim:lastClaimPlan'
+const LS_LAST_BATCH_SAVINGS = 'dustclaim:lastBatchSavings'
+const LS_LAST_DEVICE = 'dustclaim:lastDevice'
+
 const ClaimScreen = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { address, isConnected } = useWallet()
   const { results: scanResults } = useScan()
 
-  // ---------------- state from scanner ----------------
-  const { claimPlan = [], batchSavings = null, device = 'desktop' } = location.state || {}
+  // =============================================================================
+  // 1) Hydrate claimPlan from router state OR sessionStorage (critical for mobile)
+  // =============================================================================
+  const [claimPlan, setClaimPlan] = useState(() => {
+    const fromState = location.state?.claimPlan
+    if (Array.isArray(fromState) && fromState.length) return fromState
+
+    try {
+      const raw = sessionStorage.getItem(LS_LAST_CLAIM_PLAN)
+      const parsed = raw ? JSON.parse(raw) : null
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+
+  const batchSavings = useMemo(() => {
+    const fromState = location.state?.batchSavings
+    if (fromState) return fromState
+    try {
+      const raw = sessionStorage.getItem(LS_LAST_BATCH_SAVINGS)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }, [location.state])
+
+  const device = useMemo(() => {
+    const fromState = location.state?.device
+    if (fromState) return fromState
+    try {
+      return sessionStorage.getItem(LS_LAST_DEVICE) || 'desktop'
+    } catch {
+      return 'desktop'
+    }
+  }, [location.state])
+
+  // Persist on entry if router state had it (ensures it survives refresh)
+  useEffect(() => {
+    const fromState = location.state?.claimPlan
+    if (Array.isArray(fromState) && fromState.length) {
+      setClaimPlan(fromState)
+      try {
+        sessionStorage.setItem(LS_LAST_CLAIM_PLAN, JSON.stringify(fromState))
+        sessionStorage.setItem(LS_LAST_BATCH_SAVINGS, JSON.stringify(location.state?.batchSavings || null))
+        sessionStorage.setItem(LS_LAST_DEVICE, String(location.state?.device || 'desktop'))
+      } catch {
+        // ignore
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ---------------- hydrate scan snapshot ----------------
   const [scanSnapshot] = useState(() => {
@@ -162,12 +217,11 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // Prepared context cache (per chain)
-  // IMPORTANT: DO NOT auto-prepare in useEffect (MetaMask blocks non-user prompts).
+  // Prepared context cache (per chain) – click only
   // ============================================================================
   const [preparing, setPreparing] = useState(false)
-  const [preparedByChain, setPreparedByChain] = useState({}) // { [chainId]: preparedCtx }
-  const [prepareErrors, setPrepareErrors] = useState({}) // { [chainId]: string }
+  const [preparedByChain, setPreparedByChain] = useState({})
+  const [prepareErrors, setPrepareErrors] = useState({})
   const [error, setError] = useState(null)
 
   const [approving, setApproving] = useState(false)
@@ -175,7 +229,6 @@ const ClaimScreen = () => {
   const [currentStep, setCurrentStep] = useState(0)
   const [actionResults, setActionResults] = useState([])
 
-  // Cancel flag for long prepares (cannot abort MetaMask, but we can stop UI lock)
   const prepareRunRef = useRef({ runId: 0, canceled: false })
   const bumpPrepareRun = () => {
     prepareRunRef.current = { runId: prepareRunRef.current.runId + 1, canceled: false }
@@ -196,13 +249,14 @@ const ClaimScreen = () => {
   }
 
   const prepareAllChains = useCallback(async () => {
-    // MUST be called from a click handler (user gesture) for MetaMask reliability
     if (!isConnected) {
       setError('Connect your wallet to prepare the claim plan.')
       return
     }
+
+    // IMPORTANT: Button should still react even if planAvailable is false
     if (!planAvailable) {
-      setError('No swap plan available. Please rescan.')
+      setError('No swap plan available on this screen. Go back to Scanner, rescan, then open Claim again.')
       return
     }
 
@@ -225,7 +279,6 @@ const ClaimScreen = () => {
         setCurrentStep(i + 1)
 
         try {
-          // Per-chain timeout so we do not lock the UI indefinitely
           const ctx = await withTimeout(
             prepareChainPlanWithFlow(chainPlan, address),
             60_000,
@@ -239,7 +292,6 @@ const ClaimScreen = () => {
         await new Promise((r) => setTimeout(r, 150))
       }
     } finally {
-      // Only commit if this run is still the latest
       if (prepareRunRef.current.runId === runId) {
         setPreparedByChain(nextPrepared)
         setPrepareErrors(nextErrors)
@@ -333,7 +385,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // ACTION 2: Swaps ONLY
+  // ACTION 2: Swaps ONLY (DustClaimV3.claimDustUsingAggregator)
   // ============================================================================
   const handleClaimOnly = async () => {
     if (!isConnected) {
@@ -419,16 +471,13 @@ const ClaimScreen = () => {
         </p>
       </div>
 
-      {/* Summary */}
       <div className="summary-card">
         <div className="summary-grid">
           <div className="summary-item">
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">
-                {usdFmt(computedTotalDustValue)}
-              </div>
+              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
             </div>
           </div>
 
@@ -478,7 +527,6 @@ const ClaimScreen = () => {
         </div>
       </div>
 
-      {/* Chains */}
       {dustResults.length > 0 && (
         <div className="chains-section">
           <h2>Detected Chains</h2>
@@ -516,14 +564,15 @@ const ClaimScreen = () => {
         </div>
       )}
 
-      {/* ACTIONS */}
       <div className="action-section" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ width: '100%', fontSize: 12, opacity: 0.8 }}>
-  busy={String(busy)} preparing={String(preparing)} approving={String(approving)} claiming={String(claiming)} preparedCount={preparedCount} planAvailable={String(planAvailable)} isConnected={String(isConnected)}
-</div>
+          busy={String(busy)} preparing={String(preparing)} approving={String(approving)} claiming={String(claiming)} preparedCount={preparedCount} planAvailable={String(planAvailable)} isConnected={String(isConnected)}
+        </div>
+
+        {/* DO NOT disable this based on planAvailable; let it respond and show error */}
         <button
           onClick={prepareAllChains}
-          disabled={busy || !planAvailable}
+          disabled={busy}
           className="execute-button"
           title="Fetch 0x routes once and cache them (no transactions). Must be clicked to allow MetaMask prompts."
         >
@@ -566,7 +615,6 @@ const ClaimScreen = () => {
         )}
       </div>
 
-      {/* Progress */}
       {busy && progressTotal > 0 && (
         <div className="claiming-progress">
           <span>
@@ -575,7 +623,6 @@ const ClaimScreen = () => {
         </div>
       )}
 
-      {/* Results */}
       {actionResults.length > 0 && (
         <div className="results-card">
           <h3>Results</h3>
@@ -592,49 +639,12 @@ const ClaimScreen = () => {
                   {info.name} · {String(r.action || 'tx').toUpperCase()}
                 </strong>
                 {r.error && <p>{r.error}</p>}
-
-                {Array.isArray(r.receipts) && r.receipts.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    {r.receipts.map((rcpt, j) => {
-                      const url = explorerTxUrl(r.chainId, rcpt.txHash)
-                      const label =
-                        rcpt.type === 'approval'
-                          ? 'Approval'
-                          : rcpt.type === 'swap'
-                          ? 'Swap'
-                          : rcpt.type || 'Tx'
-
-                      return (
-                        <div key={j} style={{ fontSize: 13, opacity: 0.95, marginTop: 6 }}>
-                          <span style={{ fontWeight: 600 }}>{label}:</span>{' '}
-                          {rcpt.txHash ? (
-                            url ? (
-                              <a href={url} target="_blank" rel="noreferrer">
-                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
-                              </a>
-                            ) : (
-                              <span>
-                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
-                              </span>
-                            )
-                          ) : (
-                            <span>{rcpt.ok ? 'OK' : 'Not submitted'}</span>
-                          )}
-                          {rcpt.error && (
-                            <div style={{ marginTop: 2, opacity: 0.85 }}>{rcpt.error}</div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
               </div>
             )
           })}
         </div>
       )}
 
-      {/* Transaction Activity */}
       <div className="results-card" style={{ marginTop: 16 }}>
         <h3>Transaction Activity{pendingCount > 0 ? ` (Pending: ${pendingCount})` : ''}</h3>
 
@@ -687,12 +697,6 @@ const ClaimScreen = () => {
                   {t.error && (
                     <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
                       {t.error}
-                    </div>
-                  )}
-
-                  {t.blockNumber && (
-                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
-                      Block: {t.blockNumber}
                     </div>
                   )}
                 </div>
