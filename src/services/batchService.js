@@ -1,18 +1,13 @@
 // src/services/batchService.jsx
 import { ethers } from 'ethers'
-import web3Service from './web3Service'
-import dexAggregatorService from './dexAggregatorService' // kept to avoid breaking imports
 import axios from 'axios'
 import walletService from './walletService'
 import { DEPLOYMENTS } from '../config/deployments'
 
 // Normalize any input into a wei string
 const toWeiStr = (amount, decimals = 18) => {
-  if (amount === null || amount === undefined) return '0'
-  const s = String(amount)
-  // already a bigint-like integer string
-  if (!s.includes('.')) return s
-  return ethers.parseUnits(s, decimals).toString()
+  const s = String(amount ?? '0')
+  return s.includes('.') ? ethers.parseUnits(s, decimals).toString() : s
 }
 
 /**
@@ -46,7 +41,6 @@ async function get0xAllowanceHolderQuote({
     headers: { 'content-type': 'application/json' }
   })
 
-  console.log('[batchService] 0x-quote response keys:', Object.keys(res?.data || {}))
   console.log('[batchService] 0x-quote tx.to:', res?.data?.transaction?.to)
   console.log('[batchService] 0x-quote tx.data len:', res?.data?.transaction?.data?.length || 0)
   console.log(
@@ -73,17 +67,12 @@ async function getTxOriginFallback(optionsTxOrigin) {
 class BatchService {
   /**
    * claims = [{ chainId, tokenAddress, amount, decimals, recipient }]
-   * options = { txOrigin, slippagePct, outTokenByChain }
-   *
-   * IMPORTANT:
-   * - DustClaimV3 pulls tokens from the user => user must approve DustClaimV3 (NOT 0x spender)
-   * - 0x spender (allowance-holder) is used inside DustClaimV3.call(spender, calldata)
+   * options = { txOrigin, slippagePct }
    */
   async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || claims.length === 0) return []
 
     const slippagePct = Number(options.slippagePct ?? 1)
-    const slippageBps = Math.round(slippagePct * 100) // 1% => 100 bps
     const txOrigin = await getTxOriginFallback(options.txOrigin)
 
     if (!txOrigin) {
@@ -117,7 +106,6 @@ class BatchService {
         const decimals = Number(it.decimals ?? 18)
         const sellAmountWei = toWeiStr(it.amount, decimals)
 
-        // Skip nonsense amounts
         try {
           if (BigInt(sellAmountWei) <= 0n) continue
         } catch {
@@ -133,8 +121,8 @@ class BatchService {
             sellAmountWei,
             taker: dep.dustClaimV3, // contract is taker
             recipient: dep.dustClaimV3, // contract must receive WETH
-            txOrigin, // user EOA (CRITICAL)
-            slippageBps
+            txOrigin, // user EOA
+            slippageBps: Math.round(slippagePct * 100)
           })
         } catch (e) {
           console.warn(
@@ -146,52 +134,55 @@ class BatchService {
         }
 
         const callTarget = q?.transaction?.to || null
-        const routerSpender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
-        const swapCalldata = q?.transaction?.data || null
-        const gasFromQuote = q?.transaction?.gas ?? null
+        const calldata = q?.transaction?.data || null
+        const allowanceSpender =
+          q?.issues?.allowance?.spender || q?.allowanceTarget || null
 
-        // HARD GUARD
-        if (!callTarget || !routerSpender || !swapCalldata) {
+        if (!callTarget || !calldata || !allowanceSpender) {
           console.warn('[0x] invalid quote, missing fields', {
             chainId,
             tokenIn,
             callTarget,
-            routerSpender,
-            calldataLen: swapCalldata?.length || 0,
-            keys: Object.keys(q || {})
+            allowanceSpender,
+            calldataLen: calldata?.length || 0
           })
           continue
         }
 
-        /**
-         * IMPORTANT:
-         * Approval spender is DustClaimV3 (because it pulls tokens from the user).
-         * The routerSpender returned by 0x is only used as the `spender` argument
-         * inside DustClaimV3.claimDustUsingAggregator(...).
-         */
+        // DustClaimV3 calls: spender.call(calldata)
+        // So spender MUST be callable. With allowance-holder quotes, spender is typically tx.to.
+        // Your strict requirement is reasonable; keep it to avoid incompatible quotes.
+        if (String(callTarget).toLowerCase() !== String(allowanceSpender).toLowerCase()) {
+          console.warn('[0x] incompatible allowance-holder quote (tx.to != allowance spender)', {
+            chainId,
+            tokenIn,
+            callTarget,
+            allowanceSpender
+          })
+          continue
+        }
+
         steps.push({
           aggregator: '0x',
 
           needsApproval: true,
           usePermit: false,
 
-          // spender for approval (semantic + future-proof; claimExecutor already approves DustClaimV3)
-          approvalSpender: dep.dustClaimV3,
+          // ✅ FIX: user must approve DustClaimV3 (it pulls tokens via transferFrom)
+          spender: dep.dustClaimV3,
 
           tokenIn,
           tokenOut: dep.weth,
           amount: sellAmountWei,
 
-          // used by claimExecutor to call DustClaimV3
-          routerSpender,
-          swapCalldata,
-          gasFromQuote,
+          // ✅ DustClaimV3 will approve+call this spender internally
+          routerSpender: allowanceSpender,
+          swapCalldata: calldata,
 
-          // optional debug fields
+          // optional debug
           callTarget,
 
-          slippagePct,
-          slippageBps
+          slippage: slippagePct
         })
       }
 
