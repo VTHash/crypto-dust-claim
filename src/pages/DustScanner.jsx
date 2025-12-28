@@ -197,56 +197,71 @@ export default function DustScanner() {
    * - Mobile: still proceed to /claim, but mark device=mobile so ClaimScreen can enforce 2-step buttons
    */
   const handleBatchClaim = async () => {
-    if (!address) return
+  if (!address) return
 
-    const claims = buildActionUniverse.map((it) => ({
-      chainId: it.chainId,
-      tokenAddress: it.address,
-      tokenSymbol: it.symbol,
-      amount: it.balance,
-      decimals: it.decimals ?? 18,
-      recipient: address
-    }))
+  const claims = buildActionUniverse.map((it) => ({
+    chainId: it.chainId,
+    tokenAddress: it.address,
+    tokenSymbol: it.symbol,
+    amount: it.balance,
+    decimals: it.decimals ?? 18,
+    recipient: address
+  }))
 
-    let claimPlan = []
-    let batchTransactions = []
-    let oneInchSingle = null
-    let oneInchBatch = null
-    let uniswapSingle = null
-    let batchSavings = null
+  let claimPlan = []
+  let batchTransactions = []
+  let oneInchSingle = null
+  let oneInchBatch = null
+  let uniswapSingle = null
+  let batchSavings = null
 
-    try {
-      if (typeof batchService.buildClaimPlan === 'function') {
-        try {
-          claimPlan = await batchService.buildClaimPlan(claims, {
-            txOrigin: address,
-            slippagePct: 1,
-            outTokenByChain: settings.outTokenByChain
-          })
-        } catch (e) {
-          console.warn('[DustScanner] buildClaimPlan failed:', e)
-          claimPlan = []
-        }
+  try {
+    if (typeof batchService.buildClaimPlan === 'function') {
+      try {
+        claimPlan = await batchService.buildClaimPlan(claims, {
+          txOrigin: address,
+          slippagePct: 1,
+          outTokenByChain: settings.outTokenByChain
+        })
+      } catch (e) {
+        console.warn('[DustScanner] buildClaimPlan failed:', e)
+        claimPlan = []
       }
-    } finally {
-      console.log('[DustScanner] ClaimPlan built:', claimPlan)
-      navigate('/claim', {
-        state: {
-          claimPlan,
-          batchTransactions,
-          oneInchSingle,
-          oneInchBatch,
-          uniswapSingle,
-          dustResults: results,
-          totalDustValue: totalValue,
-          batchSavings,
-
-          // ✅ NEW: device flag for ClaimScreen
-          device: isProbablyMobile ? 'mobile' : 'desktop'
-        }
-      })
     }
+  } finally {
+    console.log('[DustScanner] ClaimPlan built:', claimPlan)
+
+    // ✅ CRITICAL: persist claim state so ClaimScreen works even if router state is lost (mobile refresh)
+    try {
+      sessionStorage.setItem(
+        'dustclaim:lastClaimPlan',
+        JSON.stringify(claimPlan, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+      )
+      sessionStorage.setItem(
+        'dustclaim:lastBatchSavings',
+        JSON.stringify(batchSavings || null, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+      )
+      sessionStorage.setItem('dustclaim:lastDevice', isProbablyMobile ? 'mobile' : 'desktop')
+    } catch (err) {
+      console.warn('Failed to store lastClaimPlan in sessionStorage:', err)
+    }
+
+    navigate('/claim', {
+      state: {
+        claimPlan,
+        batchTransactions,
+        oneInchSingle,
+        oneInchBatch,
+        uniswapSingle,
+        dustResults: results,
+        totalDustValue: totalValue,
+        batchSavings,
+
+        device: isProbablyMobile ? 'mobile' : 'desktop'
+      }
+    })
   }
+}
 
   const toggleChain = (id) => setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
 
