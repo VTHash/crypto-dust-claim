@@ -15,12 +15,16 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
  * 1) Approve required tokens
  * 2) Claim Dust (swap) for prepared routes
  *
- * This file now exposes a 2-step API while keeping backwards compatibility:
+ * This file exposes a 2-step API while keeping backwards compatibility:
  * - prepareChainPlanWithFlow(chainPlan, fromAddress)
  * - executeApprovalsWithFlow(preparedCtx)
  * - executeSwapsWithFlow(preparedCtx)
- * - executeChainPlanWithFlow(chainPlan, fromAddress) // device-aware wrapper
+ * - executeChainPlanWithFlow(chainPlan, fromAddress, opts) // wrapper
  * - executeChainPlan(chainPlan, fromAddress) // receipts[] wrapper
+ *
+ * NOTE:
+ * - Swaps ALWAYS call DustClaimV3.claimDustUsingAggregator (per your requirement)
+ * - txOrigin for 0x quote is ALWAYS the user (from)
  */
 
 // ----------------------------------
@@ -57,9 +61,7 @@ function normalizeBigInt(v) {
 function isProbablyMobile() {
   if (typeof navigator === 'undefined') return false
   const ua = (navigator.userAgent || '').toLowerCase()
-  // broad mobile heuristics
   if (/android|iphone|ipad|ipod|iemobile|windows phone|mobile/.test(ua)) return true
-  // MetaMask Mobile UA often includes "MetaMaskMobile"
   if (/metamaskmobile/.test(ua)) return true
   return false
 }
@@ -104,7 +106,6 @@ async function get0xQuoteStrict({
   const to = q?.transaction?.to
   const data = q?.transaction?.data
 
-  // Must have transaction fields to proceed
   if (!isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
     return { ok: false, reason: q?.message || 'No route / quote missing transaction', quote: q }
   }
@@ -147,11 +148,10 @@ async function hasSufficientAllowanceToDustClaim(provider, token, owner, dustCla
 // STEP A: Prepare plan (NO wallet prompts)
 // ----------------------------------
 export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
-  // preparation does not require exclusivity, but keep it consistent and safe
   return runExclusive(async () => {
     const flowId = newFlowId()
 
-    // Ensure wallet connection (needed for from + chain switching UX consistency)
+    // Ensure wallet connection
     const connected = await walletService.isConnected?.()
     if (!connected) {
       const res = await walletService.connect?.()
@@ -200,17 +200,13 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
       // ignore
     }
 
-    /**
-     * Prefetch quotes for all steps FIRST (no wallet prompts).
-     * IMPORTANT: txOrigin MUST be the user address (from).
-     */
+    // Prefetch quotes for all steps FIRST (no wallet prompts).
     const prepared = []
     for (const step of chainPlan.steps || []) {
       const tokenIn = step.tokenIn
       const tokenOut = step.tokenOut
       const amountWei = normalizeBigInt(step.amount || 0)
 
-      // basic skip rules
       if (!isNonZeroAddress(tokenIn) || !isNonZeroAddress(tokenOut) || amountWei <= 0n) {
         prepared.push({ step, ok: false, skipReason: 'invalid token/amount' })
         continue
@@ -222,7 +218,11 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
       }
 
       // allow pre-provided quote
-      if (isNonZeroAddress(step.routerSpender) && typeof step.swapCalldata === 'string' && step.swapCalldata.length >= 10) {
+      if (
+        isNonZeroAddress(step.routerSpender) &&
+        typeof step.swapCalldata === 'string' &&
+        step.swapCalldata.length >= 10
+      ) {
         prepared.push({
           step,
           ok: true,
@@ -233,7 +233,6 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
         continue
       }
 
-      // fetch quote now (no wallet prompts here)
       try {
         const q = await get0xQuoteStrict({
           chainId: planChainId,
@@ -270,9 +269,9 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
       }
     }
 
-    // Summaries for UI: which tokens need approval, and which swaps are available
+    // Summaries for UI
     const approvalSet = new Map() // tokenIn -> needed amount (max)
-    const swappable = []
+    let swappableCount = 0
 
     for (const p of prepared) {
       const step = p.step
@@ -280,13 +279,15 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
       const amountWei = normalizeBigInt(step?.amount || 0)
 
       if (!p.ok) continue
-      if (!isNonZeroAddress(p.routerSpender) || typeof p.swapCalldata !== 'string' || p.swapCalldata.length < 10) continue
+      if (!isNonZeroAddress(p.routerSpender) || typeof p.swapCalldata !== 'string' || p.swapCalldata.length < 10) {
+        continue
+      }
 
-      swappable.push(p)
+      swappableCount += 1
 
       if (step?.needsApproval && !step?.usePermit && isNonZeroAddress(tokenIn) && amountWei > 0n) {
         const prev = approvalSet.get(tokenIn) || 0n
-        if (amountWei > prev) approvalSet.set(tokenIn, amountWei) // approve max needed for that token
+        if (amountWei > prev) approvalSet.set(tokenIn, amountWei)
       }
     }
 
@@ -302,7 +303,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress) {
       dustClaimV3: dep.dustClaimV3,
       prepared,
       approvalsNeeded,
-      swappableCount: swappable.length,
+      swappableCount,
       isMobile: isProbablyMobile()
     }
   })
@@ -410,11 +411,8 @@ export async function executeApprovalsWithFlow(preparedCtx) {
           warning: approvalRes?.warning || null
         })
 
-        if (!approvalRes?.success) {
-          // if an approval fails, stop further approvals on mobile-friendly UX,
-          // but on desktop you might want to continue; safest is stop here.
-          break
-        }
+        // Mobile-safe default: stop on first failure
+        if (!approvalRes?.success) break
       } catch (err) {
         receipts.push({
           flowId,
@@ -429,7 +427,6 @@ export async function executeApprovalsWithFlow(preparedCtx) {
         break
       }
 
-      // tiny yield between prompts
       await sleep(150)
     }
 
@@ -502,26 +499,27 @@ export async function executeSwapsWithFlow(preparedCtx) {
         continue
       }
 
-      // Minimal mobile-safe yield before prompting
       await sleep(150)
 
       try {
-        // IMPORTANT: this must call claimDustUsingAggregator (as you requested)
         const claimData = encodeFunctionData({
           abi: DUSTCLAIM_V3_ABI,
           functionName: 'claimDustUsingAggregator',
           args: [tokenIn, amountWei, routerSpender, swapCalldata]
         })
 
-        // gasLimit strategy
         let gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 120_000n : 950_000n
 
-        // Try estimateGas via signer (best), but do not block if it fails
         try {
           const signer = await walletService.getSigner?.()
           if (signer) {
             const contract = new ethers.Contract(dustClaimV3, DUSTCLAIM_V3_ABI, signer)
-            const est = await contract.claimDustUsingAggregator.estimateGas(tokenIn, amountWei, routerSpender, swapCalldata)
+            const est = await contract.claimDustUsingAggregator.estimateGas(
+              tokenIn,
+              amountWei,
+              routerSpender,
+              swapCalldata
+            )
             const bumped = (BigInt(est) * 135n) / 100n
             if (bumped > gasLimit) gasLimit = bumped
           }
@@ -532,7 +530,7 @@ export async function executeSwapsWithFlow(preparedCtx) {
         const swapRes = await walletService.sendTransactionWithReceipt(
           {
             from,
-            to: dustClaimV3, // tx hash is DustClaimV3 interaction
+            to: dustClaimV3,
             data: claimData,
             value: 0n,
             gasLimit
@@ -591,21 +589,39 @@ export async function executeSwapsWithFlow(preparedCtx) {
 }
 
 // ----------------------------------
-// DEVICE-AWARE WRAPPER: One-click on desktop, split on mobile
+// DEVICE-AWARE WRAPPER
 // ----------------------------------
-export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
+export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}) {
   return runExclusive(async () => {
-    // Step 1: Prepare (quotes, chain, from)
-    const preparedCtx = await prepareChainPlanWithFlow(chainPlan, fromAddress)
+    // mode: 'auto' | 'approveOnly' | 'swapOnly' | 'all'
+    const mode = String(opts?.mode || 'auto')
+    const preparedCtx = opts?.preparedCtx || (await prepareChainPlanWithFlow(chainPlan, fromAddress))
 
-    // Step 2: Approvals first (always safe)
+    // Explicit modes (for your two-button UX)
+    if (mode === 'approveOnly') {
+      const approvals = await executeApprovalsWithFlow(preparedCtx)
+      return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
+    }
+    if (mode === 'swapOnly') {
+      const swaps = await executeSwapsWithFlow(preparedCtx)
+      return { flowId: preparedCtx.flowId, receipts: swaps?.receipts || [], preparedCtx, nextAction: null }
+    }
+    if (mode === 'all') {
+      const approvals = await executeApprovalsWithFlow(preparedCtx)
+      const swaps = await executeSwapsWithFlow(preparedCtx)
+      return {
+        flowId: preparedCtx.flowId,
+        receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])],
+        preparedCtx,
+        nextAction: null
+      }
+    }
+
+    // AUTO: mobile splits, desktop one-click
     const approvals = await executeApprovalsWithFlow(preparedCtx)
 
-    // If mobile: stop here and instruct UI to show "Claim Dust" button next
     if (preparedCtx.isMobile) {
       const receipts = [...(approvals?.receipts || [])]
-
-      // Add an explicit UX marker receipt so UI can show the next action deterministically
       receipts.push({
         flowId: preparedCtx.flowId,
         type: 'ux',
@@ -614,16 +630,9 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
         nextAction: 'swap',
         message: 'Approvals complete. On mobile, proceed with Claim Dust as a separate action.'
       })
-
-      return {
-        flowId: preparedCtx.flowId,
-        receipts,
-        preparedCtx,
-        nextAction: 'swap'
-      }
+      return { flowId: preparedCtx.flowId, receipts, preparedCtx, nextAction: 'swap' }
     }
 
-    // Desktop: proceed to swaps automatically
     const swaps = await executeSwapsWithFlow(preparedCtx)
     return {
       flowId: preparedCtx.flowId,
