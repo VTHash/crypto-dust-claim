@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
@@ -33,6 +32,14 @@ export default function DustScanner() {
     [selectedChains]
   )
 
+  const isProbablyMobile = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    const ua = (navigator.userAgent || '').toLowerCase()
+    if (/android|iphone|ipad|ipod|iemobile|windows phone|mobile/.test(ua)) return true
+    if (/metamaskmobile/.test(ua)) return true
+    return false
+  }, [])
+
   // hydrate from last run ONLY if we don't already have results in context
   useEffect(() => {
     if (results.length > 0) return
@@ -50,66 +57,64 @@ export default function DustScanner() {
   }, [results.length, setResults])
 
   const handleScan = async () => {
-  if (!address) return
-  setScanning(true)
+    if (!address) return
+    setScanning(true)
 
-  try {
-    const scan = await web3Service.scanChains(selectedIds, address, settings)
-    console.log('scanChains returned:', scan, 'isArray?', Array.isArray(scan))
-    // ✅ Normalize output to an array no matter what scanChains returns
-    const dustResults = Array.isArray(scan)
-      ? scan
-      : Array.isArray(scan?.dustResults)
-        ? scan.dustResults
-        : Array.isArray(scan?.results)
-          ? scan.results
-          : []
-
-    setResults(dustResults)
-
-    const total = dustResults.reduce((s, x) => s + (Number(x.totalValue) || 0), 0)
-
-    // cache
     try {
-      sessionStorage.setItem(
-        'dustclaim:lastScan',
-        JSON.stringify(
-          { dustResults, total },
-          (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
-        )
-      )
-    } catch (err) {
-      console.warn('Failed to store lastScan in sessionStorage:', err)
-    }
+      const scan = await web3Service.scanChains(selectedIds, address, settings)
+      console.log('scanChains returned:', scan, 'isArray?', Array.isArray(scan))
+      // ✅ Normalize output to an array no matter what scanChains returns
+      const dustResults = Array.isArray(scan)
+        ? scan
+        : Array.isArray(scan?.dustResults)
+          ? scan.dustResults
+          : Array.isArray(scan?.results)
+            ? scan.results
+            : []
 
-    // stats
-    try {
-      const usedChainIdsArray = Array.from(
-        new Set(
-          dustResults
-            .map((chain) => Number(chain.chainId))
-            .filter((id) => Number.isFinite(id) && id > 0)
-        )
-      )
+      setResults(dustResults)
 
-      if (usedChainIdsArray.length > 0) {
-        await fetch('/.netlify/functions/stats-scan-supabase', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chains: usedChainIdsArray })
-        })
+      const total = dustResults.reduce((s, x) => s + (Number(x.totalValue) || 0), 0)
+
+      // cache
+      try {
+        sessionStorage.setItem(
+          'dustclaim:lastScan',
+          JSON.stringify(
+            { dustResults, total },
+            (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
+          )
+        )
+      } catch (err) {
+        console.warn('Failed to store lastScan in sessionStorage:', err)
+      }
+
+      // stats
+      try {
+        const usedChainIdsArray = Array.from(
+          new Set(
+            dustResults
+              .map((chain) => Number(chain.chainId))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        )
+
+        if (usedChainIdsArray.length > 0) {
+          await fetch('/.netlify/functions/stats-scan-supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chains: usedChainIdsArray })
+          })
+        }
+      } catch (err) {
+        console.error('stats-scan client-supabase error:', err)
       }
     } catch (err) {
-      console.error('stats-scan client-supabase error:', err)
+      console.error('[DustScanner] Scan failed:', err)
+    } finally {
+      setScanning(false)
     }
-  } catch (err) {
-    // ✅ This is the missing piece. Without it, one throw = blank UI.
-    console.error('[DustScanner] Scan failed:', err)
-    // optional: you can also surface it in the UI via toast/state
-  } finally {
-    setScanning(false)
   }
-}
 
   /**
    * Build the list of items to act on based on settings:
@@ -136,7 +141,6 @@ export default function DustScanner() {
             balance: t.balance,
             decimals: t.decimals ?? 18,
             usd
-
           })
         } else {
           const min = Number(settings.tokenMinUSD || 0)
@@ -185,21 +189,24 @@ export default function DustScanner() {
 
   /**
    * Swap & Claim (0x only):
-   * - Build a claimPlan via batchService.buildClaimPlan (now your 0x version)
-   * - Navigate to ClaimScreen with claimPlan set
+   * Build a claimPlan via batchService.buildClaimPlan
+   * Navigate to ClaimScreen with claimPlan set.
+   *
+   * NEW UX:
+   * - Desktop: proceed as normal to /claim
+   * - Mobile: still proceed to /claim, but mark device=mobile so ClaimScreen can enforce 2-step buttons
    */
   const handleBatchClaim = async () => {
     if (!address) return
 
-    // Claims list (kept exactly like your original structure)
     const claims = buildActionUniverse.map((it) => ({
-  chainId: it.chainId,
-  tokenAddress: it.address,
-  tokenSymbol: it.symbol,
-  amount: it.balance,
-  decimals: it.decimals ?? 18,
-  recipient: address
-}))
+      chainId: it.chainId,
+      tokenAddress: it.address,
+      tokenSymbol: it.symbol,
+      amount: it.balance,
+      decimals: it.decimals ?? 18,
+      recipient: address
+    }))
 
     let claimPlan = []
     let batchTransactions = []
@@ -209,7 +216,6 @@ export default function DustScanner() {
     let batchSavings = null
 
     try {
-      // 0x ONLY: build claimPlan (your batchService.buildClaimPlan is now 0x-based)
       if (typeof batchService.buildClaimPlan === 'function') {
         try {
           claimPlan = await batchService.buildClaimPlan(claims, {
@@ -222,11 +228,8 @@ export default function DustScanner() {
           claimPlan = []
         }
       }
-
-      // If your batchService.buildClaimPlan expects a different signature,
-      // it will faill above and ClaimScreen will show a clear error.
     } finally {
-      console.log('[DustScanner] ClaimPlan built:', claimPlan) 
+      console.log('[DustScanner] ClaimPlan built:', claimPlan)
       navigate('/claim', {
         state: {
           claimPlan,
@@ -236,7 +239,10 @@ export default function DustScanner() {
           uniswapSingle,
           dustResults: results,
           totalDustValue: totalValue,
-          batchSavings
+          batchSavings,
+
+          // ✅ NEW: device flag for ClaimScreen
+          device: isProbablyMobile ? 'mobile' : 'desktop'
         }
       })
     }
@@ -249,121 +255,131 @@ export default function DustScanner() {
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
 
   return (
-  <div className="dust-scanner">
-    <div className="scanner-header">
-      <h1>Multi-Chain Dust Scanner</h1>
-      <p>Scan across 20+ blockchains for claimable tokens & dust</p>
-    </div>
-
-    {/* Chain selection */}
-    <div className="chain-selection-card">
-      <div className="chains-grid-selection">
-        {Object.entries(SUPPORTED_CHAINS).map(([id, chain]) => {
-          const nativeLogo = chain.logo || NATIVE_LOGOS[id] || '/logos/chains/generic.png'
-          return (
-            <div
-              key={id}
-              className={`chain-selector ${selectedChains[id] ? 'selected' : ''}`}
-              onClick={() => toggleChain(id)}
-            >
-              <img className="chain-logo" src={nativeLogo} alt={chain.name} />
-              <span className="chain-name">{chain.name}</span>
-              <div className="checkbox">{selectedChains[id] && <div className="checkmark">✓</div>}</div>
-            </div>
-          )
-        })}
+    <div className="dust-scanner">
+      <div className="scanner-header">
+        <h1>Multi-Chain Dust Scanner</h1>
+        <p>Scan across 20+ blockchains for claimable tokens & dust</p>
       </div>
 
-      <div className="scan-controls">
-        <button className="scan-button" disabled={scanning || selectedIds.length === 0} onClick={handleScan}>
-          {scanning ? `Scanning ${selectedIds.length} Chains…` : `🔍 Scan ${selectedIds.length} Selected Chains`}
-        </button>
-      </div>
-    </div>
-
-    {/* Results */}
-    {results.length > 0 && (
-      <div className="results-section">
-        <div className="results-header">
-          <h2>Dust Found: {usd(totalValue)}</h2>
-          <div className="savings-badge">🧹 {totalClaimableCount} claimable tokens</div>
-        </div>
-
-        <div className="dust-results">
-          {results.map((r) => {
-            const meta = SUPPORTED_CHAINS[r.chainId] || {}
-            const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
-            const key = String(r.chainId)
-            const chainActions = actionByChain[key] || { value: 0, count: 0 }
-
+      {/* Chain selection */}
+      <div className="chain-selection-card">
+        <div className="chains-grid-selection">
+          {Object.entries(SUPPORTED_CHAINS).map(([id, chain]) => {
+            const nativeLogo = chain.logo || NATIVE_LOGOS[id] || '/logos/chains/generic.png'
             return (
-              <div key={r.chainId} className="chain-result-card">
-                <div className="chain-result-header">
-                  <div className="chain-info">
-                    <img className="chain-logo" src={nativeLogo} alt={meta.name} />
-                    <div>
-                      <h3>{r.chainName}</h3>
-                      <p className="chain-value">{usd(chainActions.value || r.totalValue || 0)}</p>
-                    </div>
-                  </div>
+              <div
+                key={id}
+                className={`chain-selector ${selectedChains[id] ? 'selected' : ''}`}
+                onClick={() => toggleChain(id)}
+              >
+                <img className="chain-logo" src={nativeLogo} alt={chain.name} />
+                <span className="chain-name">{chain.name}</span>
+                <div className="checkbox">
+                  {selectedChains[id] && <div className="checkmark">✓</div>}
                 </div>
-
-                <div className="dust-details">
-                  {/* Native */}
-                  <div className="native-dust">
-                    <span className="dust-label">Native:</span>
-                    <span className="dust-amount">
-                      {fmt(r.nativeBalance)} {r.symbol} {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
-                    </span>
-                    {parseFloat(r.nativeBalance) > 0 &&
-                      parseFloat(r.nativeBalance) < Number(settings.nativeDustThreshold || 0.001) && (
-                        <span className="dust-badge">dust</span>
-                      )}
-                  </div>
-
-                  {/* Tokens with real logos */}
-                  {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
-                    <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={{ ...t, chainId: r.chainId }} />
-                  ))}
-
-                  {(r.tokenDetails?.length || 0) > 5 && <div className="more-tokens">+{r.tokenDetails.length - 5} more tokens</div>}
-                </div>
-
-                <div className="claim-indicator">🧹 {chainActions.count} selected by settings</div>
               </div>
             )
           })}
         </div>
 
-        <div className="claim-actions">
+        <div className="scan-controls">
           <button
-            onClick={handleBatchClaim}
-            className="claim-button"
-            disabled={buildActionUniverse.length === 0}
-            title={
-              buildActionUniverse.length === 0
-                ? 'Nothing to claim/swap given your current settings'
-                : 'Prepare a 0x swap plan and execute it on the Claim page'
-            }
+            className="scan-button"
+            disabled={scanning || selectedIds.length === 0}
+            onClick={handleScan}
           >
-            {settings.mode === 'swap-token' ? `💱 Swap & Claim (${usd(totalValue)})` : `🧹 Batch Claim All (${usd(totalValue)})`}
+            {scanning ? `Scanning ${selectedIds.length} Chains…` : `🔍 Scan ${selectedIds.length} Selected Chains`}
           </button>
-
-          {buildActionUniverse.length === 0 && (
-            <p className="claim-note">
-              Nothing matched your current settings. Try enabling “Include non-dust” or widening the USD window in
-              Settings.
-            </p>
-          )}
-
-          {/* ✅ Superbridge-like Steps UI (shows live tx progress from txStore) */}
-          <div style={{ marginTop: 16 }}>
-            <TxStepsPanel />
-            
-          </div>
         </div>
       </div>
-    )}
-  </div>
-)
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div className="results-section">
+          <div className="results-header">
+            <h2>Dust Found: {usd(totalValue)}</h2>
+            <div className="savings-badge">🧹 {totalClaimableCount} claimable tokens</div>
+          </div>
+
+          <div className="dust-results">
+            {results.map((r) => {
+              const meta = SUPPORTED_CHAINS[r.chainId] || {}
+              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
+              const key = String(r.chainId)
+              const chainActions = actionByChain[key] || { value: 0, count: 0 }
+
+              return (
+                <div key={r.chainId} className="chain-result-card">
+                  <div className="chain-result-header">
+                    <div className="chain-info">
+                      <img className="chain-logo" src={nativeLogo} alt={meta.name} />
+                      <div>
+                        <h3>{r.chainName}</h3>
+                        <p className="chain-value">{usd(chainActions.value || r.totalValue || 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="dust-details">
+                    {/* Native */}
+                    <div className="native-dust">
+                      <span className="dust-label">Native:</span>
+                      <span className="dust-amount">
+                        {fmt(r.nativeBalance)} {r.symbol}{' '}
+                        {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
+                      </span>
+                      {parseFloat(r.nativeBalance) > 0 &&
+                        parseFloat(r.nativeBalance) < Number(settings.nativeDustThreshold || 0.001) && (
+                          <span className="dust-badge">dust</span>
+                        )}
+                    </div>
+
+                    {/* Tokens with real logos */}
+                    {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
+                      <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={{ ...t, chainId: r.chainId }} />
+                    ))}
+
+                    {(r.tokenDetails?.length || 0) > 5 && (
+                      <div className="more-tokens">+{r.tokenDetails.length - 5} more tokens</div>
+                    )}
+                  </div>
+
+                  <div className="claim-indicator">🧹 {chainActions.count} selected by settings</div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="claim-actions">
+            <button
+              onClick={handleBatchClaim}
+              className="claim-button"
+              disabled={buildActionUniverse.length === 0}
+              title={
+                buildActionUniverse.length === 0
+                  ? 'Nothing to claim/swap given your current settings'
+                  : 'Prepare a 0x swap plan and execute it on the Claim page'
+              }
+            >
+              {settings.mode === 'swap-token'
+                ? `💱 Swap & Claim (${usd(totalValue)})`
+                : `🧹 Batch Claim All (${usd(totalValue)})`}
+            </button>
+
+            {buildActionUniverse.length === 0 && (
+              <p className="claim-note">
+                Nothing matched your current settings. Try enabling “Include non-dust” or widening the USD window in
+                Settings.
+              </p>
+            )}
+
+            {/* ✅ Steps UI */}
+            <div style={{ marginTop: 16 }}>
+              <TxStepsPanel />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
