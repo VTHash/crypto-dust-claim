@@ -211,7 +211,7 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress) {
           sellAmount: String(step.amount),
           taker: dep.dustClaimV3,
           recipient: dep.dustClaimV3,
-          txOrigin: from,
+          txOrigin: dep.dustClaimV3,
           slippageBps: step.slippageBps ?? 100
         })
 
