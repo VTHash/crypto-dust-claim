@@ -518,6 +518,9 @@ const ClaimScreen = () => {
 
       {/* ACTIONS */}
       <div className="action-section" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ width: '100%', fontSize: 12, opacity: 0.8 }}>
+  busy={String(busy)} preparing={String(preparing)} approving={String(approving)} claiming={String(claiming)} preparedCount={preparedCount} planAvailable={String(planAvailable)} isConnected={String(isConnected)}
+</div>
         <button
           onClick={prepareAllChains}
           disabled={busy || !planAvailable}
