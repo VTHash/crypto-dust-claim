@@ -16,7 +16,7 @@ const ClaimScreen = () => {
   const { results: scanResults } = useScan()
 
   // ---------------- state from scanner ----------------
-  const { claimPlan = [], batchSavings = null } = location.state || {}
+  const { claimPlan = [], batchSavings = null, device = 'desktop' } = location.state || {}
 
   // ---------------- hydrate scan snapshot ----------------
   const [scanSnapshot] = useState(() => {
@@ -136,8 +136,6 @@ const ClaimScreen = () => {
       setReconciling(true)
       try {
         while (!stopped) {
-          // If your walletService exposes reconcileOnce, use it; otherwise startTxReconciler handles it.
-          await walletService.reconcileOnce?.().catch(() => null)
           await refreshTxFeed()
           await new Promise((r) => setTimeout(r, 3000))
           if (!hasPending) break
@@ -157,7 +155,6 @@ const ClaimScreen = () => {
   const explorerTxUrl = (chainId, txHash) => {
     const info = getChainInfo(chainId || defaultChainId)
     if (!info?.explorer || !txHash) return null
-    // explorer may be a base url, ensure /tx/
     const base = String(info.explorer).replace(/\/$/, '')
     return `${base}/tx/${txHash}`
   }
@@ -201,7 +198,7 @@ const ClaimScreen = () => {
         setCurrentStep(i + 1)
 
         try {
-          // Execute chain plan (now uses sendTransactionWithReceipt and persists hashes)
+          // Execute chain plan (returns receipts[])
           const receipts = await executeChainPlan(chainPlan, address)
 
           const approvalsOk = receipts.filter((r) => r.type === 'approval' && r.ok).length
@@ -229,8 +226,6 @@ const ClaimScreen = () => {
       }
 
       setClaimResults(results)
-
-      // Immediately refresh tx feed so UI shows txs right away
       await refreshTxFeed()
     } catch (err) {
       setError(err?.message || 'Claim execution error')
@@ -263,7 +258,10 @@ const ClaimScreen = () => {
     <div className="claim-screen">
       <div className="claim-header">
         <h1>Dust Claim</h1>
-        <p>Execute optimized multi-chain swaps via 0x</p>
+        <p>
+          Execute optimized multi-chain swaps via 0x
+          {device === 'mobile' ? ' (Mobile mode)' : ''}
+        </p>
       </div>
 
       {/* Summary */}
@@ -306,6 +304,9 @@ const ClaimScreen = () => {
               const meta = SUPPORTED_CHAINS[r.chainId] || {}
               const logo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
 
+              // ✅ COMPAT: scanner uses tokenDetails, older code used tokenDust
+              const tokens = (r.tokenDetails || r.tokenDust || []).slice(0, 3)
+
               return (
                 <div key={idx} className="chain-card">
                   <div className="chain-header">
@@ -318,7 +319,7 @@ const ClaimScreen = () => {
                     </div>
                   </div>
 
-                  {(r.tokenDust || []).slice(0, 3).map((t, i) => (
+                  {tokens.map((t, i) => (
                     <TokenRow key={`${r.chainId}-${i}`} token={t} />
                   ))}
                 </div>
@@ -390,7 +391,9 @@ const ClaimScreen = () => {
                           ) : (
                             <span>{rcpt.ok ? 'OK' : 'Not submitted'}</span>
                           )}
-                          {rcpt.error && <div style={{ marginTop: 2, opacity: 0.85 }}>{rcpt.error}</div>}
+                          {rcpt.error && (
+                            <div style={{ marginTop: 2, opacity: 0.85 }}>{rcpt.error}</div>
+                          )}
                         </div>
                       )
                     })}
@@ -419,13 +422,17 @@ const ClaimScreen = () => {
             {relevantTxs.slice(0, 20).map((t) => {
               const chainId = t.chainId || defaultChainId
               const info = getChainInfo(chainId)
-              const url = explorerTxUrl(chainId, t.hash)
+
+              // ✅ COMPAT: txStore uses txHash (not hash)
+              const txHash = t.txHash || t.hash || null
+
+              const url = explorerTxUrl(chainId, txHash)
               const st = normalizeStatusLabel(t.status)
               const kind = t.kind || t.type || 'tx'
 
               return (
                 <div
-                  key={t.id || t.hash}
+                  key={t.id || txHash || `${t.to}-${t.createdAt}`}
                   style={{
                     border: '1px solid rgba(255,255,255,0.08)',
                     borderRadius: 12,
@@ -440,13 +447,13 @@ const ClaimScreen = () => {
                   </div>
 
                   <div style={{ marginTop: 8, fontSize: 13, opacity: 0.95 }}>
-                    {t.hash ? (
+                    {txHash ? (
                       url ? (
                         <a href={url} target="_blank" rel="noreferrer">
-                          {t.hash}
+                          {txHash}
                         </a>
                       ) : (
-                        <span>{t.hash}</span>
+                        <span>{txHash}</span>
                       )
                     ) : (
                       <span>Hash not available</span>
