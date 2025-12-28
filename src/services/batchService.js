@@ -8,8 +8,11 @@ import { DEPLOYMENTS } from '../config/deployments'
 
 // Normalize any input into a wei string
 const toWeiStr = (amount, decimals = 18) => {
-  const s = String(amount ?? '0')
-  return s.includes('.') ? ethers.parseUnits(s, decimals).toString() : s
+  if (amount === null || amount === undefined) return '0'
+  const s = String(amount)
+  // already a bigint-like integer string
+  if (!s.includes('.')) return s
+  return ethers.parseUnits(s, decimals).toString()
 }
 
 /**
@@ -37,19 +40,17 @@ async function get0xAllowanceHolderQuote({
     slippageBps: Number(slippageBps)
   }
 
-  // Helpful browser-side logs (you’ll see these in DevTools)
   console.log('[batchService] /.netlify/functions/0x-quote payload:', payload)
 
   const res = await axios.post('/.netlify/functions/0x-quote', payload, {
     headers: { 'content-type': 'application/json' }
   })
 
-  // Helpful browser-side logs
   console.log('[batchService] 0x-quote response keys:', Object.keys(res?.data || {}))
   console.log('[batchService] 0x-quote tx.to:', res?.data?.transaction?.to)
   console.log('[batchService] 0x-quote tx.data len:', res?.data?.transaction?.data?.length || 0)
   console.log(
-    '[batchService] 0x-quote spender:',
+    '[batchService] 0x-quote allowance spender:',
     res?.data?.issues?.allowance?.spender || res?.data?.allowanceTarget || null
   )
 
@@ -72,12 +73,17 @@ async function getTxOriginFallback(optionsTxOrigin) {
 class BatchService {
   /**
    * claims = [{ chainId, tokenAddress, amount, decimals, recipient }]
-   * options = { txOrigin, slippagePct }
+   * options = { txOrigin, slippagePct, outTokenByChain }
+   *
+   * IMPORTANT:
+   * - DustClaimV3 pulls tokens from the user => user must approve DustClaimV3 (NOT 0x spender)
+   * - 0x spender (allowance-holder) is used inside DustClaimV3.call(spender, calldata)
    */
   async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || claims.length === 0) return []
 
     const slippagePct = Number(options.slippagePct ?? 1)
+    const slippageBps = Math.round(slippagePct * 100) // 1% => 100 bps
     const txOrigin = await getTxOriginFallback(options.txOrigin)
 
     if (!txOrigin) {
@@ -127,8 +133,8 @@ class BatchService {
             sellAmountWei,
             taker: dep.dustClaimV3, // contract is taker
             recipient: dep.dustClaimV3, // contract must receive WETH
-            txOrigin, // user EOA
-            slippageBps: Math.round(slippagePct * 100) // 1% => 100
+            txOrigin, // user EOA (CRITICAL)
+            slippageBps
           })
         } catch (e) {
           console.warn(
@@ -140,41 +146,37 @@ class BatchService {
         }
 
         const callTarget = q?.transaction?.to || null
-        const spender =
-          q?.issues?.allowance?.spender ||
-          q?.allowanceTarget ||
-          null
-        const calldata = q?.transaction?.data || null
+        const routerSpender = q?.issues?.allowance?.spender || q?.allowanceTarget || null
+        const swapCalldata = q?.transaction?.data || null
+        const gasFromQuote = q?.transaction?.gas ?? null
 
-        // HARD GUARD — must come FIRST
-        if (!callTarget || !spender || !calldata) {
+        // HARD GUARD
+        if (!callTarget || !routerSpender || !swapCalldata) {
           console.warn('[0x] invalid quote, missing fields', {
             chainId,
             tokenIn,
             callTarget,
-            spender,
-            calldataLen: calldata?.length || 0,
+            routerSpender,
+            calldataLen: swapCalldata?.length || 0,
             keys: Object.keys(q || {})
           })
           continue
         }
 
-        // NOTE:
-        // With 0x allowance-holder quotes, tx.to and spender are often the same (as your logs show),
-        // but we should NOT enforce equality here—some routes may differ.
-        const routerSpender = spender
-        const swapCalldata = calldata
-
-        // ✅ CRITICAL: approval spender must be the 0x spender (AllowanceHolder),
-        // NOT the DustClaimV3 contract address.
+        /**
+         * IMPORTANT:
+         * Approval spender is DustClaimV3 (because it pulls tokens from the user).
+         * The routerSpender returned by 0x is only used as the `spender` argument
+         * inside DustClaimV3.claimDustUsingAggregator(...).
+         */
         steps.push({
           aggregator: '0x',
 
           needsApproval: true,
           usePermit: false,
 
-          // ✅ approve the spender returned by 0x
-          spender: routerSpender,
+          // spender for approval (semantic + future-proof; claimExecutor already approves DustClaimV3)
+          approvalSpender: dep.dustClaimV3,
 
           tokenIn,
           tokenOut: dep.weth,
@@ -183,11 +185,13 @@ class BatchService {
           // used by claimExecutor to call DustClaimV3
           routerSpender,
           swapCalldata,
+          gasFromQuote,
 
-          // optional debug fields (safe to keep)
+          // optional debug fields
           callTarget,
 
-          slippage: slippagePct
+          slippagePct,
+          slippageBps
         })
       }
 
