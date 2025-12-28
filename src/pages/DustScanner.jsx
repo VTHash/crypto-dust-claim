@@ -1,52 +1,37 @@
+
+// src/pages/DustScanner.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
 import { useSettings } from '../contexts/SettingsContext'
-
 import web3Service from '../services/web3Service'
 import batchService from '../services/batchService'
-import dexAggregatorService from '../services/dexAggregatorService' // ❗ REQUIRED – DO NOT REMOVE
-
+import dexAggregatorService from '../services/dexAggregatorService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
-import TxStepsPanel from '../components/TxStepsPanel.jsx'
-
+import Shimmer from '../components/Shimmer.jsx'
 import './DustScanner.css'
 
-export default function DustScanner() {
-  const navigate = useNavigate()
+const SCAN_TIMEOUT_MS = 90_000 // 90s hard stop so UI never hangs forever
+
+function withTimeout(promise, ms, label = 'Operation') {
+  let t
+  const timeout = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t))
+}
+
+const DustScanner = () => {
   const { address } = useWallet()
+  const navigate = useNavigate()
   const { results, setResults } = useScan()
   const { settings } = useSettings()
 
   const [scanning, setScanning] = useState(false)
-
-  /* ---------------- device detection (used by ClaimScreen) ---------------- */
-  const isProbablyMobile = useMemo(() => {
-    if (typeof navigator === 'undefined') return false
-    const ua = navigator.userAgent.toLowerCase()
-    return (
-      /android|iphone|ipad|ipod|mobile/.test(ua) ||
-      /metamaskmobile/.test(ua)
-    )
-  }, [])
-
-  /* ---------------- hydrate scan from session ---------------- */
-  useEffect(() => {
-    if (results.length > 0) return
-    try {
-      const cached = sessionStorage.getItem('dustclaim:lastScan')
-      if (!cached) return
-      const parsed = JSON.parse(cached)
-      if (Array.isArray(parsed?.dustResults)) {
-        setResults(parsed.dustResults)
-      }
-    } catch {}
-  }, [results.length, setResults])
-
-  /* ---------------- chain selection ---------------- */
+  const [scanError, setScanError] = useState('')
   const [selectedChains, setSelectedChains] = useState(
     Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => {
       acc[id] = true
@@ -55,203 +40,336 @@ export default function DustScanner() {
   )
 
   const selectedIds = useMemo(
-    () =>
-      Object.keys(selectedChains)
-        .filter((id) => selectedChains[id])
-        .map(Number),
+    () => Object.keys(selectedChains).filter((id) => selectedChains[id]).map(Number),
     [selectedChains]
   )
 
-  /* ---------------- scan ---------------- */
+  // hydrate from last run ONLY if we don't already have results in context
+  useEffect(() => {
+    if (results.length > 0) return
+    try {
+      const cached = sessionStorage.getItem('dustclaim:lastScan')
+      if (cached) {
+        const { dustResults = [] } = JSON.parse(cached)
+        if (dustResults.length > 0) {
+          setResults(dustResults)
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [results.length, setResults])
+
   const handleScan = async () => {
-    if (!address || scanning) return
+    if (!address) return
+    if (!selectedIds.length) return
+
+    setScanError('')
     setScanning(true)
 
     try {
-      const scan = await web3Service.scanChains(
-        selectedIds,
-        address,
-        settings
+      // Hard timeout prevents infinite "Scanning..."
+      const scan = await withTimeout(
+        web3Service.scanChains(selectedIds, address, settings),
+        SCAN_TIMEOUT_MS,
+        'Scan'
       )
 
-      const dustResults = Array.isArray(scan)
-        ? scan
-        : Array.isArray(scan?.dustResults)
-        ? scan.dustResults
-        : []
+      // If scan returns something unexpected, guard it
+      const safeScan = Array.isArray(scan) ? scan : []
+      setResults(safeScan)
 
-      setResults(dustResults)
+      const total = safeScan.reduce((s, x) => s + (x.totalValue || 0), 0)
 
-      const total = dustResults.reduce(
-        (s, x) => s + Number(x.totalValue || 0),
-        0
-      )
+      // BigInt-safe JSON.stringify for lastScan cache
+      try {
+        sessionStorage.setItem(
+          'dustclaim:lastScan',
+          JSON.stringify(
+            { dustResults: safeScan, total },
+            (_key, value) => (typeof value === 'bigint' ? value.toString() : value)
+          )
+        )
+      } catch (err) {
+        console.warn('Failed to store lastScan in sessionStorage:', err)
+      }
 
-      sessionStorage.setItem(
-        'dustclaim:lastScan',
-        JSON.stringify({ dustResults, total })
-      )
-    } catch (e) {
-      console.error('[DustScanner] scan failed:', e)
+      // --- report scan statistics to Netlify (global stats / top chains) ---
+      try {
+        const usedChainIdsArray = Array.from(
+          new Set(
+            (safeScan || [])
+              .map((chain) => Number(chain.chainId))
+              .filter((id) => Number.isFinite(id) && id > 0)
+          )
+        )
+
+        if (usedChainIdsArray.length > 0) {
+          await fetch('/.netlify/functions/stats-scan-supabase', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chains: usedChainIdsArray })
+          })
+        }
+      } catch (err) {
+        console.error('stats-scan client-supabase error:', err)
+      }
+    } catch (err) {
+      console.error('[DustScanner] scan failed:', err)
+      setScanError(err?.message || 'Scan failed')
     } finally {
       setScanning(false)
     }
   }
 
-  /* ---------------- build action universe ---------------- */
-  const actionUniverse = useMemo(() => {
+  const buildActionUniverse = useMemo(() => {
     const list = []
-
     for (const chain of results) {
-      for (const t of chain.tokenDetails || []) {
-        const usd = Number(t.value || 0)
-        const bal = Number(t.balance || 0)
-        if (bal <= 0) continue
+      const chainId = chain.chainId
+      const tokenList = chain.tokenDetails || []
 
-        if (!settings.includeNonDust) {
+      for (const t of tokenList) {
+        const usdVal = Number(t.value || 0)
+        const balNum = Number(t.balance || 0)
+        if (balNum <= 0) continue
+
+        if (settings.includeNonDust) {
+          list.push({
+            chainId,
+            symbol: t.symbol,
+            address: t.address,
+            balance: t.balance,
+            decimals: t.decimals ?? 18,
+            usd: usdVal
+          })
+        } else {
           const min = Number(settings.tokenMinUSD || 0)
-          const max =
-            settings.tokenMaxUSD === 0
+          const max = Number(
+            settings.tokenMaxUSD === 0 || settings.tokenMaxUSD === undefined
               ? Infinity
-              : Number(settings.tokenMaxUSD)
-          if (usd < min || usd > max) continue
+              : settings.tokenMaxUSD
+          )
+          if (usdVal >= min && usdVal <= max) {
+            list.push({
+              chainId,
+              symbol: t.symbol,
+              address: t.address,
+              balance: t.balance,
+              decimals: t.decimals ?? 18,
+              usd: usdVal
+            })
+          }
         }
-
-        list.push({
-          chainId: chain.chainId,
-          address: t.address,
-          symbol: t.symbol,
-          amount: t.balance,
-          decimals: t.decimals ?? 18,
-          usd
-        })
       }
     }
-
     return list
-  }, [
-    results,
-    settings.includeNonDust,
-    settings.tokenMinUSD,
-    settings.tokenMaxUSD
-  ])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, settings.includeNonDust, settings.tokenMinUSD, settings.tokenMaxUSD])
+
+  const actionByChain = useMemo(() => {
+    const m = {}
+    for (const item of buildActionUniverse) {
+      const key = String(item.chainId)
+      if (!m[key]) m[key] = { value: 0, count: 0 }
+      m[key].value += Number(item.usd || 0)
+      m[key].count += 1
+    }
+    return m
+  }, [buildActionUniverse])
 
   const totalValue = useMemo(
-    () => actionUniverse.reduce((s, x) => s + x.usd, 0),
-    [actionUniverse]
+    () => Object.values(actionByChain).reduce((s, x) => s + x.value, 0),
+    [actionByChain]
   )
 
-  /* ---------------- BUILD CLAIM PLAN (CRITICAL) ---------------- */
+  const totalClaimableCount = useMemo(() => buildActionUniverse.length, [buildActionUniverse])
+
   const handleBatchClaim = async () => {
     if (!address) return
-    if (actionUniverse.length === 0) return
 
-    const claims = actionUniverse.map((t) => ({
-      chainId: t.chainId,
-      tokenAddress: t.address,
-      amount: t.amount,
-      decimals: t.decimals,
+    const claims = buildActionUniverse.map((it) => ({
+      chainId: it.chainId,
+      tokenAddress: it.address,
+      tokenSymbol: it.symbol,
+      amount: it.balance,
+      decimals: it.decimals ?? 18,
       recipient: address
     }))
 
     let claimPlan = []
+    let batchTransactions = []
+    let oneInchSingle = null
+    let oneInchBatch = null
+    let uniswapSingle = null
+    let batchSavings = null
 
     try {
-      claimPlan = await batchService.buildClaimPlan(claims, {
-        txOrigin: address,
-        slippagePct: 1
-      })
-    } catch (e) {
-      console.error('[DustScanner] buildClaimPlan failed:', e)
-      return
-    }
-
-    if (!Array.isArray(claimPlan) || claimPlan.length === 0) {
-      console.warn('[DustScanner] empty claimPlan – aborting navigation')
-      return
-    }
-
-    /* -------- persist for mobile / refresh safety -------- */
-    sessionStorage.setItem(
-      'dustclaim:lastClaimPlan',
-      JSON.stringify(claimPlan)
-    )
-    sessionStorage.setItem(
-      'dustclaim:lastDevice',
-      isProbablyMobile ? 'mobile' : 'desktop'
-    )
-    sessionStorage.setItem(
-      'dustclaim:lastTotal',
-      String(totalValue)
-    )
-
-    navigate('/claim', {
-      state: {
-        claimPlan,
-        dustResults: results,
-        totalDustValue: totalValue,
-        device: isProbablyMobile ? 'mobile' : 'desktop'
+      if (typeof batchService.buildClaimPlan === 'function') {
+        try {
+          claimPlan = await batchService.buildClaimPlan(claims, {
+            txOrigin: address,
+            slippagePct: 1,
+            outTokenByChain: settings.outTokenByChain
+          })
+        } catch (e) {
+          console.warn('[DustScanner] buildClaimPlan failed:', e)
+          claimPlan = []
+        }
       }
-    })
+    } finally {
+      console.log('[DustScanner] ClaimPlan built:', claimPlan)
+      navigate('/claim', {
+        state: {
+          claimPlan,
+          batchTransactions,
+          oneInchSingle,
+          oneInchBatch,
+          uniswapSingle,
+          dustResults: results,
+          totalDustValue: totalValue,
+          batchSavings
+        }
+      })
+    }
   }
 
-  /* ---------------- UI ---------------- */
+  const toggleChain = (id) => setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
+
+  const fmt = (n) => Number(n || 0).toFixed(6)
+  const usd = (n) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
+
   return (
     <div className="dust-scanner">
       <div className="scanner-header">
         <h1>Multi-Chain Dust Scanner</h1>
-        <p>Scan and claim across all supported chains</p>
+        <p>Scan across 20+ blockchains for claimable tokens & dust</p>
+
+        {scanError ? (
+          <div style={{ marginTop: 12, padding: 10, border: '1px solid #ff5a5a', borderRadius: 10 }}>
+            <strong style={{ color: '#ff5a5a' }}>Scan error:</strong> {scanError}
+            <div style={{ opacity: 0.8, marginTop: 6, fontSize: 12 }}>
+              This usually happens when one or more RPCs hang or fail to detect network.
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className="scan-controls">
-        <button
-          className="scan-button"
-          disabled={scanning || selectedIds.length === 0}
-          onClick={handleScan}
-        >
-          {scanning
-            ? 'Scanning…'
-            : `Scan ${selectedIds.length} Chains`}
-        </button>
-      </div>
-
-      {results.length > 0 && (
-        <div className="results-section">
-          <h2>Total Found: ${totalValue.toFixed(2)}</h2>
-
-          {results.map((r) => {
-            const meta = SUPPORTED_CHAINS[r.chainId] || {}
-            const logo =
-              meta.logo ||
-              NATIVE_LOGOS[r.chainId] ||
-              '/logos/chains/generic.png'
-
+      <div className="chain-selection-card">
+        <div className="chains-grid-selection">
+          {Object.entries(SUPPORTED_CHAINS).map(([id, chain]) => {
+            const nativeLogo = chain.logo || NATIVE_LOGOS[id] || '/logos/chains/generic.png'
             return (
-              <div key={r.chainId} className="chain-result-card">
-                <img src={logo} alt={meta.name} />
-                <strong>{meta.name}</strong>
-
-                {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
-                  <TokenRow
-                    key={`${r.chainId}-${i}`}
-                    token={{ ...t, chainId: r.chainId }}
-                  />
-                ))}
+              <div
+                key={id}
+                className={`chain-selector ${selectedChains[id] ? 'selected' : ''}`}
+                onClick={() => toggleChain(id)}
+              >
+                <img className="chain-logo" src={nativeLogo} alt={chain.name} />
+                <span className="chain-name">{chain.name}</span>
+                <div className="checkbox">{selectedChains[id] && <div className="checkmark">✓</div>}</div>
               </div>
             )
           })}
+        </div>
 
+        <div className="scan-controls">
           <button
-            className="claim-button"
-            onClick={handleBatchClaim}
-            disabled={actionUniverse.length === 0}
+            className="scan-button"
+            disabled={scanning || selectedIds.length === 0 || !address}
+            onClick={handleScan}
           >
-            🧹 Batch Claim (${totalValue.toFixed(2)})
+            {scanning ? `Scanning ${selectedIds.length} Chains…` : `🔍 Scan ${selectedIds.length} Selected Chains`}
           </button>
+        </div>
+      </div>
 
-          <TxStepsPanel />
+      {scanning ? (
+        <div style={{ marginTop: 16 }}>
+          <Shimmer />
+        </div>
+      ) : null}
+
+      {results.length > 0 && (
+        <div className="results-section">
+          <div className="results-header">
+            <h2>Dust Found: {usd(totalValue)}</h2>
+            <div className="savings-badge">🧹 {totalClaimableCount} claimable tokens</div>
+          </div>
+
+          <div className="dust-results">
+            {results.map((r) => {
+              const meta = SUPPORTED_CHAINS[r.chainId] || {}
+              const nativeLogo = meta.logo || NATIVE_LOGOS[r.chainId] || '/logos/chains/generic.png'
+              const key = String(r.chainId)
+              const chainActions = actionByChain[key] || { value: 0, count: 0 }
+
+              return (
+                <div key={r.chainId} className="chain-result-card">
+                  <div className="chain-result-header">
+                    <div className="chain-info">
+                      <img className="chain-logo" src={nativeLogo} alt={meta.name} />
+                      <div>
+                        <h3>{r.chainName}</h3>
+                        <p className="chain-value">{usd(chainActions.value || r.totalValue || 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="dust-details">
+                    <div className="native-dust">
+                      <span className="dust-label">Native:</span>
+                      <span className="dust-amount">
+                        {fmt(r.nativeBalance)} {r.symbol} {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
+                      </span>
+                      {parseFloat(r.nativeBalance) > 0 &&
+                        parseFloat(r.nativeBalance) < Number(settings.nativeDustThreshold || 0.001) && (
+                          <span className="dust-badge">dust</span>
+                        )}
+                    </div>
+
+                    {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
+                      <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={{ ...t, chainId: r.chainId }} />
+                    ))}
+
+                    {(r.tokenDetails?.length || 0) > 5 && (
+                      <div className="more-tokens">+{r.tokenDetails.length - 5} more tokens</div>
+                    )}
+                  </div>
+
+                  <div className="claim-indicator">🧹 {chainActions.count} selected by settings</div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="claim-actions">
+            <button
+              onClick={handleBatchClaim}
+              className="claim-button"
+              disabled={buildActionUniverse.length === 0}
+              title={
+                buildActionUniverse.length === 0
+                  ? 'Nothing to claim/swap given your current settings'
+                  : 'Prepare a 0x swap plan and execute it on the Claim page'
+              }
+            >
+              {settings.mode === 'swap-token'
+                ? `💱 Swap & Claim (${usd(totalValue)})`
+                : `🧹 Batch Claim All (${usd(totalValue)})`}
+            </button>
+
+            {buildActionUniverse.length === 0 && (
+              <p className="claim-note">
+                Nothing matched your current settings. Try enabling “Include non-dust” or widening the USD window in
+                Settings.
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
   )
-      }
+}
+
+export default DustScanner
