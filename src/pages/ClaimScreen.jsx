@@ -3,20 +3,24 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
 import walletService from '../services/walletService'
-import {
-  prepareChainPlanWithFlow,
-  executeApprovalsWithFlow,
-  executeSwapsWithFlow
-} from '../services/claimExecutor'
+import { prepareChainPlanWithFlow, executeApprovalsWithFlow, executeSwapsWithFlow } from '../services/claimExecutor'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
 import './ClaimScreen.css'
 
-// storage keys
-const LS_LAST_CLAIM_PLAN = 'dustclaim:lastClaimPlan'
-const LS_LAST_BATCH_SAVINGS = 'dustclaim:lastBatchSavings'
-const LS_LAST_DEVICE = 'dustclaim:lastDevice'
+const SS_PLAN = 'dustclaim:lastClaimPlan'
+const SS_SAVINGS = 'dustclaim:lastBatchSavings'
+const SS_DEVICE = 'dustclaim:lastDevice'
+const SS_LASTSCAN = 'dustclaim:lastScan'
+
+function safeJsonParse(raw, fallback) {
+  try {
+    return raw ? JSON.parse(raw) : fallback
+  } catch {
+    return fallback
+  }
+}
 
 const ClaimScreen = () => {
   const location = useLocation()
@@ -24,65 +28,57 @@ const ClaimScreen = () => {
   const { address, isConnected } = useWallet()
   const { results: scanResults } = useScan()
 
-  // =============================================================================
-  // 1) Hydrate claimPlan from router state OR sessionStorage (critical for mobile)
-  // =============================================================================
-  const [claimPlan, setClaimPlan] = useState(() => {
-    const fromState = location.state?.claimPlan
-    if (Array.isArray(fromState) && fromState.length) return fromState
+  // ---------------- restore router state OR sessionStorage ----------------
+  const state = location.state || {}
 
-    try {
-      const raw = sessionStorage.getItem(LS_LAST_CLAIM_PLAN)
-      const parsed = raw ? JSON.parse(raw) : null
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  })
-
-  const batchSavings = useMemo(() => {
-    const fromState = location.state?.batchSavings
+  const restoredClaimPlan = useMemo(() => {
+    const fromState = Array.isArray(state.claimPlan) && state.claimPlan.length > 0 ? state.claimPlan : null
     if (fromState) return fromState
-    try {
-      const raw = sessionStorage.getItem(LS_LAST_BATCH_SAVINGS)
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
-    }
-  }, [location.state])
 
-  const device = useMemo(() => {
-    const fromState = location.state?.device
-    if (fromState) return fromState
-    try {
-      return sessionStorage.getItem(LS_LAST_DEVICE) || 'desktop'
-    } catch {
-      return 'desktop'
-    }
-  }, [location.state])
-
-  // Persist on entry if router state had it (ensures it survives refresh)
-  useEffect(() => {
-    const fromState = location.state?.claimPlan
-    if (Array.isArray(fromState) && fromState.length) {
-      setClaimPlan(fromState)
-      try {
-        sessionStorage.setItem(LS_LAST_CLAIM_PLAN, JSON.stringify(fromState))
-        sessionStorage.setItem(LS_LAST_BATCH_SAVINGS, JSON.stringify(location.state?.batchSavings || null))
-        sessionStorage.setItem(LS_LAST_DEVICE, String(location.state?.device || 'desktop'))
-      } catch {
-        // ignore
-      }
-    }
+    const fromSession = safeJsonParse(sessionStorage.getItem(SS_PLAN), [])
+    return Array.isArray(fromSession) ? fromSession : []
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [location.key])
+
+  const restoredBatchSavings = useMemo(() => {
+    if (state.batchSavings !== undefined) return state.batchSavings
+    return safeJsonParse(sessionStorage.getItem(SS_SAVINGS), null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
+
+  const restoredDevice = useMemo(() => {
+    if (state.device) return state.device
+    const d = sessionStorage.getItem(SS_DEVICE)
+    return d || 'desktop'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
+
+  // Persist when present (so mobile refresh doesn't kill it)
+  useEffect(() => {
+    try {
+      if (Array.isArray(restoredClaimPlan) && restoredClaimPlan.length > 0) {
+        sessionStorage.setItem(
+          SS_PLAN,
+          JSON.stringify(restoredClaimPlan, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+        )
+      }
+      sessionStorage.setItem(SS_SAVINGS, JSON.stringify(restoredBatchSavings ?? null))
+      sessionStorage.setItem(SS_DEVICE, String(restoredDevice || 'desktop'))
+    } catch {
+      // ignore
+    }
+  }, [restoredClaimPlan, restoredBatchSavings, restoredDevice])
+
+  const claimPlan = restoredClaimPlan
+  const batchSavings = restoredBatchSavings
+  const device = restoredDevice
 
   // ---------------- hydrate scan snapshot ----------------
   const [scanSnapshot] = useState(() => {
-    if (location.state?.dustResults?.length) {
+    if (state?.dustResults?.length) {
       return {
-        dustResults: location.state.dustResults,
-        totalDustValue: Number(location.state.totalDustValue || 0)
+        dustResults: state.dustResults,
+        totalDustValue: Number(state.totalDustValue || 0)
       }
     }
 
@@ -91,16 +87,14 @@ const ClaimScreen = () => {
       return { dustResults: scanResults, totalDustValue: total }
     }
 
-    try {
-      const raw = sessionStorage.getItem('dustclaim:lastScan')
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        return {
-          dustResults: parsed.dustResults || [],
-          totalDustValue: Number(parsed.total || 0)
-        }
+    // last resort
+    const parsed = safeJsonParse(sessionStorage.getItem(SS_LASTSCAN), null)
+    if (parsed?.dustResults?.length) {
+      return {
+        dustResults: parsed.dustResults || [],
+        totalDustValue: Number(parsed.total || 0)
       }
-    } catch {}
+    }
 
     return { dustResults: [], totalDustValue: 0 }
   })
@@ -115,14 +109,10 @@ const ClaimScreen = () => {
 
   const planAvailable = Array.isArray(claimPlan) && claimPlan.length > 0
 
-  const totalChains = planAvailable
-    ? claimPlan.length
-    : new Set(dustResults.map((r) => r.chainId)).size
-
+  const totalChains = planAvailable ? claimPlan.length : new Set(dustResults.map((r) => r.chainId)).size
   const defaultChainId = claimPlan?.[0]?.chainId || dustResults?.[0]?.chainId || 1
 
-  const getChainInfo = (chainId) =>
-    SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
+  const getChainInfo = (chainId) => SUPPORTED_CHAINS?.[Number(chainId)] || { name: 'Unknown', explorer: '' }
 
   const usdFmt = (n) =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(n || 0))
@@ -217,7 +207,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // Prepared context cache (per chain) – click only
+  // Prepared context cache (per chain)
   // ============================================================================
   const [preparing, setPreparing] = useState(false)
   const [preparedByChain, setPreparedByChain] = useState({})
@@ -253,15 +243,12 @@ const ClaimScreen = () => {
       setError('Connect your wallet to prepare the claim plan.')
       return
     }
-
-    // IMPORTANT: Button should still react even if planAvailable is false
     if (!planAvailable) {
-      setError('No swap plan available on this screen. Go back to Scanner, rescan, then open Claim again.')
+      setError('No swap plan available. Go back to Scanner, run Batch Claim, then open Claim again.')
       return
     }
 
     const runId = bumpPrepareRun()
-
     setPreparing(true)
     setError(null)
     setPrepareErrors({})
@@ -302,10 +289,7 @@ const ClaimScreen = () => {
     }
   }, [isConnected, planAvailable, claimPlan, address, refreshTxFeed])
 
-  const allPreparedChainIds = useMemo(
-    () => Object.keys(preparedByChain || {}).map(Number),
-    [preparedByChain]
-  )
+  const allPreparedChainIds = useMemo(() => Object.keys(preparedByChain || {}).map(Number), [preparedByChain])
   const preparedCount = allPreparedChainIds.length
 
   const approvalsRemaining = useMemo(() => {
@@ -331,18 +315,9 @@ const ClaimScreen = () => {
   // ACTION 1: Approvals ONLY
   // ============================================================================
   const handleApproveOnly = async () => {
-    if (!isConnected) {
-      setError('Connect your wallet to approve.')
-      return
-    }
-    if (!planAvailable) {
-      setError('No swap plan available. Please rescan.')
-      return
-    }
-    if (preparedCount === 0) {
-      setError('Preparing is required before approvals. Click “Prepare Plan” first.')
-      return
-    }
+    if (!isConnected) return setError('Connect your wallet to approve.')
+    if (!planAvailable) return setError('No swap plan available. Go back to Scanner and run Batch Claim.')
+    if (preparedCount === 0) return setError('Click “Prepare Plan” first.')
 
     setApproving(true)
     setError(null)
@@ -350,10 +325,8 @@ const ClaimScreen = () => {
     setCurrentStep(0)
 
     const results = []
-
     try {
       const chainIds = Object.keys(preparedByChain).map(Number)
-
       for (let i = 0; i < chainIds.length; i++) {
         const chainId = chainIds[i]
         const ctx = preparedByChain[chainId]
@@ -364,12 +337,7 @@ const ClaimScreen = () => {
           const ok = receipts?.some((r) => r.type === 'approval' && r.ok)
           results.push({ chainId, action: 'approval', success: !!ok, receipts })
         } catch (e) {
-          results.push({
-            chainId,
-            action: 'approval',
-            success: false,
-            error: e?.message || 'Approval failed'
-          })
+          results.push({ chainId, action: 'approval', success: false, error: e?.message || 'Approval failed' })
           break
         }
 
@@ -388,18 +356,9 @@ const ClaimScreen = () => {
   // ACTION 2: Swaps ONLY (DustClaimV3.claimDustUsingAggregator)
   // ============================================================================
   const handleClaimOnly = async () => {
-    if (!isConnected) {
-      setError('Connect your wallet to claim.')
-      return
-    }
-    if (!planAvailable) {
-      setError('No swap plan available. Please rescan.')
-      return
-    }
-    if (preparedCount === 0) {
-      setError('Preparing is required before claiming. Click “Prepare Plan” first.')
-      return
-    }
+    if (!isConnected) return setError('Connect your wallet to claim.')
+    if (!planAvailable) return setError('No swap plan available. Go back to Scanner and run Batch Claim.')
+    if (preparedCount === 0) return setError('Click “Prepare Plan” first.')
 
     setClaiming(true)
     setError(null)
@@ -407,10 +366,8 @@ const ClaimScreen = () => {
     setCurrentStep(0)
 
     const results = []
-
     try {
       const chainIds = Object.keys(preparedByChain).map(Number)
-
       for (let i = 0; i < chainIds.length; i++) {
         const chainId = chainIds[i]
         const ctx = preparedByChain[chainId]
@@ -421,12 +378,7 @@ const ClaimScreen = () => {
           const ok = receipts?.some((r) => r.type === 'swap' && r.ok && r.txHash)
           results.push({ chainId, action: 'swap', success: !!ok, receipts })
         } catch (e) {
-          results.push({
-            chainId,
-            action: 'swap',
-            success: false,
-            error: e?.message || 'Swap failed'
-          })
+          results.push({ chainId, action: 'swap', success: false, error: e?.message || 'Swap failed' })
           break
         }
 
@@ -466,11 +418,11 @@ const ClaimScreen = () => {
       <div className="claim-header">
         <h1>Dust Claim</h1>
         <p>
-          0x routes + DustClaimV3.claimDustUsingAggregator
-          {device === 'mobile' ? ' (Mobile mode)' : ''}
+          0x routes + DustClaimV3.claimDustUsingAggregator{device === 'mobile' ? ' (Mobile mode)' : ''}
         </p>
       </div>
 
+      {/* Summary */}
       <div className="summary-card">
         <div className="summary-grid">
           <div className="summary-item">
@@ -527,6 +479,7 @@ const ClaimScreen = () => {
         </div>
       </div>
 
+      {/* Chains */}
       {dustResults.length > 0 && (
         <div className="chains-section">
           <h2>Detected Chains</h2>
@@ -564,19 +517,15 @@ const ClaimScreen = () => {
         </div>
       )}
 
+      {/* ACTIONS */}
       <div className="action-section" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ width: '100%', fontSize: 12, opacity: 0.8 }}>
-          busy={String(busy)} preparing={String(preparing)} approving={String(approving)} claiming={String(claiming)} preparedCount={preparedCount} planAvailable={String(planAvailable)} isConnected={String(isConnected)}
-        </div>
-
-        {/* DO NOT disable this based on planAvailable; let it respond and show error */}
         <button
           onClick={prepareAllChains}
           disabled={busy}
           className="execute-button"
-          title="Fetch 0x routes once and cache them (no transactions). Must be clicked to allow MetaMask prompts."
+          title="Fetch 0x routes once and cache them (no transactions)."
         >
-          {preparing ? '⏳ Preparing…' : '🧠 Prepare Plan (0x Routes)'}
+          {preparing ? 'Preparing…' : 'Prepare Plan (0x Routes)'}
         </button>
 
         {preparing && (
@@ -584,9 +533,9 @@ const ClaimScreen = () => {
             onClick={cancelPrepare}
             className="execute-button"
             style={{ opacity: 0.9 }}
-            title="Stop the UI from being locked if MetaMask did not open a prompt"
+            title="Stop the UI lock if something stalls"
           >
-            ✋ Cancel Prepare
+            Cancel Prepare
           </button>
         )}
 
@@ -596,7 +545,7 @@ const ClaimScreen = () => {
           className="execute-button"
           title="Send ONLY approval transactions"
         >
-          {approving ? '⏳ Approving…' : '✅ Approve Required Tokens'}
+          {approving ? 'Approving…' : 'Approve Required Tokens'}
         </button>
 
         <button
@@ -605,8 +554,14 @@ const ClaimScreen = () => {
           className="execute-button"
           title="Send ONLY DustClaimV3 claimDustUsingAggregator swaps"
         >
-          {claiming ? '⏳ Claiming…' : '🚀 Claim Dust (Execute Swaps)'}
+          {claiming ? 'Claiming…' : 'Claim Dust (Execute Swaps)'}
         </button>
+
+        {!planAvailable && (
+          <div className="error-message" style={{ width: '100%' }}>
+            No swap plan available on this screen. Go back to Scanner, tap “Batch Claim”, then open Claim again.
+          </div>
+        )}
 
         {error && (
           <div className="error-message" style={{ width: '100%' }}>
@@ -615,6 +570,7 @@ const ClaimScreen = () => {
         )}
       </div>
 
+      {/* Progress */}
       {busy && progressTotal > 0 && (
         <div className="claiming-progress">
           <span>
@@ -623,6 +579,7 @@ const ClaimScreen = () => {
         </div>
       )}
 
+      {/* Results */}
       {actionResults.length > 0 && (
         <div className="results-card">
           <h3>Results</h3>
@@ -639,12 +596,42 @@ const ClaimScreen = () => {
                   {info.name} · {String(r.action || 'tx').toUpperCase()}
                 </strong>
                 {r.error && <p>{r.error}</p>}
+
+                {Array.isArray(r.receipts) && r.receipts.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    {r.receipts.map((rcpt, j) => {
+                      const url = explorerTxUrl(r.chainId, rcpt.txHash)
+                      const label = rcpt.type === 'approval' ? 'Approval' : rcpt.type === 'swap' ? 'Swap' : rcpt.type
+
+                      return (
+                        <div key={j} style={{ fontSize: 13, opacity: 0.95, marginTop: 6 }}>
+                          <span style={{ fontWeight: 600 }}>{label}:</span>{' '}
+                          {rcpt.txHash ? (
+                            url ? (
+                              <a href={url} target="_blank" rel="noreferrer">
+                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
+                              </a>
+                            ) : (
+                              <span>
+                                {rcpt.txHash.slice(0, 10)}…{rcpt.txHash.slice(-8)}
+                              </span>
+                            )
+                          ) : (
+                            <span>{rcpt.ok ? 'OK' : 'Not submitted'}</span>
+                          )}
+                          {rcpt.error && <div style={{ marginTop: 2, opacity: 0.85 }}>{rcpt.error}</div>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )
           })}
         </div>
       )}
 
+      {/* Transaction Activity */}
       <div className="results-card" style={{ marginTop: 16 }}>
         <h3>Transaction Activity{pendingCount > 0 ? ` (Pending: ${pendingCount})` : ''}</h3>
 
@@ -694,9 +681,10 @@ const ClaimScreen = () => {
                     )}
                   </div>
 
-                  {t.error && (
-                    <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>
-                      {t.error}
+                  {t.error && <div style={{ marginTop: 6, fontSize: 13, opacity: 0.85 }}>{t.error}</div>}
+                  {t.blockNumber && (
+                    <div style={{ marginTop: 6, fontSize: 12, opacity: 0.75 }}>
+                      Block: {t.blockNumber}
                     </div>
                   )}
                 </div>
