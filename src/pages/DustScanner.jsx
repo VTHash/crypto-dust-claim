@@ -1,3 +1,4 @@
+// src/pages/DustScanner.jsx
 import React, { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
@@ -5,13 +6,13 @@ import { useScan } from '../contexts/ScanContext'
 import { useSettings } from '../contexts/SettingsContext'
 import web3Service from '../services/web3Service'
 import batchService from '../services/batchService'
-import dexAggregatorService from '../services/dexAggregatorService'
+// NOTE: dexAggregatorService imported previously but not used here; remove to avoid dead imports.
+// import dexAggregatorService from '../services/dexAggregatorService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
-import Shimmer from '../components/Shimmer.jsx'
-import './DustScanner.css'
 import TxStepsPanel from '../components/TxStepsPanel.jsx'
+import './DustScanner.css'
 
 export default function DustScanner() {
   const { address } = useWallet()
@@ -20,7 +21,10 @@ export default function DustScanner() {
   const { settings } = useSettings()
 
   const [scanning, setScanning] = useState(false)
-  const [selectedChains, setSelectedChains] = useState(
+  const [buildingPlan, setBuildingPlan] = useState(false)
+  const [planError, setPlanError] = useState(null)
+
+  const [selectedChains, setSelectedChains] = useState(() =>
     Object.keys(SUPPORTED_CHAINS).reduce((acc, id) => {
       acc[id] = true
       return acc
@@ -40,17 +44,14 @@ export default function DustScanner() {
     return false
   }, [])
 
-  // hydrate from last run ONLY if we don't already have results in context
+  // Hydrate from last run ONLY if we don't already have results in context
   useEffect(() => {
     if (results.length > 0) return
     try {
       const cached = sessionStorage.getItem('dustclaim:lastScan')
-      if (cached) {
-        const { dustResults = [] } = JSON.parse(cached)
-        if (dustResults.length > 0) {
-          setResults(dustResults)
-        }
-      }
+      if (!cached) return
+      const { dustResults = [] } = JSON.parse(cached)
+      if (Array.isArray(dustResults) && dustResults.length > 0) setResults(dustResults)
     } catch {
       // ignore
     }
@@ -59,11 +60,12 @@ export default function DustScanner() {
   const handleScan = async () => {
     if (!address) return
     setScanning(true)
+    setPlanError(null)
 
     try {
       const scan = await web3Service.scanChains(selectedIds, address, settings)
-      console.log('scanChains returned:', scan, 'isArray?', Array.isArray(scan))
-      // ✅ Normalize output to an array no matter what scanChains returns
+
+      // Normalize output to an array no matter what scanChains returns
       const dustResults = Array.isArray(scan)
         ? scan
         : Array.isArray(scan?.dustResults)
@@ -76,7 +78,7 @@ export default function DustScanner() {
 
       const total = dustResults.reduce((s, x) => s + (Number(x.totalValue) || 0), 0)
 
-      // cache
+      // Cache
       try {
         sessionStorage.setItem(
           'dustclaim:lastScan',
@@ -89,7 +91,7 @@ export default function DustScanner() {
         console.warn('Failed to store lastScan in sessionStorage:', err)
       }
 
-      // stats
+      // Stats
       try {
         const usedChainIdsArray = Array.from(
           new Set(
@@ -123,15 +125,19 @@ export default function DustScanner() {
    */
   const buildActionUniverse = useMemo(() => {
     const list = []
-    for (const chain of results) {
+    for (const chain of results || []) {
       const chainId = chain.chainId
       const tokenList = chain.tokenDetails || []
 
       for (const t of tokenList) {
-        const usd = Number(t.value || 0)
-        const balance = Number(t.balance || 0)
+        const usdValue = Number(t.value || 0)
+        const balanceNum = Number(t.balance || 0)
 
-        if (balance <= 0) continue
+        if (balanceNum <= 0) continue
+
+        // Require an ERC20 address for claim/swap actions
+        // (If your scanner uses a special placeholder for native, it should not be here)
+        if (!t.address) continue
 
         if (settings.includeNonDust) {
           list.push({
@@ -140,23 +146,23 @@ export default function DustScanner() {
             address: t.address,
             balance: t.balance,
             decimals: t.decimals ?? 18,
-            usd
+            usd: usdValue
           })
         } else {
           const min = Number(settings.tokenMinUSD || 0)
-          const max = Number(
+          const max =
             settings.tokenMaxUSD === 0 || settings.tokenMaxUSD === undefined
               ? Infinity
-              : settings.tokenMaxUSD
-          )
-          if (usd >= min && usd <= max) {
+              : Number(settings.tokenMaxUSD)
+
+          if (usdValue >= min && usdValue <= max) {
             list.push({
               chainId,
               symbol: t.symbol,
               address: t.address,
               balance: t.balance,
               decimals: t.decimals ?? 18,
-              usd
+              usd: usdValue
             })
           }
         }
@@ -188,80 +194,85 @@ export default function DustScanner() {
   const totalClaimableCount = useMemo(() => buildActionUniverse.length, [buildActionUniverse])
 
   /**
-   * Swap & Claim (0x only):
-   * Build a claimPlan via batchService.buildClaimPlan
-   * Navigate to ClaimScreen with claimPlan set.
+   * Build a claimPlan via batchService.buildClaimPlan and navigate to /claim.
    *
-   * NEW UX:
-   * - Desktop: proceed as normal to /claim
-   * - Mobile: still proceed to /claim, but mark device=mobile so ClaimScreen can enforce 2-step buttons
+   * CRITICAL RULE:
+   * - Do NOT navigate if claimPlan is empty. This is what caused "No swap plan available".
+   *
+   * Also:
+   * - Persist claim plan to sessionStorage for mobile browser refresh / router-state loss.
    */
   const handleBatchClaim = async () => {
-  if (!address) return
+    if (!address) return
 
-  const claims = buildActionUniverse.map((it) => ({
-    chainId: it.chainId,
-    tokenAddress: it.address,
-    tokenSymbol: it.symbol,
-    amount: it.balance,
-    decimals: it.decimals ?? 18,
-    recipient: address
-  }))
+    setBuildingPlan(true)
+    setPlanError(null)
 
-  let claimPlan = []
-  let batchTransactions = []
-  let oneInchSingle = null
-  let oneInchBatch = null
-  let uniswapSingle = null
-  let batchSavings = null
-
-  try {
-    if (typeof batchService.buildClaimPlan === 'function') {
-      try {
-        claimPlan = await batchService.buildClaimPlan(claims, {
-          txOrigin: address,
-          slippagePct: 1,
-          outTokenByChain: settings.outTokenByChain
-        })
-      } catch (e) {
-        console.warn('[DustScanner] buildClaimPlan failed:', e)
-        claimPlan = []
-      }
-    }
-  } finally {
-    console.log('[DustScanner] ClaimPlan built:', claimPlan)
-
-    // ✅ CRITICAL: persist claim state so ClaimScreen works even if router state is lost (mobile refresh)
     try {
-      sessionStorage.setItem(
-        'dustclaim:lastClaimPlan',
-        JSON.stringify(claimPlan, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
-      )
-      sessionStorage.setItem(
-        'dustclaim:lastBatchSavings',
-        JSON.stringify(batchSavings || null, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
-      )
-      sessionStorage.setItem('dustclaim:lastDevice', isProbablyMobile ? 'mobile' : 'desktop')
-    } catch (err) {
-      console.warn('Failed to store lastClaimPlan in sessionStorage:', err)
-    }
+      const claims = buildActionUniverse.map((it) => ({
+        chainId: it.chainId,
+        tokenAddress: it.address,
+        tokenSymbol: it.symbol,
+        amount: it.balance,
+        decimals: it.decimals ?? 18,
+        recipient: address
+      }))
 
-    navigate('/claim', {
-      state: {
-        claimPlan,
-        batchTransactions,
-        oneInchSingle,
-        oneInchBatch,
-        uniswapSingle,
-        dustResults: results,
-        totalDustValue: totalValue,
-        batchSavings,
-
-        device: isProbablyMobile ? 'mobile' : 'desktop'
+      if (claims.length === 0) {
+        setPlanError('Nothing to claim with your current filters. Try widening the USD window in Settings.')
+        return
       }
-    })
+
+      if (typeof batchService.buildClaimPlan !== 'function') {
+        setPlanError('buildClaimPlan() is not available. Check services/batchService export.')
+        return
+      }
+
+      // IMPORTANT: pass both txOrigin AND recipient for compatibility with your 0x quote function + DustClaimV3 flow
+      const claimPlan = await batchService.buildClaimPlan(claims, {
+        txOrigin: address,
+        recipient: address,
+        slippagePct: 1,
+        outTokenByChain: settings.outTokenByChain
+      })
+
+      if (!Array.isArray(claimPlan) || claimPlan.length === 0) {
+        setPlanError(
+          'No swap routes were returned.\n\nThis usually means:\n' +
+            '• Amounts are too small for 0x\n' +
+            '• Output token selection is invalid for a chain\n' +
+            '• Some chains have no swappable ERC20s under your settings\n\n' +
+            'Try increasing the USD minimum, or change output token in Settings.'
+        )
+        return
+      }
+
+      // Persist claim state so ClaimScreen works even if router state is lost (mobile refresh)
+      try {
+        sessionStorage.setItem(
+          'dustclaim:lastClaimPlan',
+          JSON.stringify(claimPlan, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+        )
+        sessionStorage.setItem('dustclaim:lastDevice', isProbablyMobile ? 'mobile' : 'desktop')
+      } catch (err) {
+        console.warn('Failed to store lastClaimPlan in sessionStorage:', err)
+      }
+
+      navigate('/claim', {
+        state: {
+          claimPlan,
+          dustResults: results,
+          totalDustValue: totalValue,
+          device: isProbablyMobile ? 'mobile' : 'desktop'
+        }
+      })
+    } catch (e) {
+      console.warn('[DustScanner] buildClaimPlan failed:', e)
+      setPlanError(e?.message || 'Failed to build claim plan.')
+    } finally {
+      setBuildingPlan(false)
+    }
   }
-}
 
   const toggleChain = (id) => setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
 
@@ -289,20 +300,14 @@ export default function DustScanner() {
               >
                 <img className="chain-logo" src={nativeLogo} alt={chain.name} />
                 <span className="chain-name">{chain.name}</span>
-                <div className="checkbox">
-                  {selectedChains[id] && <div className="checkmark">✓</div>}
-                </div>
+                <div className="checkbox">{selectedChains[id] && <div className="checkmark">✓</div>}</div>
               </div>
             )
           })}
         </div>
 
         <div className="scan-controls">
-          <button
-            className="scan-button"
-            disabled={scanning || selectedIds.length === 0}
-            onClick={handleScan}
-          >
+          <button className="scan-button" disabled={scanning || selectedIds.length === 0} onClick={handleScan}>
             {scanning ? `Scanning ${selectedIds.length} Chains…` : `🔍 Scan ${selectedIds.length} Selected Chains`}
           </button>
         </div>
@@ -340,8 +345,7 @@ export default function DustScanner() {
                     <div className="native-dust">
                       <span className="dust-label">Native:</span>
                       <span className="dust-amount">
-                        {fmt(r.nativeBalance)} {r.symbol}{' '}
-                        {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
+                        {fmt(r.nativeBalance)} {r.symbol} {r.nativeValue ? `(${usd(r.nativeValue)})` : ''}
                       </span>
                       {parseFloat(r.nativeBalance) > 0 &&
                         parseFloat(r.nativeBalance) < Number(settings.nativeDustThreshold || 0.001) && (
@@ -349,7 +353,7 @@ export default function DustScanner() {
                         )}
                     </div>
 
-                    {/* Tokens with real logos */}
+                    {/* Tokens */}
                     {(r.tokenDetails || []).slice(0, 5).map((t, i) => (
                       <TokenRow key={`${r.chainId}-${t.address}-${i}`} token={{ ...t, chainId: r.chainId }} />
                     ))}
@@ -369,26 +373,33 @@ export default function DustScanner() {
             <button
               onClick={handleBatchClaim}
               className="claim-button"
-              disabled={buildActionUniverse.length === 0}
+              disabled={buildingPlan || buildActionUniverse.length === 0}
               title={
                 buildActionUniverse.length === 0
                   ? 'Nothing to claim/swap given your current settings'
-                  : 'Prepare a 0x swap plan and execute it on the Claim page'
+                  : 'Build a 0x swap plan and open the Claim page'
               }
             >
-              {settings.mode === 'swap-token'
-                ? `💱 Swap & Claim (${usd(totalValue)})`
-                : `🧹 Batch Claim All (${usd(totalValue)})`}
+              {buildingPlan
+                ? '⏳ Building Swap Plan…'
+                : settings.mode === 'swap-token'
+                  ? `💱 Swap & Claim (${usd(totalValue)})`
+                  : `🧹 Batch Claim All (${usd(totalValue)})`}
             </button>
 
-            {buildActionUniverse.length === 0 && (
+            {planError && (
+              <p className="claim-note" style={{ whiteSpace: 'pre-line' }}>
+                {planError}
+              </p>
+            )}
+
+            {buildActionUniverse.length === 0 && !planError && (
               <p className="claim-note">
                 Nothing matched your current settings. Try enabling “Include non-dust” or widening the USD window in
                 Settings.
               </p>
             )}
 
-            {/* ✅ Steps UI */}
             <div style={{ marginTop: 16 }}>
               <TxStepsPanel />
             </div>
