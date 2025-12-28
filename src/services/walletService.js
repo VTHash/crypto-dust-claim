@@ -456,7 +456,7 @@ const walletService = {
       const data = typeof tx?.data === 'string' ? tx.data : '0x'
       const value = toBigIntSafe(tx?.value) ?? 0n
 
-      const req = { to, data, value }
+      const req = { from, to, data, value }
 
       const gasLimit = toBigIntSafe(tx?.gasLimit)
       const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
@@ -479,14 +479,12 @@ const walletService = {
       }
 
       // Fee data if missing (let MM fill if not available)
-      if (!req.maxFeePerGas && !req.maxPriorityFeePerGas && !req.gasPrice) {
+      if (!req.maxFeePerGas && !req.maxPriorityFeePerGas) {
         try {
           const fee = await bp.getFeeData()
           if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
             req.maxFeePerGas = BigInt(fee.maxFeePerGas)
             req.maxPriorityFeePerGas = BigInt(fee.maxPriorityFeePerGas)
-          } else if (fee?.gasPrice) {
-            req.gasPrice = BigInt(fee.gasPrice)
           }
         } catch {
           // ignore
