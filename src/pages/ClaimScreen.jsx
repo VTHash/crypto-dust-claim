@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState, useCallback } from 'react'
+import React, { useMemo, useEffect, useState, useCallback, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
@@ -162,7 +162,8 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // NEW: Prepared context cache (per chain) – prevents re-quoting on Approve
+  // Prepared context cache (per chain)
+  // IMPORTANT: DO NOT auto-prepare in useEffect (MetaMask blocks non-user prompts).
   // ============================================================================
   const [preparing, setPreparing] = useState(false)
   const [preparedByChain, setPreparedByChain] = useState({}) // { [chainId]: preparedCtx }
@@ -174,7 +175,28 @@ const ClaimScreen = () => {
   const [currentStep, setCurrentStep] = useState(0)
   const [actionResults, setActionResults] = useState([])
 
+  // Cancel flag for long prepares (cannot abort MetaMask, but we can stop UI lock)
+  const prepareRunRef = useRef({ runId: 0, canceled: false })
+  const bumpPrepareRun = () => {
+    prepareRunRef.current = { runId: prepareRunRef.current.runId + 1, canceled: false }
+    return prepareRunRef.current.runId
+  }
+  const cancelPrepare = () => {
+    prepareRunRef.current.canceled = true
+    setPreparing(false)
+    setCurrentStep(0)
+  }
+
+  const withTimeout = (p, ms, label = 'Operation') => {
+    let t
+    const timeout = new Promise((_, rej) => {
+      t = setTimeout(() => rej(new Error(`${label} timed out`)), ms)
+    })
+    return Promise.race([p, timeout]).finally(() => clearTimeout(t))
+  }
+
   const prepareAllChains = useCallback(async () => {
+    // MUST be called from a click handler (user gesture) for MetaMask reliability
     if (!isConnected) {
       setError('Connect your wallet to prepare the claim plan.')
       return
@@ -183,6 +205,8 @@ const ClaimScreen = () => {
       setError('No swap plan available. Please rescan.')
       return
     }
+
+    const runId = bumpPrepareRun()
 
     setPreparing(true)
     setError(null)
@@ -194,50 +218,49 @@ const ClaimScreen = () => {
 
     try {
       for (let i = 0; i < claimPlan.length; i++) {
+        if (prepareRunRef.current.canceled || prepareRunRef.current.runId !== runId) break
+
         const chainPlan = claimPlan[i]
         const chainId = Number(chainPlan.chainId)
         setCurrentStep(i + 1)
 
         try {
-          const ctx = await prepareChainPlanWithFlow(chainPlan, address)
+          // Per-chain timeout so we do not lock the UI indefinitely
+          const ctx = await withTimeout(
+            prepareChainPlanWithFlow(chainPlan, address),
+            60_000,
+            `Prepare chain ${chainId}`
+          )
           nextPrepared[chainId] = ctx
         } catch (e) {
           nextErrors[chainId] = e?.message || 'Prepare failed'
         }
 
-        // slight pacing for MM mobile/webview
         await new Promise((r) => setTimeout(r, 150))
       }
     } finally {
-      setPreparedByChain(nextPrepared)
-      setPrepareErrors(nextErrors)
-      setPreparing(false)
-      setCurrentStep(0)
-      await refreshTxFeed()
+      // Only commit if this run is still the latest
+      if (prepareRunRef.current.runId === runId) {
+        setPreparedByChain(nextPrepared)
+        setPrepareErrors(nextErrors)
+        setPreparing(false)
+        setCurrentStep(0)
+        await refreshTxFeed()
+      }
     }
   }, [isConnected, planAvailable, claimPlan, address, refreshTxFeed])
 
-  // Auto-prepare once when entering screen (optional but recommended)
-  useEffect(() => {
-    if (!planAvailable) return
-    if (!isConnected) return
-    // if already prepared, do not repeat
-    const already = Object.keys(preparedByChain || {}).length > 0
-    if (already) return
-    prepareAllChains().catch(() => null)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planAvailable, isConnected])
-
-  const allPreparedChainIds = useMemo(() => Object.keys(preparedByChain || {}).map(Number), [preparedByChain])
+  const allPreparedChainIds = useMemo(
+    () => Object.keys(preparedByChain || {}).map(Number),
+    [preparedByChain]
+  )
   const preparedCount = allPreparedChainIds.length
 
   const approvalsRemaining = useMemo(() => {
-    // Count tokens needing approval across all prepared ctxs (best-effort)
     let n = 0
     for (const cid of allPreparedChainIds) {
       const ctx = preparedByChain[cid]
       const arr = Array.isArray(ctx?.approvalsNeeded) ? ctx.approvalsNeeded : []
-      // only count those with >0
       n += arr.filter((x) => x && x.amountWei && String(x.amountWei) !== '0').length
     }
     return n
@@ -253,7 +276,7 @@ const ClaimScreen = () => {
   }, [allPreparedChainIds, preparedByChain])
 
   // ============================================================================
-  // ACTION 1: Approvals ONLY (NO quote calls here)
+  // ACTION 1: Approvals ONLY
   // ============================================================================
   const handleApproveOnly = async () => {
     if (!isConnected) {
@@ -264,8 +287,6 @@ const ClaimScreen = () => {
       setError('No swap plan available. Please rescan.')
       return
     }
-
-    // Must be prepared first (otherwise approvalsNeeded may be missing)
     if (preparedCount === 0) {
       setError('Preparing is required before approvals. Click “Prepare Plan” first.')
       return
@@ -288,14 +309,8 @@ const ClaimScreen = () => {
 
         try {
           const { receipts } = await executeApprovalsWithFlow(ctx)
-
           const ok = receipts?.some((r) => r.type === 'approval' && r.ok)
-          results.push({
-            chainId,
-            action: 'approval',
-            success: !!ok,
-            receipts
-          })
+          results.push({ chainId, action: 'approval', success: !!ok, receipts })
         } catch (e) {
           results.push({
             chainId,
@@ -303,7 +318,6 @@ const ClaimScreen = () => {
             success: false,
             error: e?.message || 'Approval failed'
           })
-          // stop early on failure (mobile safe)
           break
         }
 
@@ -319,7 +333,7 @@ const ClaimScreen = () => {
   }
 
   // ============================================================================
-  // ACTION 2: Swaps ONLY (DustClaimV3.claimDustUsingAggregator)
+  // ACTION 2: Swaps ONLY
   // ============================================================================
   const handleClaimOnly = async () => {
     if (!isConnected) {
@@ -352,14 +366,8 @@ const ClaimScreen = () => {
 
         try {
           const { receipts } = await executeSwapsWithFlow(ctx)
-
           const ok = receipts?.some((r) => r.type === 'swap' && r.ok && r.txHash)
-          results.push({
-            chainId,
-            action: 'swap',
-            success: !!ok,
-            receipts
-          })
+          results.push({ chainId, action: 'swap', success: !!ok, receipts })
         } catch (e) {
           results.push({
             chainId,
@@ -367,7 +375,6 @@ const ClaimScreen = () => {
             success: false,
             error: e?.message || 'Swap failed'
           })
-          // do not necessarily stop — but mobile safe is to stop
           break
         }
 
@@ -419,7 +426,9 @@ const ClaimScreen = () => {
             <div className="summary-icon">💰</div>
             <div className="summary-content">
               <h3>Total Value</h3>
-              <div className="summary-value">{usdFmt(computedTotalDustValue)}</div>
+              <div className="summary-value">
+                {usdFmt(computedTotalDustValue)}
+              </div>
             </div>
           </div>
 
@@ -495,7 +504,6 @@ const ClaimScreen = () => {
                     <TokenRow key={`${r.chainId}-${i}`} token={t} />
                   ))}
 
-                  {/* Prepare error per chain (if in plan) */}
                   {prepareErrors?.[Number(r.chainId)] && (
                     <div className="error-message" style={{ marginTop: 10 }}>
                       Prepare error: {prepareErrors[Number(r.chainId)]}
@@ -514,16 +522,27 @@ const ClaimScreen = () => {
           onClick={prepareAllChains}
           disabled={busy || !planAvailable}
           className="execute-button"
-          title="Fetch 0x routes once and cache them (no transactions)"
+          title="Fetch 0x routes once and cache them (no transactions). Must be clicked to allow MetaMask prompts."
         >
           {preparing ? '⏳ Preparing…' : '🧠 Prepare Plan (0x Routes)'}
         </button>
+
+        {preparing && (
+          <button
+            onClick={cancelPrepare}
+            className="execute-button"
+            style={{ opacity: 0.9 }}
+            title="Stop the UI from being locked if MetaMask did not open a prompt"
+          >
+            ✋ Cancel Prepare
+          </button>
+        )}
 
         <button
           onClick={handleApproveOnly}
           disabled={busy || preparedCount === 0}
           className="execute-button"
-          title="Send ONLY approval transactions (no 0x quote calls here)"
+          title="Send ONLY approval transactions"
         >
           {approving ? '⏳ Approving…' : '✅ Approve Required Tokens'}
         </button>
@@ -537,7 +556,11 @@ const ClaimScreen = () => {
           {claiming ? '⏳ Claiming…' : '🚀 Claim Dust (Execute Swaps)'}
         </button>
 
-        {error && <div className="error-message" style={{ width: '100%' }}>{error}</div>}
+        {error && (
+          <div className="error-message" style={{ width: '100%' }}>
+            {error}
+          </div>
+        )}
       </div>
 
       {/* Progress */}
@@ -575,8 +598,8 @@ const ClaimScreen = () => {
                         rcpt.type === 'approval'
                           ? 'Approval'
                           : rcpt.type === 'swap'
-                            ? 'Swap'
-                            : rcpt.type || 'Tx'
+                          ? 'Swap'
+                          : rcpt.type || 'Tx'
 
                       return (
                         <div key={j} style={{ fontSize: 13, opacity: 0.95, marginTop: 6 }}>
@@ -610,9 +633,7 @@ const ClaimScreen = () => {
 
       {/* Transaction Activity */}
       <div className="results-card" style={{ marginTop: 16 }}>
-        <h3>
-          Transaction Activity{pendingCount > 0 ? ` (Pending: ${pendingCount})` : ''}
-        </h3>
+        <h3>Transaction Activity{pendingCount > 0 ? ` (Pending: ${pendingCount})` : ''}</h3>
 
         <div style={{ fontSize: 13, opacity: 0.9, marginBottom: 10 }}>
           {reconciling || hasPending ? 'Reconciling receipts…' : 'Up to date.'}
