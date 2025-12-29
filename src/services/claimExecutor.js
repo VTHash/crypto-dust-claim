@@ -315,7 +315,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
           sellAmount: String(amountWei),
           taker: dep.dustClaimV3, // DustClaimV3 is taker (smart contract)
           recipient: dep.dustClaimV3, // DustClaimV3 receives WETH
-          txOrigin: from, // EOA origin
+          txOrigin: dep.dustClaimV3, // tx.origin must be DustClaimV3 for v2 Allowance Holder
           slippageBps: step.slippageBps ?? 100
         })
 
