@@ -8,11 +8,15 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 /**
  * MetaMask + 0x + Multichain Execution (UX-safe)
  * ---------------------------------------------
+ * UPDATED: 0x Swap API v2 (Allowance Holder Quote)
+ *
  * Primary goals:
  * 1) MetaMask Mobile reliability: never parallelize wallet prompts; never back-to-back auto approve+swap on mobile.
  * 2) Chain correctness: only approve/swap on currently-selected chain; enforce/verify chain switch.
  * 3) Token approval correctness: spender is ALWAYS DustClaimV3 (user approves DustClaimV3, not 0x).
- * 4) “0x allowance-holder” routes: DustClaimV3 calls `routerSpender.call(calldata)` so tx.to MUST match spender.
+ * 4) 0x v2 allowance-holder routes: DustClaimV3 calls `routerSpender.call(calldata)` so:
+ *    - routerSpender MUST equal quote.transaction.to
+ *    - calldata MUST equal quote.transaction.data
  * 5) Better UX hooks: optional progress callbacks for UI, plus safe dedup and USDT-like approval handling.
  *
  * Public API:
@@ -71,7 +75,7 @@ const MAX_UINT256 = (2n ** 256n) - 1n
 function isUserRejected(err) {
   const msg = String(err?.shortMessage || err?.reason || err?.message || '').toLowerCase()
   const code = err?.code
-  if (code === 4001) return true // EIP-1193 user rejected
+  if (code === 4001) return true
   if (msg.includes('user rejected')) return true
   if (msg.includes('user denied')) return true
   if (msg.includes('rejected the request')) return true
@@ -81,13 +85,11 @@ function isUserRejected(err) {
 
 function isPendingRequest(err) {
   const msg = String(err?.shortMessage || err?.reason || err?.message || '').toLowerCase()
-  // MetaMask “Already processing eth_requestAccounts” / “Request already pending”
   return msg.includes('already processing') || msg.includes('request already pending') || msg.includes('pending request')
 }
 
 function isMustZeroFirstApprove(err) {
   const msg = String(err?.shortMessage || err?.reason || err?.message || '').toLowerCase()
-  // USDT/old ERC20 patterns: "must approve 0 first", "non-zero allowance", etc.
   return (
     msg.includes('approve from non-zero to non-zero allowance') ||
     msg.includes('must set allowance to 0') ||
@@ -118,7 +120,7 @@ function safeCall(cb, payload) {
 }
 
 // ----------------------------------
-// 0x quote helper (strict route validation)
+// 0x v2 quote helper (strict route validation)
 // ----------------------------------
 async function get0xQuoteStrict({
   chainId,
@@ -130,6 +132,7 @@ async function get0xQuoteStrict({
   txOrigin,
   slippageBps
 }) {
+  // Netlify function calls 0x v2 /swap/allowance-holder/quote
   const { data: q } = await axios.post(
     '/.netlify/functions/0x-quote',
     {
@@ -137,22 +140,29 @@ async function get0xQuoteStrict({
       sellToken,
       buyToken,
       sellAmount: String(sellAmount),
-      taker,
-      recipient,
-      txOrigin,
+      taker,      // DustClaimV3
+      recipient,  // DustClaimV3
+      txOrigin,   // USER EOA (required when taker is contract)
       slippageBps: Number(slippageBps ?? 100)
     },
     { headers: { 'content-type': 'application/json' } }
   )
 
+  // v2 response: transaction.to + transaction.data
   const to = q?.transaction?.to
   const data = q?.transaction?.data
+
   if (!isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
     return { ok: false, reason: q?.message || 'No route / quote missing transaction', quote: q }
   }
 
-  // allowance-holder spender used inside DustClaimV3
-  const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || q?.allowance?.spender || null
+  // Allowance-holder spender is provided on v2 as issues.allowance.spender (defensive fallbacks kept)
+  const spender =
+    q?.issues?.allowance?.spender ||
+    q?.allowanceTarget ||
+    q?.allowance?.spender ||
+    null
+
   if (!isNonZeroAddress(spender)) {
     return { ok: false, reason: '0x quote missing allowance spender', quote: q }
   }
@@ -203,7 +213,6 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
     const flowId = newFlowId()
     const onProgress = opts?.onProgress || chainPlan?.onProgress || null
 
-    // Ensure wallet connection
     const connected = await walletService.isConnected?.()
     if (!connected) {
       safeCall(onProgress, { flowId, stage: 'wallet', status: 'connecting' })
@@ -215,15 +224,8 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
 
-    // Switch chain if needed (single prompt)
     if (planChainId !== currentChainId) {
-      safeCall(onProgress, {
-        flowId,
-        stage: 'chain',
-        status: 'switching',
-        from: currentChainId,
-        to: planChainId
-      })
+      safeCall(onProgress, { flowId, stage: 'chain', status: 'switching', from: currentChainId, to: planChainId })
 
       const sw = await walletService.switchChain(planChainId)
       if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
@@ -261,7 +263,6 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       // ignore
     }
 
-    // Prefetch quotes for all steps FIRST (no wallet prompts).
     const prepared = []
     const steps = Array.isArray(chainPlan.steps) ? chainPlan.steps : []
 
@@ -273,15 +274,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       const tokenOut = step.tokenOut
       const amountWei = normalizeBigInt(step.amount || 0)
 
-      safeCall(onProgress, {
-        flowId,
-        stage: 'quote',
-        status: 'progress',
-        index: i,
-        total: steps.length,
-        tokenIn,
-        amount: String(amountWei)
-      })
+      safeCall(onProgress, { flowId, stage: 'quote', status: 'progress', index: i, total: steps.length, tokenIn, amount: String(amountWei) })
 
       if (!isNonZeroAddress(tokenIn) || !isNonZeroAddress(tokenOut) || amountWei <= 0n) {
         prepared.push({ step, ok: false, skipReason: 'invalid token/amount' })
@@ -315,9 +308,9 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
           sellToken: tokenIn,
           buyToken: tokenOut,
           sellAmount: String(amountWei),
-          taker: dep.dustClaimV3,
-          recipient: dep.dustClaimV3,
-          txOrigin: from, // CRITICAL: user is txOrigin
+          taker: dep.dustClaimV3,      // contract taker
+          recipient: dep.dustClaimV3,  // output goes to contract
+          txOrigin: from,              // USER EOA (required by v2 when taker is contract)
           slippageBps: step.slippageBps ?? 100
         })
 
@@ -347,9 +340,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       await sleep(isProbablyMobile() ? 30 : 0)
     }
 
-    // Summaries for UI
-    // approvalsNeeded: dedupe by tokenIn and SUM amounts (safer when multiple steps use same token)
-    const approvalMap = new Map() // tokenIn -> sum amount
+    const approvalMap = new Map()
     let swappableCount = 0
 
     for (const p of prepared) {
@@ -358,13 +349,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       const amountWei = normalizeBigInt(step?.amount || 0)
 
       if (!p.ok) continue
-      if (
-        !isNonZeroAddress(p.routerSpender) ||
-        typeof p.swapCalldata !== 'string' ||
-        p.swapCalldata.length < 10
-      ) {
-        continue
-      }
+      if (!isNonZeroAddress(p.routerSpender) || typeof p.swapCalldata !== 'string' || p.swapCalldata.length < 10) continue
 
       swappableCount += 1
 
@@ -379,13 +364,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       amountWei: amountWei.toString()
     }))
 
-    safeCall(onProgress, {
-      flowId,
-      stage: 'quote',
-      status: 'done',
-      swappableCount,
-      approvalsCount: approvalsNeeded.length
-    })
+    safeCall(onProgress, { flowId, stage: 'quote', status: 'done', swappableCount, approvalsCount: approvalsNeeded.length })
 
     return {
       flowId,
@@ -414,7 +393,6 @@ async function sendApprovalTx({
   waitTimeoutMs = 240000,
   onProgress
 }) {
-  // First try approve(amount)
   const tryApprove = async (amt) => {
     const data = encodeFunctionData({
       abi: erc20Abi,
@@ -439,42 +417,27 @@ async function sendApprovalTx({
   }
 
   try {
-    safeCall(onProgress, {
-      flowId,
-      stage: 'approval',
-      status: 'prompt',
-      token,
-      spender,
-      amount: String(amountWei)
-    })
+    safeCall(onProgress, { flowId, stage: 'approval', status: 'prompt', token, spender, amount: String(amountWei) })
 
     const r = await tryApprove(amountWei)
     if (r?.success) return r
 
-    // If it failed for “must set allowance 0 first” try approve(0) then approve(amount)
     if (isMustZeroFirstApprove(r?.error || r)) {
       safeCall(onProgress, { flowId, stage: 'approval', status: 'zero_first', token, spender })
-
       const z = await tryApprove(0n)
       if (!z?.success) return z
-
       await sleep(isProbablyMobile() ? 800 : 250)
-      const r2 = await tryApprove(amountWei)
-      return r2
+      return await tryApprove(amountWei)
     }
 
     return r
   } catch (err) {
-    // Handle “must set 0 first” pattern even when thrown
     if (isMustZeroFirstApprove(err)) {
       safeCall(onProgress, { flowId, stage: 'approval', status: 'zero_first', token, spender })
-
       const z = await tryApprove(0n)
       if (!z?.success) return z
-
       await sleep(isProbablyMobile() ? 800 : 250)
-      const r2 = await tryApprove(amountWei)
-      return r2
+      return await tryApprove(amountWei)
     }
     throw err
   }
@@ -492,7 +455,7 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
     const dustClaimV3 = preparedCtx?.dustClaimV3
     const onProgress = opts?.onProgress || preparedCtx?.onProgress || null
 
-    const approveMax = !!opts?.approveMax // optional (default false)
+    const approveMax = !!opts?.approveMax
     const waitConfirms = Number.isFinite(opts?.waitConfirms) ? Number(opts.waitConfirms) : 1
     const waitTimeoutMs = Number.isFinite(opts?.waitTimeoutMs) ? Number(opts.waitTimeoutMs) : 240000
 
@@ -500,17 +463,10 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
     if (!planChainId) throw new Error('Missing chainId in prepared context')
     if (!isNonZeroAddress(dustClaimV3)) throw new Error('Missing DustClaimV3 in prepared context')
 
-    // Ensure still on correct chain
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
     if (currentChainId !== planChainId) {
-      safeCall(onProgress, {
-        flowId,
-        stage: 'chain',
-        status: 'switching',
-        from: currentChainId,
-        to: planChainId
-      })
+      safeCall(onProgress, { flowId, stage: 'chain', status: 'switching', from: currentChainId, to: planChainId })
       const sw = await walletService.switchChain(planChainId)
       if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
       await sleep(isProbablyMobile() ? 450 : 150)
@@ -519,80 +475,48 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
     const provider = await walletService.getBrowserProvider?.()
     if (!provider) throw new Error('Provider unavailable')
 
-    // approvalsNeeded can be strings; normalize and dedupe again (defensive)
     const rawApprovals = Array.isArray(preparedCtx?.approvalsNeeded) ? preparedCtx.approvalsNeeded : []
-    const approvalMap = new Map() // token -> amount(sum)
+    const approvalMap = new Map()
     for (const a of rawApprovals) {
       const token = a?.tokenAddress
       const amt = normalizeBigInt(a?.amountWei)
       if (!isNonZeroAddress(token) || amt <= 0n) continue
-      const prev = approvalMap.get(token) || 0n
-      approvalMap.set(token, prev + amt)
+      approvalMap.set(token, (approvalMap.get(token) || 0n) + amt)
     }
 
-    const approvals = Array.from(approvalMap.entries()).map(([tokenAddress, amountWei]) => ({
-      tokenAddress,
-      amountWei
-    }))
+    const approvals = Array.from(approvalMap.entries()).map(([tokenAddress, amountWei]) => ({ tokenAddress, amountWei }))
 
-    safeCall(onProgress, {
-      flowId,
-      stage: 'approval',
-      status: 'starting',
-      chainId: planChainId,
-      total: approvals.length
-    })
+    safeCall(onProgress, { flowId, stage: 'approval', status: 'starting', chainId: planChainId, total: approvals.length })
 
     for (let i = 0; i < approvals.length; i++) {
       const { tokenAddress: tokenIn, amountWei } = approvals[i]
 
-      safeCall(onProgress, {
-        flowId,
-        stage: 'approval',
-        status: 'checking',
-        index: i,
-        total: approvals.length,
-        token: tokenIn,
-        spender: dustClaimV3,
-        amount: String(amountWei)
-      })
+      safeCall(onProgress, { flowId, stage: 'approval', status: 'checking', index: i, total: approvals.length, token: tokenIn, spender: dustClaimV3, amount: String(amountWei) })
 
       try {
-        const okAllowance = await hasSufficientAllowanceToDustClaim(
-          provider,
-          tokenIn,
-          from,
-          dustClaimV3,
-          amountWei
-        )
+        const okAllowance = await (async () => {
+          try {
+            const allowanceData = encodeFunctionData({
+              abi: erc20Abi,
+              functionName: 'allowance',
+              args: [from, dustClaimV3]
+            })
+            const raw = await provider.call({ to: tokenIn, data: allowanceData })
+            const [current] = ethers.AbiCoder.defaultAbiCoder().decode(['uint256'], raw)
+            return BigInt(current.toString()) >= BigInt(amountWei)
+          } catch {
+            return false
+          }
+        })()
 
         if (okAllowance) {
-          receipts.push({
-            flowId,
-            type: 'approval',
-            ok: true,
-            skipped: true,
-            reason: 'allowance already sufficient',
-            chainId: planChainId,
-            tokenIn,
-            spender: dustClaimV3,
-            amount: String(amountWei)
-          })
-          safeCall(onProgress, {
-            flowId,
-            stage: 'approval',
-            status: 'skipped',
-            index: i,
-            total: approvals.length,
-            token: tokenIn
-          })
+          receipts.push({ flowId, type: 'approval', ok: true, skipped: true, reason: 'allowance already sufficient', chainId: planChainId, tokenIn, spender: dustClaimV3, amount: String(amountWei) })
+          safeCall(onProgress, { flowId, stage: 'approval', status: 'skipped', index: i, total: approvals.length, token: tokenIn })
           continue
         }
 
-        // If approveMax enabled, approve MAX instead of exact sum.
         const approveAmount = approveMax ? MAX_UINT256 : amountWei
 
-        // Send approval tx (sequential; mobile-safe)
         const approvalRes = await sendApprovalTx({
           from,
           token: tokenIn,
@@ -622,60 +546,23 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
           warning: approvalRes?.warning || null
         })
 
-        safeCall(onProgress, {
-          flowId,
-          stage: 'approval',
-          status: ok ? 'confirmed' : 'failed',
-          index: i,
-          total: approvals.length,
-          token: tokenIn,
-          txHash: approvalRes?.txHash || null,
-          error: approvalRes?.error || null
-        })
+        safeCall(onProgress, { flowId, stage: 'approval', status: ok ? 'confirmed' : 'failed', index: i, total: approvals.length, token: tokenIn, txHash: approvalRes?.txHash || null, error: approvalRes?.error || null })
 
-        // Stop on failure (especially important on mobile to avoid cascading prompts)
         if (!ok) {
-          // If it was user rejection, surface that cleanly
-          if (isUserRejected(approvalRes) || isUserRejected(approvalRes?.error)) {
-            break
-          }
-          // Pending request: tell UI to wait/clear
-          if (isPendingRequest(approvalRes) || isPendingRequest(approvalRes?.error)) {
-            break
-          }
+          if (isUserRejected(approvalRes) || isUserRejected(approvalRes?.error)) break
+          if (isPendingRequest(approvalRes) || isPendingRequest(approvalRes?.error)) break
           break
         }
       } catch (err) {
-        receipts.push({
-          flowId,
-          type: 'approval',
-          ok: false,
-          chainId: planChainId,
-          tokenIn,
-          spender: dustClaimV3,
-          amount: String(amountWei),
-          error: err?.shortMessage || err?.reason || err?.message || 'Approval failed'
-        })
-
-        safeCall(onProgress, {
-          flowId,
-          stage: 'approval',
-          status: 'failed',
-          index: i,
-          total: approvals.length,
-          token: tokenIn,
-          error: err?.shortMessage || err?.reason || err?.message || 'Approval failed'
-        })
-
+        receipts.push({ flowId, type: 'approval', ok: false, chainId: planChainId, tokenIn, spender: dustClaimV3, amount: String(amountWei), error: err?.shortMessage || err?.reason || err?.message || 'Approval failed' })
+        safeCall(onProgress, { flowId, stage: 'approval', status: 'failed', index: i, total: approvals.length, token: tokenIn, error: err?.shortMessage || err?.reason || err?.message || 'Approval failed' })
         break
       }
 
-      // Extra spacing helps MetaMask Mobile not cancel subsequent prompts
       await sleep(isProbablyMobile() ? 900 : 200)
     }
 
     safeCall(onProgress, { flowId, stage: 'approval', status: 'done', receipts })
-
     return { flowId, receipts }
   })
 }
@@ -686,7 +573,6 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
 export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
   return runExclusive(async () => {
     const receipts = []
-
     const flowId = preparedCtx?.flowId || newFlowId()
     const planChainId = normalizeChainId(preparedCtx?.chainId)
     const from = preparedCtx?.from || (await walletService.getAddress?.())
@@ -700,17 +586,10 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
     if (!planChainId) throw new Error('Missing chainId in prepared context')
     if (!isNonZeroAddress(dustClaimV3)) throw new Error('Missing DustClaimV3 in prepared context')
 
-    // Ensure still on correct chain
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
     if (currentChainId !== planChainId) {
-      safeCall(onProgress, {
-        flowId,
-        stage: 'chain',
-        status: 'switching',
-        from: currentChainId,
-        to: planChainId
-      })
+      safeCall(onProgress, { flowId, stage: 'chain', status: 'switching', from: currentChainId, to: planChainId })
       const sw = await walletService.switchChain(planChainId)
       if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
       await sleep(isProbablyMobile() ? 450 : 150)
@@ -718,13 +597,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
 
     const prepared = Array.isArray(preparedCtx?.prepared) ? preparedCtx.prepared : []
 
-    safeCall(onProgress, {
-      flowId,
-      stage: 'swap',
-      status: 'starting',
-      chainId: planChainId,
-      total: prepared.length
-    })
+    safeCall(onProgress, { flowId, stage: 'swap', status: 'starting', chainId: planChainId, total: prepared.length })
 
     for (let i = 0; i < prepared.length; i++) {
       const p = prepared[i]
@@ -733,27 +606,10 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
       const tokenOut = step?.tokenOut
       const amountWei = normalizeBigInt(step?.amount || 0)
 
-      safeCall(onProgress, {
-        flowId,
-        stage: 'swap',
-        status: 'progress',
-        index: i,
-        total: prepared.length,
-        tokenIn,
-        amount: String(amountWei)
-      })
+      safeCall(onProgress, { flowId, stage: 'swap', status: 'progress', index: i, total: prepared.length, tokenIn, amount: String(amountWei) })
 
       if (!p.ok) {
-        receipts.push({
-          flowId,
-          type: 'swap',
-          ok: true,
-          skipped: true,
-          reason: p.skipReason || 'skipped',
-          chainId: planChainId,
-          tokenIn,
-          tokenOut
-        })
+        receipts.push({ flowId, type: 'swap', ok: true, skipped: true, reason: p.skipReason || 'skipped', chainId: planChainId, tokenIn, tokenOut })
         continue
       }
 
@@ -762,20 +618,10 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
       const gasFromQuote = p.gasFromQuote
 
       if (!isNonZeroAddress(routerSpender) || typeof swapCalldata !== 'string' || swapCalldata.length < 10) {
-        receipts.push({
-          flowId,
-          type: 'swap',
-          ok: true,
-          skipped: true,
-          reason: 'missing spender/calldata (no route)',
-          chainId: planChainId,
-          tokenIn,
-          tokenOut
-        })
+        receipts.push({ flowId, type: 'swap', ok: true, skipped: true, reason: 'missing spender/calldata (no route)', chainId: planChainId, tokenIn, tokenOut })
         continue
       }
 
-      // mobile spacing
       await sleep(isProbablyMobile() ? 650 : 200)
 
       try {
@@ -785,20 +631,13 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
           args: [tokenIn, amountWei, routerSpender, swapCalldata]
         })
 
-        // Conservative fallback gas
         let gasLimit = gasFromQuote ? BigInt(gasFromQuote) + 160_000n : 1_050_000n
 
-        // Try estimate gas with signer (best effort)
         try {
           const signer = await walletService.getSigner?.()
           if (signer) {
             const contract = new ethers.Contract(dustClaimV3, DUSTCLAIM_V3_ABI, signer)
-            const est = await contract.claimDustUsingAggregator.estimateGas(
-              tokenIn,
-              amountWei,
-              routerSpender,
-              swapCalldata
-            )
+            const est = await contract.claimDustUsingAggregator.estimateGas(tokenIn, amountWei, routerSpender, swapCalldata)
             const bumped = (BigInt(est) * 140n) / 100n
             if (bumped > gasLimit) gasLimit = bumped
           }
@@ -806,24 +645,10 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
           // keep fallback
         }
 
-        safeCall(onProgress, {
-          flowId,
-          stage: 'swap',
-          status: 'prompt',
-          index: i,
-          total: prepared.length,
-          tokenIn,
-          dustClaimV3
-        })
+        safeCall(onProgress, { flowId, stage: 'swap', status: 'prompt', index: i, total: prepared.length, tokenIn, dustClaimV3 })
 
         const swapRes = await walletService.sendTransactionWithReceipt(
-          {
-            from,
-            to: dustClaimV3,
-            data: claimData,
-            value: 0n,
-            gasLimit
-          },
+          { from, to: dustClaimV3, data: claimData, value: 0n, gasLimit },
           {
             flowId,
             kind: 'swap',
@@ -853,21 +678,9 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
           warning: swapRes?.warning || null
         })
 
-        safeCall(onProgress, {
-          flowId,
-          stage: 'swap',
-          status: swapRes?.success ? 'confirmed' : 'failed',
-          index: i,
-          total: prepared.length,
-          tokenIn,
-          txHash: swapRes?.txHash || null,
-          error: swapRes?.error || null
-        })
+        safeCall(onProgress, { flowId, stage: 'swap', status: swapRes?.success ? 'confirmed' : 'failed', index: i, total: prepared.length, tokenIn, txHash: swapRes?.txHash || null, error: swapRes?.error || null })
 
-        // Stop on failure for a clean UX (especially if user rejects)
-        if (!swapRes?.success) {
-          break
-        }
+        if (!swapRes?.success) break
       } catch (err) {
         receipts.push({
           flowId,
@@ -885,17 +698,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
             'Swap failed'
         })
 
-        safeCall(onProgress, {
-          flowId,
-          stage: 'swap',
-          status: 'failed',
-          index: i,
-          total: prepared.length,
-          tokenIn,
-          error:
-            err?.shortMessage || err?.reason || err?.message || err?.response?.data?.message || 'Swap failed'
-        })
-
+        safeCall(onProgress, { flowId, stage: 'swap', status: 'failed', index: i, total: prepared.length, tokenIn, error: err?.shortMessage || err?.reason || err?.message || err?.response?.data?.message || 'Swap failed' })
         break
       }
 
@@ -903,7 +706,6 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
     }
 
     safeCall(onProgress, { flowId, stage: 'swap', status: 'done', receipts })
-
     return { flowId, receipts }
   })
 }
@@ -913,14 +715,11 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
 // ----------------------------------
 export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}) {
   return runExclusive(async () => {
-    // mode: 'auto' | 'approveOnly' | 'swapOnly' | 'all'
     const mode = String(opts?.mode || 'auto')
     const onProgress = opts?.onProgress || chainPlan?.onProgress || null
 
-    const preparedCtx =
-      opts?.preparedCtx || (await prepareChainPlanWithFlow(chainPlan, fromAddress, { onProgress }))
+    const preparedCtx = opts?.preparedCtx || (await prepareChainPlanWithFlow(chainPlan, fromAddress, { onProgress }))
 
-    // Explicit modes (two-button UX)
     if (mode === 'approveOnly') {
       const approvals = await executeApprovalsWithFlow(preparedCtx, {
         onProgress,
@@ -928,20 +727,11 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}
         waitConfirms: opts?.waitConfirms,
         waitTimeoutMs: opts?.waitTimeoutMs
       })
-      return {
-        flowId: preparedCtx.flowId,
-        receipts: approvals?.receipts || [],
-        preparedCtx,
-        nextAction: 'swap'
-      }
+      return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
     }
 
     if (mode === 'swapOnly') {
-      const swaps = await executeSwapsWithFlow(preparedCtx, {
-        onProgress,
-        waitConfirms: opts?.waitConfirms,
-        waitTimeoutMs: opts?.waitTimeoutMs
-      })
+      const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
       return { flowId: preparedCtx.flowId, receipts: swaps?.receipts || [], preparedCtx, nextAction: null }
     }
 
@@ -952,30 +742,13 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}
         waitConfirms: opts?.waitConfirms,
         waitTimeoutMs: opts?.waitTimeoutMs
       })
-      // If approvals failed, do NOT continue to swaps
       const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
-      if (!approvalsOk) {
-        return {
-          flowId: preparedCtx.flowId,
-          receipts: approvals?.receipts || [],
-          preparedCtx,
-          nextAction: 'swap'
-        }
-      }
-      const swaps = await executeSwapsWithFlow(preparedCtx, {
-        onProgress,
-        waitConfirms: opts?.waitConfirms,
-        waitTimeoutMs: opts?.waitTimeoutMs
-      })
-      return {
-        flowId: preparedCtx.flowId,
-        receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])],
-        preparedCtx,
-        nextAction: null
-      }
+      if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
+
+      const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
+      return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
     }
 
-    // AUTO: always run approvals first; on mobile, stop after approvals and require a second click for swaps.
     const approvals = await executeApprovalsWithFlow(preparedCtx, {
       onProgress,
       approveMax: opts?.approveMax,
@@ -996,28 +769,14 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       return { flowId: preparedCtx.flowId, receipts, preparedCtx, nextAction: 'swap' }
     }
 
-    // Desktop: continue to swaps automatically (still sequential)
     const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
-    if (!approvalsOk) {
-      return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
-    }
+    if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
 
-    const swaps = await executeSwapsWithFlow(preparedCtx, {
-      onProgress,
-      waitConfirms: opts?.waitConfirms,
-      waitTimeoutMs: opts?.waitTimeoutMs
-    })
-
-    return {
-      flowId: preparedCtx.flowId,
-      receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])],
-      preparedCtx,
-      nextAction: null
-    }
+    const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
+    return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
   })
 }
 
-// Backwards-compatible version (returns receipts[])
 export async function executeChainPlan(chainPlan, fromAddress) {
   const { receipts } = await executeChainPlanWithFlow(chainPlan, fromAddress)
   return receipts
