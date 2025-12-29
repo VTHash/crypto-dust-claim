@@ -6,9 +6,12 @@ const isPendingStatus = (s) => s === 'created' || s === 'submitted' || s === 'pr
 const getHash = (t) => t?.txHash || t?.hash || null
 
 function normalizeReceipt(receipt) {
+  // ethers v6 receipts commonly expose `index` (tx index in block)
+  const txIndex = receipt?.transactionIndex ?? receipt?.index ?? null
+
   return {
     blockNumber: receipt?.blockNumber ?? null,
-    transactionIndex: receipt?.transactionIndex ?? null,
+    transactionIndex: txIndex,
     gasUsed: receipt?.gasUsed?.toString?.() ?? null,
     effectiveGasPrice: receipt?.effectiveGasPrice?.toString?.() ?? null,
     status: receipt?.status === 1 ? 'confirmed' : 'failed'
@@ -93,8 +96,7 @@ export class TxReconciler {
     const maxAgeMs = this.opts.maxAgeMs ?? 24 * 60 * 60 * 1000
     const cutoff = Date.now() - maxAgeMs
 
-    // ✅ Grace period before declaring "dropped"
-    // MetaMask Mobile + some RPCs won't show a tx immediately.
+    // Grace period before declaring "dropped"
     const graceMs = this.opts.graceMs ?? 90_000
 
     const pending = txStore
@@ -130,17 +132,9 @@ export class TxReconciler {
       const result = await detectReplacementOrDrop(provider, tx)
 
       if (result === 'replaced') {
-        txStore.patch(tx.id, {
-          status: 'replaced',
-          txHash,
-          hash: txHash
-        })
+        txStore.patch(tx.id, { status: 'replaced', txHash, hash: txHash })
       } else if (result === 'dropped') {
-        txStore.patch(tx.id, {
-          status: 'dropped',
-          txHash,
-          hash: txHash
-        })
+        txStore.patch(tx.id, { status: 'dropped', txHash, hash: txHash })
       }
     }
   }

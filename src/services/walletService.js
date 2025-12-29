@@ -66,27 +66,7 @@ const toBigIntSafe = (v) => {
   }
 }
 
-// EIP-1193 / MetaMask requires hex quantities for tx params
-function toHexQty(v) {
-  const bi = toBigIntSafe(v)
-  if (bi === undefined) return undefined
-  if (bi === 0n) return '0x0'
-  return '0x' + bi.toString(16)
-}
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
-const raceTimeout = async (p, ms, label = 'timeout') => {
-  let t
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(label)), ms)
-  })
-  try {
-    return await Promise.race([p, timeout])
-  } finally {
-    clearTimeout(t)
-  }
-}
 
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
@@ -203,7 +183,7 @@ async function ensureHydratedForSend() {
   try {
     await eip1193.request?.({ method: 'eth_requestAccounts' })
   } catch {
-    // ignore
+    // ignore (WalletConnect providers may reject)
   }
 
   await ensureAccounts()
@@ -407,172 +387,108 @@ const walletService = {
     return await ensureAccounts()
   },
 
-  // --- NEW: MetaMask-native send (most reliable on MetaMask Mobile) ---
-  async _sendViaEip1193(tx) {
-    const from = tx?.from || (await this.getAddress())
-    const to = tx?.to
-    if (!isNonZeroAddress(from)) throw new Error('No wallet address')
-    if (!isNonZeroAddress(to)) throw new Error('Invalid "to" address')
-
-    const data = typeof tx?.data === 'string' ? tx.data : '0x'
-    const value = toHexQty(tx?.value ?? 0n) || '0x0'
-
-    // If provided, support gasLimit->gas conversion for MetaMask
-    const gas = toHexQty(tx?.gas ?? tx?.gasLimit)
-    const maxFeePerGas = toHexQty(tx?.maxFeePerGas)
-    const maxPriorityFeePerGas = toHexQty(tx?.maxPriorityFeePerGas)
-    const gasPrice = toHexQty(tx?.gasPrice)
-
-    const params = {
-      from,
-      to,
-      data,
-      value
-    }
-    if (gas) params.gas = gas
-    if (maxFeePerGas) params.maxFeePerGas = maxFeePerGas
-    if (maxPriorityFeePerGas) params.maxPriorityFeePerGas = maxPriorityFeePerGas
-    if (gasPrice) params.gasPrice = gasPrice
-
-    const hash = await eip1193.request({
-      method: 'eth_sendTransaction',
-      params: [params]
-    })
-
-    return { hash, from, to }
+  // SIMPLE SEND (hash only) — single path via sendTransactionWithReceipt
+  async sendTransaction(tx) {
+    const r = await this.sendTransactionWithReceipt(tx, { kind: 'tx', title: 'Transaction', step: 'tx' })
+    return r?.success
+      ? { success: true, txHash: r.txHash }
+      : { success: false, error: r?.error || 'Transaction failed' }
   },
 
-  // SIMPLE SEND (hash only)
-  async sendTransaction(tx) {
+  // BULLETPROOF SEND (hash + receipt) — unified through txSend.js
+  async sendTransactionWithReceipt(tx, meta = {}) {
+    const waitConfirms = Number(meta.waitConfirms ?? 1)
+    const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
+
+    const fail = (error, extra = {}) => {
+      const message =
+        error?.shortMessage ||
+        error?.reason ||
+        error?.message ||
+        String(error || 'Transaction failed')
+      return { success: false, error: message, ...extra }
+    }
+
     try {
       if (!eip1193) await ensureProvider()
 
       const ok = await this.isConnected()
       if (!ok) {
         const res = await this.connect()
-        if (!res.success) return { success: false, error: res.error }
+        if (!res?.success) return fail(res?.error || 'Wallet connection failed')
       }
 
       await ensureHydratedForSend()
 
-      // If injected MetaMask: use native RPC send (fixes submitted->cancelled on MM Mobile)
-      if (isInjectedMetaMask(eip1193)) {
-        const r = await this._sendViaEip1193(tx)
-        return { success: true, txHash: r.hash }
-      }
+      const from = (tx?.from && String(tx.from)) || (await this.getAddress())
+      if (!isNonZeroAddress(from)) return fail('No wallet address')
 
-      // Otherwise fallback to signer
-      await ensureEthers()
-      if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
-      const resp = await signer.sendTransaction(tx)
-      return { success: true, txHash: resp.hash }
-    } catch (err) {
-      const code = err?.code
-      const msg = err?.shortMessage || err?.reason || err?.message || 'Transaction failed'
-      if (code === 4001) return { success: false, error: 'User rejected the request (4001)' }
-      if (code === -32002) return { success: false, error: 'Request already pending in wallet (-32002)' }
-      const errMsg = code ? `${msg} (code ${code})` : msg
-      return { success: false, error: errMsg }
+      const chainHex = await this.getChainId()
+      const chainDec = hexToDec(chainHex)
+
+      const bp = await this.getBrowserProvider()
+      if (!bp) return fail('Provider unavailable')
+
+      const to = tx?.to
+      if (!isNonZeroAddress(to)) return fail('Invalid "to" address')
+
+      const data = typeof tx?.data === 'string' ? tx.data : '0x'
+      const value = toBigIntSafe(tx?.value) ?? 0n
+
+      // ethers TransactionRequest
+      const request = { from, to, data, value }
+
+      // pass-through optional gas/fees if present
+      const gasLimit = toBigIntSafe(tx?.gasLimit ?? tx?.gas)
+      const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
+      const maxPriorityFeePerGas = toBigIntSafe(tx?.maxPriorityFeePerGas)
+      const gasPrice = toBigIntSafe(tx?.gasPrice)
+      const nonce = tx?.nonce != null ? Number(tx.nonce) : null
+
+      if (gasLimit && gasLimit > 0n) request.gasLimit = gasLimit
+      if (maxFeePerGas && maxFeePerGas > 0n) request.maxFeePerGas = maxFeePerGas
+      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n)
+        request.maxPriorityFeePerGas = maxPriorityFeePerGas
+      if (gasPrice && gasPrice > 0n) request.gasPrice = gasPrice
+      if (Number.isFinite(nonce) && nonce >= 0) request.nonce = nonce
+
+      const r = await sendTransactionReliable({
+        provider: bp,
+        chainId: chainDec,
+        from,
+        kind: meta.kind || 'tx',
+        request,
+        tokenAddress: meta.tokenAddress || null,
+        spender: meta.spender || null,
+        amount: meta.amount || null,
+        flowId: meta.flowId || null,
+        title: meta.title || null,
+        step: meta.step || null,
+        waitConfirms,
+        waitTimeoutMs
+      })
+
+      return {
+        success: !!r?.success,
+        txHash: r?.txHash || null,
+        receipt: r?.receipt || null,
+        status: r?.status || (r?.success ? 'confirmed' : 'failed'),
+        chainId: chainDec,
+        error: r?.success ? null : (r?.error || 'Transaction failed'),
+        warning: r?.warning || null
+      }
+    } catch (e) {
+      const msg = e?.message || ''
+      const code = e?.code
+      const rejected =
+        code === 4001 ||
+        /user rejected/i.test(msg) ||
+        /denied transaction/i.test(msg) ||
+        /rejected/i.test(msg)
+
+      return fail(rejected ? 'User rejected the transaction' : e)
     }
   },
-
-  // BULLETPROOF SEND (hash + receipt) — unified through txSend.js
-async sendTransactionWithReceipt(tx, meta = {}) {
-  const waitConfirms = Number(meta.waitConfirms ?? 1)
-  const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
-
-  const fail = (error, extra = {}) => {
-    const message =
-      error?.shortMessage ||
-      error?.reason ||
-      error?.message ||
-      String(error || 'Transaction failed')
-    return { success: false, error: message, ...extra }
-  }
-
-  try {
-    if (!eip1193) await ensureProvider()
-
-    const ok = await this.isConnected()
-    if (!ok) {
-      const res = await this.connect()
-      if (!res?.success) return fail(res?.error || 'Wallet connection failed')
-    }
-
-    // important on MM Mobile
-    await ensureHydratedForSend()
-
-    const from = (tx?.from && String(tx.from)) || (await this.getAddress())
-    if (!isNonZeroAddress(from)) return fail('No wallet address')
-
-    const chainHex = await this.getChainId()
-    const chainDec = hexToDec(chainHex)
-
-    const bp = await this.getBrowserProvider()
-    if (!bp) return fail('Provider unavailable')
-
-    const to = tx?.to
-    if (!isNonZeroAddress(to)) return fail('Invalid "to" address')
-
-    const data = typeof tx?.data === 'string' ? tx.data : '0x'
-    const value = toBigIntSafe(tx?.value) ?? 0n
-
-    // Build the TransactionRequest for txSend
-    const request = { from, to, data, value }
-
-    // pass through optional gas/fees if present
-    const gasLimit = toBigIntSafe(tx?.gasLimit ?? tx?.gas)
-    const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
-    const maxPriorityFeePerGas = toBigIntSafe(tx?.maxPriorityFeePerGas)
-    const gasPrice = toBigIntSafe(tx?.gasPrice)
-    const nonce = tx?.nonce != null ? Number(tx.nonce) : null
-
-    if (gasLimit && gasLimit > 0n) request.gasLimit = gasLimit
-    if (maxFeePerGas && maxFeePerGas > 0n) request.maxFeePerGas = maxFeePerGas
-    if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n)
-      request.maxPriorityFeePerGas = maxPriorityFeePerGas
-    if (gasPrice && gasPrice > 0n) request.gasPrice = gasPrice
-    if (Number.isFinite(nonce) && nonce >= 0) request.nonce = nonce
-
-    // Single sender path (prevents MM Mobile “submitted then cancelled” patterns)
-    const r = await sendTransactionReliable({
-      provider: bp,
-      chainId: chainDec,
-      from,
-      kind: meta.kind || 'tx',
-      request,
-      tokenAddress: meta.tokenAddress || null,
-      spender: meta.spender || null,
-      amount: meta.amount || null,
-      flowId: meta.flowId || null,
-      title: meta.title || null,
-      step: meta.step || null,
-      waitConfirms,
-      waitTimeoutMs
-    })
-
-    // Normalize return shape to what your app already expects
-    return {
-      success: !!r?.success,
-      txHash: r?.txHash || null,
-      receipt: r?.receipt || null,
-      status: r?.status || (r?.success ? 'confirmed' : 'failed'),
-      chainId: chainDec,
-      error: r?.success ? null : (r?.error || 'Transaction failed'),
-      warning: r?.warning || null
-    }
-  } catch (e) {
-    const msg = e?.message || ''
-    const code = e?.code
-    const rejected =
-      code === 4001 ||
-      /user rejected/i.test(msg) ||
-      /denied transaction/i.test(msg) ||
-      /rejected/i.test(msg)
-
-    return fail(rejected ? 'User rejected the transaction' : e)
-  }
-},
 
   async signMessage(message) {
     try {
@@ -585,6 +501,7 @@ async sendTransactionWithReceipt(tx, meta = {}) {
 
       await ensureHydratedForSend()
 
+      // MetaMask path (most reliable)
       if (isInjectedMetaMask(eip1193)) {
         const from = await this.getAddress()
         const sig = await eip1193.request({
@@ -594,6 +511,7 @@ async sendTransactionWithReceipt(tx, meta = {}) {
         return { success: true, signature: sig }
       }
 
+      // WalletConnect / AppKit path
       await ensureEthers()
       if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
       const signature = await signer.signMessage(message)

@@ -99,6 +99,9 @@ export async function sendTransactionReliable({
     txStore.patch(id, { lastError: `estimateGas failed: ${e?.message ?? String(e)}` })
   }
 
+  // Mark prompting BEFORE opening MetaMask UI (critical on MetaMask Mobile)
+  txStore.patch(id, { status: 'prompting', updatedAt: Date.now() })
+
   // ---- primary path: signer.sendTransaction ----
   try {
     const resp = await signer.sendTransaction(req)
@@ -142,6 +145,9 @@ export async function sendTransactionReliable({
     txStore.patch(id, { lastError: `sendTransaction failed: ${msg}${code ? ` (code ${code})` : ''}` })
 
     try {
+      // Mark prompting again right before RPC send attempt (safe + consistent)
+      txStore.patch(id, { status: 'prompting', updatedAt: Date.now() })
+
       const rpcTx = toRpcTx({ ...req, from })
       const hash = await provider.send('eth_sendTransaction', [rpcTx])
       if (!hash) throw new Error('eth_sendTransaction returned no hash')
