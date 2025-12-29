@@ -85,6 +85,18 @@ function resolveSlippageBps(options = {}) {
   return Math.max(0, Math.floor(pct * 100))
 }
 
+// Execution eligibility for 0x + DustClaimV3 swap flow
+function canSwapVia0x(chainId) {
+  const dep = DEPLOYMENTS?.[Number(chainId)]
+  return !!(
+    dep?.directSwap0x &&
+    dep?.dustClaimV3 &&
+    isNonZeroAddress(dep.dustClaimV3) &&
+    dep?.weth &&
+    isNonZeroAddress(dep.weth)
+  )
+}
+
 class BatchService {
   /**
    * claims = [{ chainId, tokenAddress, amount, decimals, recipient }]
@@ -112,10 +124,13 @@ class BatchService {
     const plan = []
 
     for (const [chainId, items] of byChain.entries()) {
-      const dep = DEPLOYMENTS?.[Number(chainId)]
-      if (!dep?.dustClaimV3 || !isNonZeroAddress(dep.dustClaimV3)) continue
-      if (!dep?.weth || !isNonZeroAddress(dep.weth)) continue
+      // CRITICAL: Only build steps for chains that can actually execute the 0x swap path
+      if (!canSwapVia0x(chainId)) {
+        console.warn('[batchService] skipping chain (not 0x-executable):', chainId, DEPLOYMENTS?.[Number(chainId)] || null)
+        continue
+      }
 
+      const dep = DEPLOYMENTS?.[Number(chainId)]
       const steps = []
 
       for (const it of items) {
@@ -139,7 +154,7 @@ class BatchService {
           q = await get0xAllowanceHolderQuote({
             chainId,
             sellToken: tokenIn,
-            buyToken: dep.weth,
+            buyToken: dep.weth, // IMPORTANT: DustClaimV3 expects wrapped-native output (WETH/WBNB/etc.)
             sellAmountWei,
             taker: dep.dustClaimV3, // DustClaimV3 is taker (smart contract caller)
             recipient: dep.dustClaimV3, // DustClaimV3 receives WETH
@@ -147,7 +162,11 @@ class BatchService {
             slippageBps
           })
         } catch (e) {
-          console.warn('[buildClaimPlan] 0x quote failed:', { chainId, tokenIn }, e?.response?.data || e?.message)
+          console.warn(
+            '[buildClaimPlan] 0x quote failed:',
+            { chainId, tokenIn },
+            e?.response?.data || e?.message
+          )
           continue
         }
 
@@ -157,7 +176,12 @@ class BatchService {
         const calldata = q?.transaction?.data || null
         const gasFromQuote = q?.transaction?.gas ?? null
 
-        if (!isNonZeroAddress(routerSpender) || !isNonZeroAddress(callTarget) || typeof calldata !== 'string' || calldata.length < 10) {
+        if (
+          !isNonZeroAddress(routerSpender) ||
+          !isNonZeroAddress(callTarget) ||
+          typeof calldata !== 'string' ||
+          calldata.length < 10
+        ) {
           console.warn('[0x] invalid quote, missing executable fields', {
             chainId,
             tokenIn,
@@ -168,7 +192,7 @@ class BatchService {
           continue
         }
 
-        // DustClaimV3 logic requires: approve(routerSpender), then routerSpender.call(calldata)
+        // DustClaimV3: approve(routerSpender), then routerSpender.call(calldata)
         // So routerSpender MUST match tx.to
         if (String(callTarget).toLowerCase() !== String(routerSpender).toLowerCase()) {
           console.warn('[0x] incompatible allowance-holder quote (spender != tx.to)', {
@@ -183,7 +207,7 @@ class BatchService {
         steps.push({
           aggregator: '0x',
 
-          // claimExecutor uses these fields
+          // claimExecutor derives approvalsNeeded from these flags
           needsApproval: true,
           usePermit: false,
 
@@ -191,12 +215,12 @@ class BatchService {
           tokenOut: dep.weth,
           amount: String(sellAmountWei),
 
-          // IMPORTANT: DustClaimV3 will approve+call this spender internally
+          // DustClaimV3 will approve+call this internally
           routerSpender,
           swapCalldata: calldata,
           gasFromQuote,
 
-          // IMPORTANT: claimExecutor reads step.slippageBps
+          // claimExecutor reads step.slippageBps when it needs to re-quote
           slippageBps
         })
       }
