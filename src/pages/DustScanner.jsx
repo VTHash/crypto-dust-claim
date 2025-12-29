@@ -7,7 +7,6 @@ import { useScan } from '../contexts/ScanContext'
 import { useSettings } from '../contexts/SettingsContext'
 import web3Service from '../services/web3Service'
 import batchService from '../services/batchService'
-import dexAggregatorService from '../services/dexAggregatorService'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
 import TokenRow from '../components/TokenRow'
@@ -29,7 +28,6 @@ const DustScanner = () => {
   const navigate = useNavigate()
   const { results, setResults } = useScan()
   const { settings } = useSettings()
-
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
   const [selectedChains, setSelectedChains] = useState(
@@ -185,53 +183,79 @@ const DustScanner = () => {
   const totalClaimableCount = useMemo(() => buildActionUniverse.length, [buildActionUniverse])
 
   const handleBatchClaim = async () => {
-    if (!address) return
+  if (!address) return
+  if (buildActionUniverse.length === 0) return
 
-    const claims = buildActionUniverse.map((it) => ({
-      chainId: it.chainId,
-      tokenAddress: it.address,
-      tokenSymbol: it.symbol,
-      amount: it.balance,
-      decimals: it.decimals ?? 18,
-      recipient: address
-    }))
+  // Clear stale plan first (prevents ClaimScreen using old plan)
+  try {
+    sessionStorage.removeItem('dustclaim:lastClaimPlan')
+    sessionStorage.removeItem('dustclaim:lastBatchSavings')
+    sessionStorage.removeItem('dustclaim:lastDevice')
+  } catch {}
 
-    let claimPlan = []
-    let batchTransactions = []
-    let oneInchSingle = null
-    let oneInchBatch = null
-    let uniswapSingle = null
-    let batchSavings = null
+  const claims = buildActionUniverse.map((it) => ({
+    chainId: it.chainId,
+    tokenAddress: it.address,
+    tokenSymbol: it.symbol,
+    amount: it.balance,
+    decimals: it.decimals ?? 18,
+    recipient: address
+  }))
 
-    try {
-      if (typeof batchService.buildClaimPlan === 'function') {
-        try {
-          claimPlan = await batchService.buildClaimPlan(claims, {
-            txOrigin: address,
-            slippagePct: 1,
-            outTokenByChain: settings.outTokenByChain
-          })
-        } catch (e) {
-          console.warn('[DustScanner] buildClaimPlan failed:', e)
-          claimPlan = []
-        }
-      }
-    } finally {
-      console.log('[DustScanner] ClaimPlan built:', claimPlan)
-      navigate('/claim', {
-        state: {
-          claimPlan,
-          batchTransactions,
-          oneInchSingle,
-          oneInchBatch,
-          uniswapSingle,
-          dustResults: results,
-          totalDustValue: totalValue,
-          batchSavings
-        }
+  let claimPlan = []
+  let batchTransactions = []
+  let oneInchSingle = null
+  let oneInchBatch = null
+  let uniswapSingle = null
+  let batchSavings = null
+
+  try {
+    if (typeof batchService.buildClaimPlan === 'function') {
+      // IMPORTANT: prefer BPS internally (1% = 100 bps)
+      const slippageBps = Number.isFinite(Number(settings?.slippageBps))
+        ? Number(settings.slippageBps)
+        : 100
+
+      claimPlan = await batchService.buildClaimPlan(claims, {
+        txOrigin: address,
+        slippageBps, // <-- aligns with claimExecutor + netlify v2
+        // keep backwards compat if batchService expects slippagePct
+        slippagePct: slippageBps / 100,
+        outTokenByChain: settings.outTokenByChain
       })
     }
+  } catch (e) {
+    console.warn('[DustScanner] buildClaimPlan failed:', e)
+    claimPlan = []
   }
+
+  // Persist for ClaimScreen restore (critical on mobile)
+  try {
+    sessionStorage.setItem(
+      'dustclaim:lastClaimPlan',
+      JSON.stringify(claimPlan, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+    )
+    sessionStorage.setItem('dustclaim:lastBatchSavings', JSON.stringify(batchSavings ?? null))
+    sessionStorage.setItem('dustclaim:lastDevice', /mobile/i.test(navigator?.userAgent || '') ? 'mobile' : 'desktop')
+  } catch (err) {
+    console.warn('[DustScanner] Failed to persist claim plan:', err)
+  }
+
+  // Navigate with state (still useful; sessionStorage is the fallback)
+  navigate('/claim', {
+    state: {
+      claimPlan,
+      batchTransactions,
+      oneInchSingle,
+      oneInchBatch,
+      uniswapSingle,
+      dustResults: results,
+      totalDustValue: totalValue,
+      batchSavings,
+      device: /mobile/i.test(navigator?.userAgent || '') ? 'mobile' : 'desktop'
+    }
+  })
+}
 
   const toggleChain = (id) => setSelectedChains((prev) => ({ ...prev, [id]: !prev[id] }))
 

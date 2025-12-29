@@ -8,14 +8,15 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 /**
  * MetaMask + 0x + Multichain Execution (UX-safe)
  *
- * This version assumes 0x Swap API v2 is used server-side (Netlify function),
- * and the function returns a normalized payload including:
- * - transaction: { to, data, value?, gas? }
- * - issues.allowance.spender (or allowanceTarget)
+ * IMPORTANT (DustClaimV3):
+ * - User approves DustClaimV3 (for transferFrom into the contract)
+ * - DustClaimV3 then approves 0x AllowanceHolder (allowanceTarget)
+ * - DustClaimV3 calls allowanceTarget with transaction.data (spender.call(calldata))
  *
- * DustClaimV3 compatibility rule:
- * - DustClaimV3 does: approve(spender) then spender.call(calldata)
- * - therefore spender MUST equal transaction.to
+ * Therefore for 0x v2 Allowance Holder quotes:
+ * - use /swap/allowance-holder/quote with header 0x-version:v2
+ * - we require: allowanceTarget === transaction.to
+ * - we pass spender = allowanceTarget into DustClaimV3
  */
 
 // ----------------------------------
@@ -25,7 +26,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
 const isHexAddress = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a)
-const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== ethers.ZeroAddress.toLowerCase()
+const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== ethers.ZeroAddress
 
 function normalizeChainId(chainIdLike) {
   if (typeof chainIdLike === 'string') {
@@ -91,7 +92,7 @@ function isMustZeroFirstApprove(err) {
 }
 
 // ----------------------------------
-// internal mutex: prevent overlapping wallet prompts
+// internal mutex: prevent overlapping wallet prompts (critical on mobile)
 // ----------------------------------
 let _txQueue = Promise.resolve()
 function runExclusive(fn) {
@@ -111,7 +112,7 @@ function safeCall(cb, payload) {
 }
 
 // ----------------------------------
-// 0x v2 quote helper (strict route validation)
+// 0x quote helper (v2 Allowance Holder; strict route validation)
 // ----------------------------------
 async function get0xQuoteStrict({
   chainId,
@@ -123,7 +124,7 @@ async function get0xQuoteStrict({
   txOrigin,
   slippageBps
 }) {
-  // Netlify returns normalized v2 response including transaction {to,data}
+  // Netlify function hits 0x v2 allowance-holder quote and returns full JSON
   const { data: q } = await axios.post(
     '/.netlify/functions/0x-quote',
     {
@@ -131,58 +132,42 @@ async function get0xQuoteStrict({
       sellToken,
       buyToken,
       sellAmount: String(sellAmount),
-      taker,      // DustClaimV3
-      recipient,  // DustClaimV3
-      txOrigin,   // USER EOA (required when taker is contract)
+      taker,
+      recipient,
+      txOrigin,
       slippageBps: Number(slippageBps ?? 100)
     },
     { headers: { 'content-type': 'application/json' } }
   )
 
-  // If function returns an error wrapper, surface it clearly
-  if (q?.error && !q?.transaction?.to) {
-    const msg =
-      q?.data?.message ||
-      q?.data?.reason ||
-      q?.message ||
-      q?.error ||
-      '0x quote error'
-    return { ok: false, reason: msg, quote: q }
-  }
+  // v2 response shape:
+  // - q.allowanceTarget
+  // - q.transaction.to / q.transaction.data
+  const allowanceTarget = q?.allowanceTarget
+  const to = q?.transaction?.to
+  const data = q?.transaction?.data
+  const gas = q?.transaction?.gas ?? null
 
-  const to = q?.transaction?.to || q?.to
-  const data = q?.transaction?.data || q?.data
-  if (!isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
+  if (!isNonZeroAddress(allowanceTarget) || !isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
     return { ok: false, reason: q?.message || 'No route / quote missing transaction', quote: q }
   }
 
-  // allowance-holder spender used inside DustClaimV3
-  const spender =
-    q?.issues?.allowance?.spender ||
-    q?.allowanceTarget ||
-    q?.allowance?.spender ||
-    null
-
-  if (!isNonZeroAddress(spender)) {
-    return { ok: false, reason: '0x quote missing allowance spender', quote: q }
-  }
-
-  // CRITICAL for DustClaimV3: it calls spender.call(calldata) so spender MUST equal tx.to
-  if (normalizeAddr(spender) !== normalizeAddr(to)) {
-    return { ok: false, reason: 'V3 incompatible route (tx.to != allowance spender)', quote: q }
+  // For DustClaimV3, we must call allowanceTarget with calldata, and we will approve allowanceTarget.
+  if (normalizeAddr(allowanceTarget) !== normalizeAddr(to)) {
+    return { ok: false, reason: 'V3 incompatible route (allowanceTarget != tx.to)', quote: q }
   }
 
   return {
     ok: true,
-    spender,
+    spender: allowanceTarget, // pass into DustClaimV3 as routerSpender
     calldata: data,
-    gas: q?.transaction?.gas ?? q?.gas ?? null,
+    gas,
     quote: q
   }
 }
 
 // ----------------------------------
-// allowance check (spender MUST be DustClaimV3)
+// allowance check (spender MUST be DustClaimV3, since it pulls user tokens)
 // ----------------------------------
 async function getAllowanceToDustClaim(provider, token, owner, dustClaimV3) {
   const allowanceData = encodeFunctionData({
@@ -206,7 +191,7 @@ async function hasSufficientAllowanceToDustClaim(provider, token, owner, dustCla
 }
 
 // ----------------------------------
-// STEP A: Prepare plan (NO wallet prompts)
+// STEP A: Prepare plan (NO wallet tx prompts; only connect/switch)
 // ----------------------------------
 export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}) {
   return runExclusive(async () => {
@@ -224,19 +209,14 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
 
-    // Switch chain if needed
     if (planChainId !== currentChainId) {
       safeCall(onProgress, { flowId, stage: 'chain', status: 'switching', from: currentChainId, to: planChainId })
-
       const sw = await walletService.switchChain(planChainId)
       if (!sw?.success) throw new Error(sw?.error || 'Chain switch failed')
 
       const afterHex = await walletService.getChainId?.()
       const afterId = normalizeChainId(afterHex)
-      if (afterId !== planChainId) {
-        throw new Error(`Chain switch did not complete (expected ${planChainId}, got ${afterId})`)
-      }
-
+      if (afterId !== planChainId) throw new Error(`Chain switch did not complete (expected ${planChainId}, got ${afterId})`)
       await sleep(isProbablyMobile() ? 450 : 150)
     }
 
@@ -280,17 +260,8 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
         continue
       }
 
-      if (step.aggregator && step.aggregator !== '0x') {
-        prepared.push({ step, ok: false, skipReason: `unsupported aggregator: ${step.aggregator}` })
-        continue
-      }
-
       // allow pre-provided quote
-      if (
-        isNonZeroAddress(step.routerSpender) &&
-        typeof step.swapCalldata === 'string' &&
-        step.swapCalldata.length >= 10
-      ) {
+      if (isNonZeroAddress(step.routerSpender) && typeof step.swapCalldata === 'string' && step.swapCalldata.length >= 10) {
         prepared.push({
           step,
           ok: true,
@@ -307,11 +278,9 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
           sellToken: tokenIn,
           buyToken: tokenOut,
           sellAmount: String(amountWei),
-          // allowance-holder rules:
-          // taker/recipient are DustClaimV3, txOrigin is the user
-          taker: dep.dustClaimV3,
-          recipient: dep.dustClaimV3,
-          txOrigin: from,
+          taker: dep.dustClaimV3, // DustClaimV3 will be the caller at execution time
+          recipient: dep.dustClaimV3, // DustClaimV3 receives buyToken (e.g., WETH)
+          txOrigin: from, // required when taker is a smart contract
           slippageBps: step.slippageBps ?? 100
         })
 
@@ -321,7 +290,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
           prepared.push({
             step,
             ok: true,
-            routerSpender: q.spender,
+            routerSpender: q.spender, // allowanceTarget / tx.to
             swapCalldata: q.calldata,
             gasFromQuote: q.gas
           })
@@ -330,18 +299,14 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
         prepared.push({
           step,
           ok: false,
-          skipReason:
-            err?.response?.data?.message ||
-            err?.response?.data?.error ||
-            err?.message ||
-            'quote failed'
+          skipReason: err?.response?.data?.message || err?.response?.data?.error || err?.message || 'quote failed'
         })
       }
 
       await sleep(isProbablyMobile() ? 30 : 0)
     }
 
-    // approvalsNeeded: dedupe by tokenIn and SUM amounts
+    // approvalsNeeded: dedupe tokenIn and sum amounts
     const approvalMap = new Map()
     let swappableCount = 0
 
@@ -382,7 +347,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
 }
 
 // ----------------------------------
-// Internal: send an approval tx (handles USDT-style zero-first)
+// Internal: send an approval tx (handles USDT-style zero-first if needed)
 // ----------------------------------
 async function sendApprovalTx({
   from,
@@ -445,7 +410,7 @@ async function sendApprovalTx({
 }
 
 // ----------------------------------
-// STEP B: Execute approvals ONLY
+// STEP B: Execute approvals ONLY (user -> DustClaimV3)
 // ----------------------------------
 export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
   return runExclusive(async () => {
@@ -482,7 +447,8 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
       const token = a?.tokenAddress
       const amt = normalizeBigInt(a?.amountWei)
       if (!isNonZeroAddress(token) || amt <= 0n) continue
-      approvalMap.set(token, (approvalMap.get(token) || 0n) + amt)
+      const prev = approvalMap.get(token) || 0n
+      approvalMap.set(token, prev + amt)
     }
 
     const approvals = Array.from(approvalMap.entries()).map(([tokenAddress, amountWei]) => ({ tokenAddress, amountWei }))
@@ -496,19 +462,8 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
 
       try {
         const okAllowance = await hasSufficientAllowanceToDustClaim(provider, tokenIn, from, dustClaimV3, amountWei)
-
         if (okAllowance) {
-          receipts.push({
-            flowId,
-            type: 'approval',
-            ok: true,
-            skipped: true,
-            reason: 'allowance already sufficient',
-            chainId: planChainId,
-            tokenIn,
-            spender: dustClaimV3,
-            amount: String(amountWei)
-          })
+          receipts.push({ flowId, type: 'approval', ok: true, skipped: true, reason: 'allowance already sufficient', chainId: planChainId, tokenIn, spender: dustClaimV3, amount: String(amountWei) })
           safeCall(onProgress, { flowId, stage: 'approval', status: 'skipped', index: i, total: approvals.length, token: tokenIn })
           continue
         }
@@ -545,11 +500,9 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
 
         safeCall(onProgress, { flowId, stage: 'approval', status: ok ? 'confirmed' : 'failed', index: i, total: approvals.length, token: tokenIn, txHash: approvalRes?.txHash || null, error: approvalRes?.error || null })
 
-        if (!ok) {
-          if (isUserRejected(approvalRes) || isUserRejected(approvalRes?.error)) break
-          if (isPendingRequest(approvalRes) || isPendingRequest(approvalRes?.error)) break
-          break
-        }
+        if (!ok) break
+        if (isUserRejected(approvalRes) || isUserRejected(approvalRes?.error)) break
+        if (isPendingRequest(approvalRes) || isPendingRequest(approvalRes?.error)) break
       } catch (err) {
         receipts.push({ flowId, type: 'approval', ok: false, chainId: planChainId, tokenIn, spender: dustClaimV3, amount: String(amountWei), error: err?.shortMessage || err?.reason || err?.message || 'Approval failed' })
         safeCall(onProgress, { flowId, stage: 'approval', status: 'failed', index: i, total: approvals.length, token: tokenIn, error: err?.shortMessage || err?.reason || err?.message || 'Approval failed' })
@@ -570,6 +523,7 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
 export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
   return runExclusive(async () => {
     const receipts = []
+
     const flowId = preparedCtx?.flowId || newFlowId()
     const planChainId = normalizeChainId(preparedCtx?.chainId)
     const from = preparedCtx?.from || (await walletService.getAddress?.())
@@ -684,13 +638,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
           chainId: planChainId,
           tokenIn,
           tokenOut,
-          error:
-            err?.response?.data?.error ||
-            err?.response?.data?.message ||
-            err?.shortMessage ||
-            err?.reason ||
-            err?.message ||
-            'Swap failed'
+          error: err?.response?.data?.error || err?.response?.data?.message || err?.shortMessage || err?.reason || err?.message || 'Swap failed'
         })
 
         safeCall(onProgress, { flowId, stage: 'swap', status: 'failed', index: i, total: prepared.length, tokenIn, error: err?.shortMessage || err?.reason || err?.message || err?.response?.data?.message || 'Swap failed' })
@@ -703,81 +651,4 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
     safeCall(onProgress, { flowId, stage: 'swap', status: 'done', receipts })
     return { flowId, receipts }
   })
-}
-
-// ----------------------------------
-// DEVICE-AWARE WRAPPER
-// ----------------------------------
-export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}) {
-  return runExclusive(async () => {
-    const mode = String(opts?.mode || 'auto')
-    const onProgress = opts?.onProgress || chainPlan?.onProgress || null
-
-    const preparedCtx = opts?.preparedCtx || (await prepareChainPlanWithFlow(chainPlan, fromAddress, { onProgress }))
-
-    if (mode === 'approveOnly') {
-      const approvals = await executeApprovalsWithFlow(preparedCtx, {
-        onProgress,
-        approveMax: opts?.approveMax,
-        waitConfirms: opts?.waitConfirms,
-        waitTimeoutMs: opts?.waitTimeoutMs
-      })
-      return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
-    }
-
-    if (mode === 'swapOnly') {
-      const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
-      return { flowId: preparedCtx.flowId, receipts: swaps?.receipts || [], preparedCtx, nextAction: null }
-    }
-
-    if (mode === 'all') {
-      const approvals = await executeApprovalsWithFlow(preparedCtx, {
-        onProgress,
-        approveMax: opts?.approveMax,
-        waitConfirms: opts?.waitConfirms,
-        waitTimeoutMs: opts?.waitTimeoutMs
-      })
-      const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
-      if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
-
-      const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
-      return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
-    }
-
-    const approvals = await executeApprovalsWithFlow(preparedCtx, {
-      onProgress,
-      approveMax: opts?.approveMax,
-      waitConfirms: opts?.waitConfirms,
-      waitTimeoutMs: opts?.waitTimeoutMs
-    })
-
-    if (preparedCtx.isMobile) {
-      const receipts = [...(approvals?.receipts || [])]
-      receipts.push({
-        flowId: preparedCtx.flowId,
-        type: 'ux',
-        ok: true,
-        chainId: preparedCtx.chainId,
-        nextAction: 'swap',
-        message: 'Approvals complete. On mobile, proceed with Claim Dust as a separate action.'
-      })
-      return { flowId: preparedCtx.flowId, receipts, preparedCtx, nextAction: 'swap' }
-    }
-
-    const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
-    if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
-
-    const swaps = await executeSwapsWithFlow(preparedCtx, {
-      onProgress,
-      waitConfirms: opts?.waitConfirms,
-      waitTimeoutMs: opts?.waitTimeoutMs
-    })
-
-    return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
-  })
-}
-
-export async function executeChainPlan(chainPlan, fromAddress) {
-  const { receipts } = await executeChainPlanWithFlow(chainPlan, fromAddress)
-  return receipts
 }
