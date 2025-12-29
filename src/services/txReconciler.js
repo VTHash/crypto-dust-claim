@@ -1,33 +1,34 @@
+// src/services/txReconciler.js
 import { txStore } from './txStore'
 
 const isPendingStatus = (s) => s === 'created' || s === 'submitted'
 
+const getHash = (t) => t?.txHash || t?.hash || null
+
 function normalizeReceipt(receipt) {
   return {
-    blockNumber: receipt.blockNumber,
-    transactionIndex: receipt.index,
-    gasUsed: receipt.gasUsed?.toString?.(),
-    effectiveGasPrice: receipt.effectiveGasPrice?.toString?.(),
+    blockNumber: receipt.blockNumber ?? null,
+    transactionIndex: receipt.transactionIndex ?? null,
+    gasUsed: receipt.gasUsed?.toString?.() ?? null,
+    effectiveGasPrice: receipt.effectiveGasPrice?.toString?.() ?? null,
     status: receipt.status === 1 ? 'confirmed' : 'failed'
   }
 }
 
-async function detectReplacementOrDrop(provider, tx) {
-  if (!tx.hash) return null
-
+/**
+ * Replacement/drop detection is *best-effort*.
+ * We do NOT assume nonce exists in store.
+ */
+async function detectDrop(provider, txHash) {
   const [onChainTx, receipt] = await Promise.all([
-    provider.getTransaction(tx.hash).catch(() => null),
-    provider.getTransactionReceipt(tx.hash).catch(() => null)
+    provider.getTransaction(txHash).catch(() => null),
+    provider.getTransactionReceipt(txHash).catch(() => null)
   ])
 
   if (receipt) return null
   if (onChainTx) return null // still visible (mempool or provider knows it)
 
-  if (typeof tx.nonce === 'number') {
-    const latestCount = await provider.getTransactionCount(tx.from, 'latest').catch(() => null)
-    if (latestCount != null && latestCount > tx.nonce) return 'replaced'
-  }
-
+  // If provider cannot see tx + no receipt, treat as dropped (do not guess "replaced")
   return 'dropped'
 }
 
@@ -83,28 +84,31 @@ export class TxReconciler {
     const pending = txStore
       .readAll()
       .filter((t) => isPendingStatus(t.status))
-      .filter((t) => t.createdAt >= cutoff)
-      .filter((t) => !!t.hash)
+      .filter((t) => (t.createdAt ?? 0) >= cutoff)
+      .filter((t) => !!getHash(t))
 
     if (!pending.length) return
 
     for (const tx of pending) {
-      if (!tx.hash) continue
+      const txHash = getHash(tx)
+      if (!txHash) continue
 
-      const receipt = await provider.getTransactionReceipt(tx.hash).catch(() => null)
+      const receipt = await provider.getTransactionReceipt(txHash).catch(() => null)
 
       if (receipt) {
         const normalized = normalizeReceipt(receipt)
         txStore.patch(tx.id, {
           ...normalized,
-          confirmations: 1
+          confirmations: 1,
+          txHash // ensure it’s persisted in case old record used "hash"
         })
         continue
       }
 
-      const replacement = await detectReplacementOrDrop(provider, tx)
-      if (replacement === 'replaced') txStore.patch(tx.id, { status: 'replaced' })
-      else if (replacement === 'dropped') txStore.patch(tx.id, { status: 'dropped' })
+      const drop = await detectDrop(provider, txHash)
+      if (drop === 'dropped') {
+        txStore.patch(tx.id, { status: 'dropped', txHash })
+      }
     }
   }
 }
