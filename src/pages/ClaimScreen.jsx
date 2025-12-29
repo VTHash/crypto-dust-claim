@@ -3,7 +3,6 @@ import React, { useMemo, useEffect, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useWallet } from '../contexts/WalletContext'
 import { useScan } from '../contexts/ScanContext'
-import walletService from '../services/walletService'
 import { prepareChainPlanWithFlow, executeApprovalsWithFlow, executeSwapsWithFlow } from '../services/claimExecutor'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import { NATIVE_LOGOS } from '../services/logoService'
@@ -66,13 +65,17 @@ const ClaimScreen = () => {
   }, [claimPlan, batchSavings, device])
 
   const [scanSnapshot] = useState(() => {
-    if (state?.dustResults?.length) return { dustResults: state.dustResults, totalDustValue: Number(state.totalDustValue || 0) }
+    if (state?.dustResults?.length) {
+      return { dustResults: state.dustResults, totalDustValue: Number(state.totalDustValue || 0) }
+    }
     if (scanResults?.length) {
       const total = scanResults.reduce((s, x) => s + Number(x.totalValue || 0), 0)
       return { dustResults: scanResults, totalDustValue: total }
     }
     const parsed = safeJsonParse(sessionStorage.getItem(SS_LASTSCAN), null)
-    if (parsed?.dustResults?.length) return { dustResults: parsed.dustResults || [], totalDustValue: Number(parsed.total || 0) }
+    if (parsed?.dustResults?.length) {
+      return { dustResults: parsed.dustResults || [], totalDustValue: Number(parsed.total || 0) }
+    }
     return { dustResults: [], totalDustValue: 0 }
   })
 
@@ -121,10 +124,15 @@ const ClaimScreen = () => {
     return n
   }, [preparedByChain])
 
+  /**
+   * IMPORTANT:
+   * - Must return the computed prepared map, because React state updates are async.
+   * - Handlers should use the returned map rather than relying on state immediately after setting it.
+   */
   const ensurePrepared = useCallback(async () => {
     if (!isConnected) throw new Error('Connect your wallet first.')
     if (!planAvailable) throw new Error('No claim plan available. Go back to Scanner and run Batch Claim.')
-    if (preparedCount > 0) return
+    if (preparedCount > 0) return { preparedMap: preparedByChain, errorsMap: prepareErrors }
 
     setPreparing(true)
     setError(null)
@@ -157,28 +165,29 @@ const ClaimScreen = () => {
       setPrepareErrors(nextErrors)
       setPreparing(false)
 
-      // If nothing is swappable across all chains, surface it clearly
       const totalSwaps = Object.values(nextPrepared).reduce((s, ctx) => s + Number(ctx?.swappableCount || 0), 0)
       if (totalSwaps === 0) {
         setError('No 0x routes available for the selected tokens (all steps returned “no route”).')
       }
     }
-  }, [isConnected, planAvailable, preparedCount, claimPlan, address])
+
+    return { preparedMap: nextPrepared, errorsMap: nextErrors }
+  }, [isConnected, planAvailable, preparedCount, claimPlan, address, preparedByChain, prepareErrors])
 
   const handleApprove = async () => {
     try {
       setError(null)
       setActionResults([])
-      await ensurePrepared()
 
-      const chainIds = Object.keys(preparedByChain).map(Number)
+      const { preparedMap } = await ensurePrepared()
+      const chainIds = Object.keys(preparedMap || {}).map(Number)
       if (chainIds.length === 0) throw new Error('Nothing prepared (all chains failed to prepare).')
 
       setApproving(true)
 
       const results = []
       for (const chainId of chainIds) {
-        const ctx = preparedByChain[chainId]
+        const ctx = preparedMap[chainId]
         try {
           const { receipts } = await executeApprovalsWithFlow(ctx)
           const ok = receipts?.some((r) => r.type === 'approval' && (r.ok || r.skipped))
@@ -202,16 +211,16 @@ const ClaimScreen = () => {
     try {
       setError(null)
       setActionResults([])
-      await ensurePrepared()
 
-      const chainIds = Object.keys(preparedByChain).map(Number)
+      const { preparedMap } = await ensurePrepared()
+      const chainIds = Object.keys(preparedMap || {}).map(Number)
       if (chainIds.length === 0) throw new Error('Nothing prepared (all chains failed to prepare).')
 
       setClaiming(true)
 
       const results = []
       for (const chainId of chainIds) {
-        const ctx = preparedByChain[chainId]
+        const ctx = preparedMap[chainId]
         try {
           const { receipts } = await executeSwapsWithFlow(ctx)
           const ok = receipts?.some((r) => r.type === 'swap' && r.ok && r.txHash)
@@ -237,7 +246,10 @@ const ClaimScreen = () => {
     <div className="claim-screen">
       <div className="claim-header">
         <h1>Dust Claim</h1>
-        <p>0x v2 Allowance Holder routes + DustClaimV3.claimDustUsingAggregator{device === 'mobile' ? ' (Mobile mode)' : ''}</p>
+        <p>
+          0x v2 Allowance Holder routes + DustClaimV3.claimDustUsingAggregator
+          {device === 'mobile' ? ' (Mobile mode)' : ''}
+        </p>
       </div>
 
       <div className="summary-card">
@@ -262,7 +274,9 @@ const ClaimScreen = () => {
             <div className="summary-icon">🧾</div>
             <div className="summary-content">
               <h3>Prepared</h3>
-              <div className="summary-value">{preparedCount}/{planAvailable ? claimPlan.length : totalChains}</div>
+              <div className="summary-value">
+                {preparedCount}/{planAvailable ? claimPlan.length : totalChains}
+              </div>
             </div>
           </div>
 
@@ -331,7 +345,6 @@ const ClaimScreen = () => {
         </div>
       )}
 
-      {/* ACTIONS: only two buttons */}
       <div className="action-section" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <button
           onClick={handleApprove}

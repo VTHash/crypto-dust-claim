@@ -10,9 +10,17 @@ const toWeiStr = (amount, decimals = 18) => {
   return s.includes('.') ? ethers.parseUnits(s, decimals).toString() : s
 }
 
+const isHexAddress = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a)
+const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== ethers.ZeroAddress
+
 /**
- * 0x Swap API v2 via Netlify function (POST)
- * This is the ONLY place we request quotes to build the plan.
+ * 0x Swap API v2 (Allowance Holder) via Netlify function (POST)
+ * Netlify returns a normalized v2 shape:
+ * {
+ * spender,
+ * transaction: { to, data, gas, value },
+ * raw: {...}
+ * }
  */
 async function get0xAllowanceHolderQuote({
   chainId,
@@ -41,14 +49,12 @@ async function get0xAllowanceHolderQuote({
     headers: { 'content-type': 'application/json' }
   })
 
-  console.log('[batchService] 0x-quote tx.to:', res?.data?.transaction?.to)
-  console.log('[batchService] 0x-quote tx.data len:', res?.data?.transaction?.data?.length || 0)
-  console.log(
-    '[batchService] 0x-quote allowance spender:',
-    res?.data?.issues?.allowance?.spender || res?.data?.allowanceTarget || null
-  )
+  const q = res?.data
+  console.log('[batchService] 0x-quote spender:', q?.spender || null)
+  console.log('[batchService] 0x-quote tx.to:', q?.transaction?.to || null)
+  console.log('[batchService] 0x-quote tx.data len:', q?.transaction?.data?.length || 0)
 
-  return res.data
+  return q
 }
 
 async function getTxOriginFallback(optionsTxOrigin) {
@@ -64,15 +70,30 @@ async function getTxOriginFallback(optionsTxOrigin) {
   return from || null
 }
 
+// Convert slippage settings to BPS (basis points)
+// - prefer options.slippageBps if present
+// - else accept options.slippagePct (1 = 1% => 100 bps)
+function resolveSlippageBps(options = {}) {
+  const bpsRaw = options?.slippageBps
+  if (bpsRaw !== undefined && bpsRaw !== null && Number.isFinite(Number(bpsRaw))) {
+    const bps = Math.max(0, Math.floor(Number(bpsRaw)))
+    return bps
+  }
+
+  const pctRaw = options?.slippagePct
+  const pct = Number.isFinite(Number(pctRaw)) ? Number(pctRaw) : 1
+  return Math.max(0, Math.floor(pct * 100))
+}
+
 class BatchService {
   /**
    * claims = [{ chainId, tokenAddress, amount, decimals, recipient }]
-   * options = { txOrigin, slippagePct }
+   * options = { txOrigin, slippageBps, slippagePct, outTokenByChain }
    */
   async buildClaimPlan(claims = [], options = {}) {
     if (!Array.isArray(claims) || claims.length === 0) return []
 
-    const slippagePct = Number(options.slippagePct ?? 1)
+    const slippageBps = resolveSlippageBps(options)
     const txOrigin = await getTxOriginFallback(options.txOrigin)
 
     if (!txOrigin) {
@@ -92,13 +113,14 @@ class BatchService {
 
     for (const [chainId, items] of byChain.entries()) {
       const dep = DEPLOYMENTS?.[Number(chainId)]
-      if (!dep?.dustClaimV3 || !dep?.weth) continue
+      if (!dep?.dustClaimV3 || !isNonZeroAddress(dep.dustClaimV3)) continue
+      if (!dep?.weth || !isNonZeroAddress(dep.weth)) continue
 
       const steps = []
 
       for (const it of items) {
         const tokenIn = it.tokenAddress
-        if (!tokenIn) continue
+        if (!isNonZeroAddress(tokenIn)) continue
 
         // Skip WETH -> WETH
         if (String(tokenIn).toLowerCase() === String(dep.weth).toLowerCase()) continue
@@ -119,45 +141,41 @@ class BatchService {
             sellToken: tokenIn,
             buyToken: dep.weth,
             sellAmountWei,
-            taker: dep.dustClaimV3, // contract is taker
-            recipient: dep.dustClaimV3, // contract must receive WETH
-            txOrigin, // user EOA
-            slippageBps: Math.round(slippagePct * 100)
+            taker: dep.dustClaimV3, // DustClaimV3 is taker (smart contract caller)
+            recipient: dep.dustClaimV3, // DustClaimV3 receives WETH
+            txOrigin, // user EOA origin
+            slippageBps
           })
         } catch (e) {
-          console.warn(
-            '[buildClaimPlan] 0x quote failed:',
-            { chainId, tokenIn },
-            e?.response?.data || e?.message
-          )
+          console.warn('[buildClaimPlan] 0x quote failed:', { chainId, tokenIn }, e?.response?.data || e?.message)
           continue
         }
 
+        // Netlify normalized response
+        const routerSpender = q?.spender || null
         const callTarget = q?.transaction?.to || null
         const calldata = q?.transaction?.data || null
-        const allowanceSpender =
-          q?.issues?.allowance?.spender || q?.allowanceTarget || null
+        const gasFromQuote = q?.transaction?.gas ?? null
 
-        if (!callTarget || !calldata || !allowanceSpender) {
-          console.warn('[0x] invalid quote, missing fields', {
+        if (!isNonZeroAddress(routerSpender) || !isNonZeroAddress(callTarget) || typeof calldata !== 'string' || calldata.length < 10) {
+          console.warn('[0x] invalid quote, missing executable fields', {
             chainId,
             tokenIn,
+            routerSpender,
             callTarget,
-            allowanceSpender,
             calldataLen: calldata?.length || 0
           })
           continue
         }
 
-        // DustClaimV3 calls: spender.call(calldata)
-        // So spender MUST be callable. With allowance-holder quotes, spender is typically tx.to.
-        // Your strict requirement is reasonable; keep it to avoid incompatible quotes.
-        if (String(callTarget).toLowerCase() !== String(allowanceSpender).toLowerCase()) {
-          console.warn('[0x] incompatible allowance-holder quote (tx.to != allowance spender)', {
+        // DustClaimV3 logic requires: approve(routerSpender), then routerSpender.call(calldata)
+        // So routerSpender MUST match tx.to
+        if (String(callTarget).toLowerCase() !== String(routerSpender).toLowerCase()) {
+          console.warn('[0x] incompatible allowance-holder quote (spender != tx.to)', {
             chainId,
             tokenIn,
             callTarget,
-            allowanceSpender
+            routerSpender
           })
           continue
         }
@@ -165,24 +183,21 @@ class BatchService {
         steps.push({
           aggregator: '0x',
 
+          // claimExecutor uses these fields
           needsApproval: true,
           usePermit: false,
 
-          // ✅ FIX: user must approve DustClaimV3 (it pulls tokens via transferFrom)
-          spender: dep.dustClaimV3,
-
           tokenIn,
           tokenOut: dep.weth,
-          amount: sellAmountWei,
+          amount: String(sellAmountWei),
 
-          // ✅ DustClaimV3 will approve+call this spender internally
-          routerSpender: allowanceSpender,
+          // IMPORTANT: DustClaimV3 will approve+call this spender internally
+          routerSpender,
           swapCalldata: calldata,
+          gasFromQuote,
 
-          // optional debug
-          callTarget,
-
-          slippage: slippagePct
+          // IMPORTANT: claimExecutor reads step.slippageBps
+          slippageBps
         })
       }
 

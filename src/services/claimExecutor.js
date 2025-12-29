@@ -159,29 +159,28 @@ async function get0xQuoteStrict({
     }
   }
 
-  const spender = q?.spender
-  const to = q?.transaction?.to
-  const data = q?.transaction?.data
+  // Backward compatible: accept either normalized {spender,...} or raw v2 {allowanceTarget,...}
+  const spender = q?.spender || q?.allowanceTarget || q?.issues?.allowance?.spender || null
+  const to = q?.transaction?.to || null
+  const data = q?.transaction?.data || null
   const gas = q?.transaction?.gas ?? null
 
   if (!isNonZeroAddress(spender) || !isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
     return { ok: false, reason: q?.message || 'No executable route / quote missing fields', quote: q }
   }
 
-  // DustClaimV3: approves spender then calls spender(data) => spender MUST equal tx.to
   if (normalizeAddr(spender) !== normalizeAddr(to)) {
     return { ok: false, reason: 'V3 incompatible route (spender != tx.to)', quote: q }
   }
 
   return {
     ok: true,
-    spender, // pass into DustClaimV3 as routerSpender
+    spender,
     calldata: data,
     gas,
     quote: q
   }
 }
-
 // ----------------------------------
 // allowance check (spender MUST be DustClaimV3, since it pulls user tokens)
 // ----------------------------------
