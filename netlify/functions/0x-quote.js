@@ -11,9 +11,9 @@
 // DUSTCLAIM V3 COMPATIBILITY:
 // DustClaimV3 does: pull tokens -> approve(spender) -> spender.call(calldata)
 // For Allowance Holder quotes:
-// - `allowanceTarget` is the contract that must be approved and called (tx.to)
-// - `transaction.to` should match `allowanceTarget`
-// We enforce: allowanceTarget === transaction.to and data is present.
+// - spender MUST equal transaction.to
+// - transaction.data must be present
+// - Some tokens return 200 but without executable tx fields; treat as NO_EXECUTABLE_ROUTE and return 422.
 
 const ZEROX_BASE = "https://api.0x.org";
 
@@ -55,6 +55,7 @@ function normAddr(a) {
 // ---------- tiny in-memory cache (warm lambda) ----------
 const CACHE_TTL_MS = 25_000;
 const cache = new Map(); // key -> { ts, data }
+
 function getCache(key) {
   const v = cache.get(key);
   if (!v) return null;
@@ -107,6 +108,26 @@ async function fetch0xWithRetry(url, headers, reqId) {
   }
 }
 
+// Extract spender + tx fields robustly for 0x v2 allowance-holder responses.
+function extractV2ExecutableFields(data) {
+  const tx = data?.transaction || null;
+
+  const txTo = tx?.to || data?.to || null;
+  const txData = tx?.data || data?.data || null;
+  const txGas = tx?.gas ?? data?.gas ?? null;
+  const txValue = tx?.value ?? data?.value ?? null;
+
+  // v2 allowance-holder spender typically at issues.allowance.spender
+  // some responses also include allowanceTarget
+  const spender =
+    data?.issues?.allowance?.spender ||
+    data?.allowance?.spender ||
+    data?.allowanceTarget ||
+    null;
+
+  return { spender, txTo, txData, txGas, txValue };
+}
+
 exports.handler = async (event) => {
   const started = Date.now();
   const reqId =
@@ -149,13 +170,13 @@ exports.handler = async (event) => {
     const buyToken = body.buyToken;
     const sellAmount = body.sellAmount ?? body.sellAmountWei;
 
-    // In allowance-holder v2:
-    // taker = address that will submit/call the tx at execution time.
-    // For your DustClaimV3 flow, taker should be DustClaimV3 and txOrigin should be the EOA (user).
+    // Allowance-holder v2:
+    // taker = the address that will be the caller at execution (DustClaimV3)
+    // txOrigin = the EOA originator (user) when taker is a contract
     const taker = body.taker;
-    const txOrigin = body.txOrigin; // only needed if taker is a smart contract
-    const recipient = body.recipient; // optional
-    const slippageBps = body.slippageBps; // optional (default 100 per docs)
+    const txOrigin = body.txOrigin;
+    const recipient = body.recipient;
+    const slippageBps = body.slippageBps;
 
     console.log("[0x] REQUEST PARAMS:", {
       chainId,
@@ -197,7 +218,7 @@ exports.handler = async (event) => {
     }
 
     const cacheKey = JSON.stringify([
-      "v2_allowance_holder_quote",
+      "v2_allowance_holder_quote_norm",
       chainId,
       sellToken.toLowerCase(),
       buyToken.toLowerCase(),
@@ -224,7 +245,6 @@ exports.handler = async (event) => {
       taker,
     });
 
-    // Optional params
     if (txOrigin) params.set("txOrigin", txOrigin);
     if (recipient) params.set("recipient", recipient);
     if (slippageBps !== undefined && slippageBps !== null) params.set("slippageBps", String(slippageBps));
@@ -254,17 +274,15 @@ exports.handler = async (event) => {
       data = { raw: text };
     }
 
-    const allowanceTarget = data?.allowanceTarget;
-    const txTo = data?.transaction?.to;
-    const txData = data?.transaction?.data;
+    const { spender, txTo, txData, txGas, txValue } = extractV2ExecutableFields(data);
 
     const summary = {
       ok: resp.ok,
       status: resp.status,
-      allowanceTarget: safeAddr(allowanceTarget),
+      spender: safeAddr(spender),
       tx_to: safeAddr(txTo),
       tx_data_len: txData ? String(txData.length) : "0",
-      gas: data?.transaction?.gas ?? null,
+      gas: txGas ?? null,
       buyAmount: data?.buyAmount ?? null,
       sellAmount: data?.sellAmount ?? null,
       message: data?.message ?? null,
@@ -278,35 +296,66 @@ exports.handler = async (event) => {
       return json(resp.status, { error: "0x error", status: resp.status, data }, { "x-req-id": reqId });
     }
 
-    // Strict DustClaimV3 compatibility checks:
-    // - DustClaimV3 will approve allowanceTarget and then call allowanceTarget with txData
-    if (!isNonZeroAddress(allowanceTarget) || !isNonZeroAddress(txTo) || typeof txData !== "string" || txData.length < 10) {
-      const reason = "Quote missing allowanceTarget or transaction.to/data";
-      console.log("[0x] VALIDATION FAILED:", reason, {
-        allowanceTarget: safeAddr(allowanceTarget),
+    // Treat "200 but missing executable tx" as NO_EXECUTABLE_ROUTE (common edge case)
+    if (!isNonZeroAddress(spender) || !isNonZeroAddress(txTo) || typeof txData !== "string" || txData.length < 10) {
+      const reason = data?.message || data?.reason || "No executable route returned by 0x";
+      console.log("[0x] VALIDATION FAILED:", "NO_EXECUTABLE_ROUTE", {
+        spender: safeAddr(spender),
         txTo: safeAddr(txTo),
         dataLen: txData ? txData.length : 0,
         reqId,
       });
+
       return json(
         422,
-        { error: reason, details: { allowanceTarget, txTo, dataLen: txData ? txData.length : 0 }, data },
+        {
+          error: "NO_EXECUTABLE_ROUTE",
+          message: reason,
+          details: { spender, txTo, dataLen: txData ? txData.length : 0 },
+          data,
+        },
         { "x-req-id": reqId }
       );
     }
 
-    if (normAddr(allowanceTarget) !== normAddr(txTo)) {
-      const reason = "DustClaimV3 incompatible route: allowanceTarget != transaction.to";
-      console.log("[0x] VALIDATION FAILED:", reason, {
-        allowanceTarget: safeAddr(allowanceTarget),
+    // Strict DustClaimV3 compatibility:
+    // DustClaimV3 approves `spender` then calls `spender` with `txData`,
+    // so spender MUST equal txTo.
+    if (normAddr(spender) !== normAddr(txTo)) {
+      const reason = "DustClaimV3 incompatible route: spender != transaction.to";
+      console.log("[0x] VALIDATION FAILED:", "INCOMPATIBLE_ROUTE", {
+        spender: safeAddr(spender),
         txTo: safeAddr(txTo),
         reqId,
       });
-      return json(422, { error: reason, details: { allowanceTarget, txTo }, data }, { "x-req-id": reqId });
+
+      return json(
+        422,
+        { error: "INCOMPATIBLE_ROUTE", message: reason, details: { spender, txTo }, data },
+        { "x-req-id": reqId }
+      );
     }
 
-    setCache(cacheKey, data);
-    return json(200, data, { "x-req-id": reqId, "x-cache": "MISS" });
+    // Normalized response for claimExecutor (single consistent shape)
+    const normalized = {
+      chainId,
+      sellToken,
+      buyToken,
+      sellAmount: data?.sellAmount ?? String(sellAmount),
+      buyAmount: data?.buyAmount ?? null,
+      spender,
+      transaction: {
+        to: txTo,
+        data: txData,
+        gas: txGas ?? null,
+        value: txValue ?? null,
+      },
+      // Keep raw for debugging (optional). If you want smaller payloads, remove this.
+      raw: data,
+    };
+
+    setCache(cacheKey, normalized);
+    return json(200, normalized, { "x-req-id": reqId, "x-cache": "MISS" });
   } catch (e) {
     console.log("[0x] FUNCTION ERROR:", e?.message || e);
     return json(500, { error: e?.message || "Function error" }, { "x-req-id": reqId });
