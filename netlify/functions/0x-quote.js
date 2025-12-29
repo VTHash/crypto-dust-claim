@@ -1,15 +1,11 @@
 // netlify/functions/0x-quote.js
 // Browser -> Netlify: POST only (CORS + hide API key)
-// Netlify -> 0x: GET only
-//
-// UPDATED FOR 0x API v2 (Swap API v2)
-// Uses: /swap/allowance-holder/quote
+// Netlify -> 0x: GET only (0x /swap/v1/quote is GET with query params)
 //
 // IMPORTANT FOR DUSTCLAIM V3 FLOW:
-// - User approves DustClaimV3.
-// - DustClaimV3 pulls tokens from user, approves the 0x spender (AllowanceHolder), then does spender.call(calldata).
-// - Therefore the quote MUST be compatible with: spender === transaction.to
-// - For contract takers, 0x v2 requires txOrigin (the user EOA) in addition to taker (DustClaimV3).
+// - DustClaimV3 pulls tokens from the user, then approves spender, then does spender.call(calldata)
+// - Therefore we MUST use standard /swap/v1/quote (NOT allowance-holder)
+// - We also REQUIRE allowanceTarget === to, because we will call the spender directly.
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
@@ -139,12 +135,15 @@ async function fetch0xWithRetry(url, headers, reqId) {
   }
 }
 
-// Slippage for v2: slippageBps (basis points)
-function normalizeSlippageBps(slippageBps) {
+// Convert slippageBps -> slippagePercentage (0x v1 expects a decimal, e.g. 0.01 for 1%)
+function bpsToSlippagePct(slippageBps) {
   const n = Number(slippageBps);
-  if (!Number.isFinite(n) || n < 0) return "100"; // default 1%
+  if (!Number.isFinite(n) || n < 0) return "0.01"; // default 1%
+  // clamp to something sane
   const clamped = Math.max(0, Math.min(5000, Math.trunc(n))); // 0% .. 50%
-  return String(clamped);
+  const pct = clamped / 10000;
+  // keep fixed precision but avoid scientific notation
+  return pct.toFixed(4).replace(/0+$/, "").replace(/\.$/, "") || "0";
 }
 
 exports.handler = async (event) => {
@@ -189,14 +188,13 @@ exports.handler = async (event) => {
     const buyToken = body.buyToken;
     const sellAmount = body.sellAmount ?? body.sellAmountWei;
 
-    // For DustClaimV3 compatibility:
-    // - taker should be DustClaimV3 (the contract that will be the taker)
-    // - txOrigin should be the user EOA (wallet address initiating the tx)
-    // - recipient should be DustClaimV3 (receive output into contract so it can unwrap/send back)
-    const taker = body.taker;       // DustClaimV3
+    // DustClaimV3 address (this is the taker/caller on 0x side)
+    const taker = body.taker; // DustClaimV3
     const recipient = body.recipient; // DustClaimV3
-    const txOrigin = body.txOrigin; // USER EOA (REQUIRED when taker is contract)
     const slippageBps = body.slippageBps;
+
+    // txOrigin no longer required for /swap/v1/quote (we ignore if present)
+    const txOrigin = body.txOrigin;
 
     console.log("[0x] REQUEST PARAMS:", {
       chainId,
@@ -221,11 +219,12 @@ exports.handler = async (event) => {
       return json(400, { error: `0x unsupported chainId: ${chainId}` }, { "x-req-id": reqId });
     }
 
-    if (!sellToken || !buyToken || !sellAmount || !taker || !recipient || !txOrigin) {
+    // Required fields for v1 quote
+    if (!sellToken || !buyToken || !sellAmount || !taker || !recipient) {
       console.log("[0x] ERROR: missing required fields");
       return json(
         400,
-        { error: "Missing required fields: chainId,sellToken,buyToken,sellAmount,taker,recipient,txOrigin" },
+        { error: "Missing required fields: chainId,sellToken,buyToken,sellAmount,taker,recipient" },
         { "x-req-id": reqId }
       );
     }
@@ -233,22 +232,23 @@ exports.handler = async (event) => {
     if (!isNonZeroAddress(sellToken) || !isNonZeroAddress(buyToken)) {
       return json(400, { error: "Invalid sellToken or buyToken address" }, { "x-req-id": reqId });
     }
-    if (!isNonZeroAddress(taker) || !isNonZeroAddress(recipient) || !isNonZeroAddress(txOrigin)) {
-      return json(400, { error: "Invalid taker/recipient/txOrigin address" }, { "x-req-id": reqId });
+    if (!isNonZeroAddress(taker) || !isNonZeroAddress(recipient)) {
+      return json(400, { error: "Invalid taker/recipient address" }, { "x-req-id": reqId });
     }
 
-    const slippageBpsNorm = normalizeSlippageBps(slippageBps);
+    const slippagePercentage = bpsToSlippagePct(slippageBps);
 
     const cacheKey = JSON.stringify([
+      "v2",
+      "allowance-holder",
       chainId,
       sellToken.toLowerCase(),
       buyToken.toLowerCase(),
       String(sellAmount),
       taker.toLowerCase(),
       recipient.toLowerCase(),
-      txOrigin.toLowerCase(),
-      slippageBpsNorm,
-      "swap_allowance_holder_quote_v2",
+      slippagePercentage,
+      "swap_v1_quote",
     ]);
 
     const cached = getCache(cacheKey);
@@ -257,17 +257,16 @@ exports.handler = async (event) => {
       return json(200, cached, { "x-req-id": reqId, "x-cache": "HIT" });
     }
 
-    // 0x v2 Allowance Holder Quote:
-    // GET {host}/swap/allowance-holder/quote?buyToken&sellToken&sellAmount&taker&txOrigin&recipient&slippageBps
-    const upstream = new URL(`${host}/swap/allowance-holder/quote`);
+    // Build 0x GET URL with query params (Swap API v1)
+    // Docs-style params: sellToken, buyToken, sellAmount, takerAddress, recipient, slippagePercentage
+    const upstream = new URL(`${host}/swap/v1/quote`);
     upstream.search = new URLSearchParams({
       sellToken,
       buyToken,
       sellAmount: String(sellAmount),
-      taker: taker,
-      txOrigin: txOrigin,
+      takerAddress: taker,
       recipient: recipient,
-      slippageBps: slippageBpsNorm,
+      slippagePercentage: slippagePercentage,
     }).toString();
 
     console.log("[0x] Calling URL (GET):", upstream.toString());
@@ -293,22 +292,17 @@ exports.handler = async (event) => {
       data = { raw: text };
     }
 
-    // v2 typical fields: { transaction: { to, data, value, gas, ... }, issues: { allowance: { spender } }, ... }
-    const txTo = data?.transaction?.to;
-    const txData = data?.transaction?.data;
-    const spender =
-      data?.issues?.allowance?.spender ||
-      data?.allowanceTarget || // defensive (some payloads may still include)
-      data?.allowance?.spender ||
-      null;
-
+    // v1 fields: { to, data, value, gas, allowanceTarget, buyAmount, sellAmount, ... }
     const summary = {
       ok: resp.ok,
       status: resp.status,
-      tx_to: safeAddr(txTo),
-      tx_data_len: typeof txData === "string" ? String(txData.length) : "0",
-      spender: safeAddr(spender),
-      gas: data?.transaction?.gas ?? null,
+      allowanceTarget: safeAddr(data?.allowanceTarget),
+      hasTo: !!data?.to,
+      hasData: typeof data?.data === "string" && data.data.length > 10,
+      tx_to: safeAddr(data?.to),
+      tx_data_len: data?.data ? String(data.data.length) : "0",
+      tx_value: data?.value ?? null,
+      gas: data?.gas ?? null,
       buyAmount: data?.buyAmount ?? null,
       sellAmount: data?.sellAmount ?? null,
       code: data?.code ?? null,
@@ -324,44 +318,79 @@ exports.handler = async (event) => {
     }
 
     // Strict DustClaimV3 compatibility checks:
-    // - DustClaimV3 will call spender.call(calldata)
-    // - So spender MUST exist and MUST equal transaction.to
-    if (!isNonZeroAddress(txTo) || typeof txData !== "string" || txData.length < 10) {
-      const reason = "Quote missing transaction.to / transaction.data";
-      console.log("[0x] VALIDATION FAILED:", reason, { txTo: safeAddr(txTo), reqId });
-      return json(
-        422,
-        { error: reason, details: { txTo, dataLen: txData ? txData.length : 0 }, data },
-        { "x-req-id": reqId }
-      );
-    }
+    // - We will call `spender.call(calldata)` where spender is allowanceTarget.
+    // - So allowanceTarget must be present and match `to`.
+    const allowanceTarget = data?.allowanceTarget;
+    const to = data?.to;
+    const calldata = data?.data;
 
-    if (!isNonZeroAddress(spender)) {
-      const reason = "Quote missing allowance spender";
-      console.log("[0x] VALIDATION FAILED:", reason, { reqId });
-      return json(
-        422,
-        { error: reason, details: { spender }, data },
-        { "x-req-id": reqId }
-      );
-    }
-
-    if (normAddr(spender) !== normAddr(txTo)) {
-      const reason = "DustClaimV3 incompatible route: spender != transaction.to";
+    if (!isNonZeroAddress(allowanceTarget) || !isNonZeroAddress(to) || typeof calldata !== "string" || calldata.length < 10) {
+      const reason = "Quote missing allowanceTarget/to/data";
       console.log("[0x] VALIDATION FAILED:", reason, {
-        spender: safeAddr(spender),
-        txTo: safeAddr(txTo),
+        allowanceTarget: safeAddr(allowanceTarget),
+        to: safeAddr(to),
+        dataLen: calldata ? calldata.length : 0,
         reqId,
       });
       return json(
         422,
-        { error: reason, details: { spender, txTo }, data },
+        {
+          error: reason,
+          details: { allowanceTarget, to, dataLen: calldata ? calldata.length : 0 },
+          data,
+        },
         { "x-req-id": reqId }
       );
     }
 
-    setCache(cacheKey, data);
-    return json(200, data, { "x-req-id": reqId, "x-cache": "MISS" });
+    if (normAddr(allowanceTarget) !== normAddr(to)) {
+      // This indicates a route we cannot execute via `spender.call(calldata)`
+      // (because the contract would approve allowanceTarget but calldata is intended for a different `to`).
+      const reason = "DustClaimV3 incompatible route: allowanceTarget != to";
+      console.log("[0x] VALIDATION FAILED:", reason, {
+        allowanceTarget: safeAddr(allowanceTarget),
+        to: safeAddr(to),
+        reqId,
+      });
+      return json(
+        422,
+        {
+          error: reason,
+          details: { allowanceTarget, to },
+          data,
+        },
+        { "x-req-id": reqId }
+      );
+    }
+
+    // Return normalized payload (backwards compatible with existing claimExecutor parsing)
+    const normalized = {
+      ...data,
+      allowanceTarget: data?.allowanceTarget || spender, // keep legacy field populated
+      issues: {
+        ...(data?.issues || {}),
+        allowance: {
+          ...(data?.issues?.allowance || {}),
+          spender,
+        },
+      },
+      transaction: {
+        to: txTo,
+        data: txData,
+        value: txValue,
+        gas: txGas,
+      },
+      // Helpful for debugging
+      meta: {
+        api: "0x",
+        version: "v2",
+        endpoint: "swap/allowance-holder/quote",
+        chainId,
+      },
+    };
+
+    setCache(cacheKey, normalized);
+    return json(200, normalized, { "x-req-id": reqId, "x-cache": "MISS" });
   } catch (e) {
     console.log("[0x] FUNCTION ERROR:", e?.message || e);
     return json(500, { error: e?.message || "Function error" }, { "x-req-id": reqId });

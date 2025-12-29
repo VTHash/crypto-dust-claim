@@ -7,6 +7,7 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
 
 /**
  * MetaMask + 0x + Multichain Execution (UX-safe)
+<<<<<<< HEAD
  * ---------------------------------------------
  * UPDATED: 0x Swap API v2 (Allowance Holder Quote)
  *
@@ -18,13 +19,17 @@ import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
  *    - routerSpender MUST equal quote.transaction.to
  *    - calldata MUST equal quote.transaction.data
  * 5) Better UX hooks: optional progress callbacks for UI, plus safe dedup and USDT-like approval handling.
+=======
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
  *
- * Public API:
- * - prepareChainPlanWithFlow(chainPlan, fromAddress, opts?)
- * - executeApprovalsWithFlow(preparedCtx, opts?)
- * - executeSwapsWithFlow(preparedCtx, opts?)
- * - executeChainPlanWithFlow(chainPlan, fromAddress, opts?) // wrapper
- * - executeChainPlan(chainPlan, fromAddress)
+ * This version assumes 0x Swap API v2 is used server-side (Netlify function),
+ * and the function returns a normalized payload including:
+ * - transaction: { to, data, value?, gas? }
+ * - issues.allowance.spender (or allowanceTarget)
+ *
+ * DustClaimV3 compatibility rule:
+ * - DustClaimV3 does: approve(spender) then spender.call(calldata)
+ * - therefore spender MUST equal transaction.to
  */
 
 // ----------------------------------
@@ -34,7 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const newFlowId = () => `flow_${Math.random().toString(16).slice(2)}_${Date.now()}`
 
 const isHexAddress = (a) => typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a)
-const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== ethers.ZeroAddress
+const isNonZeroAddress = (a) => isHexAddress(a) && a.toLowerCase() !== ethers.ZeroAddress.toLowerCase()
 
 function normalizeChainId(chainIdLike) {
   if (typeof chainIdLike === 'string') {
@@ -100,7 +105,7 @@ function isMustZeroFirstApprove(err) {
 }
 
 // ----------------------------------
-// internal mutex: prevent overlapping wallet prompts (critical on mobile)
+// internal mutex: prevent overlapping wallet prompts
 // ----------------------------------
 let _txQueue = Promise.resolve()
 function runExclusive(fn) {
@@ -132,7 +137,11 @@ async function get0xQuoteStrict({
   txOrigin,
   slippageBps
 }) {
+<<<<<<< HEAD
   // Netlify function calls 0x v2 /swap/allowance-holder/quote
+=======
+  // Netlify returns normalized v2 response including transaction {to,data}
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
   const { data: q } = await axios.post(
     '/.netlify/functions/0x-quote',
     {
@@ -148,15 +157,35 @@ async function get0xQuoteStrict({
     { headers: { 'content-type': 'application/json' } }
   )
 
+<<<<<<< HEAD
   // v2 response: transaction.to + transaction.data
   const to = q?.transaction?.to
   const data = q?.transaction?.data
 
+=======
+  // If function returns an error wrapper, surface it clearly
+  if (q?.error && !q?.transaction?.to) {
+    const msg =
+      q?.data?.message ||
+      q?.data?.reason ||
+      q?.message ||
+      q?.error ||
+      '0x quote error'
+    return { ok: false, reason: msg, quote: q }
+  }
+
+  const to = q?.transaction?.to || q?.to
+  const data = q?.transaction?.data || q?.data
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
   if (!isNonZeroAddress(to) || typeof data !== 'string' || data.length < 10) {
     return { ok: false, reason: q?.message || 'No route / quote missing transaction', quote: q }
   }
 
+<<<<<<< HEAD
   // Allowance-holder spender is provided on v2 as issues.allowance.spender (defensive fallbacks kept)
+=======
+  // allowance-holder spender used inside DustClaimV3
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
   const spender =
     q?.issues?.allowance?.spender ||
     q?.allowanceTarget ||
@@ -176,13 +205,13 @@ async function get0xQuoteStrict({
     ok: true,
     spender,
     calldata: data,
-    gas: q?.transaction?.gas ?? null,
+    gas: q?.transaction?.gas ?? q?.gas ?? null,
     quote: q
   }
 }
 
 // ----------------------------------
-// allowance check (spender MUST be DustClaimV3, since it pulls user tokens)
+// allowance check (spender MUST be DustClaimV3)
 // ----------------------------------
 async function getAllowanceToDustClaim(provider, token, owner, dustClaimV3) {
   const allowanceData = encodeFunctionData({
@@ -224,6 +253,10 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
 
+<<<<<<< HEAD
+=======
+    // Switch chain if needed
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
     if (planChainId !== currentChainId) {
       safeCall(onProgress, { flowId, stage: 'chain', status: 'switching', from: currentChainId, to: planChainId })
 
@@ -259,9 +292,7 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
 
     try {
       walletService.startTxReconciler?.()
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     const prepared = []
     const steps = Array.isArray(chainPlan.steps) ? chainPlan.steps : []
@@ -308,9 +339,17 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
           sellToken: tokenIn,
           buyToken: tokenOut,
           sellAmount: String(amountWei),
+<<<<<<< HEAD
           taker: dep.dustClaimV3,      // contract taker
           recipient: dep.dustClaimV3,  // output goes to contract
           txOrigin: from,              // USER EOA (required by v2 when taker is contract)
+=======
+          // allowance-holder rules:
+          // taker/recipient are DustClaimV3, txOrigin is the user
+          taker: dep.dustClaimV3,
+          recipient: dep.dustClaimV3,
+          txOrigin: from,
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
           slippageBps: step.slippageBps ?? 100
         })
 
@@ -340,6 +379,10 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       await sleep(isProbablyMobile() ? 30 : 0)
     }
 
+<<<<<<< HEAD
+=======
+    // approvalsNeeded: dedupe by tokenIn and SUM amounts
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
     const approvalMap = new Map()
     let swappableCount = 0
 
@@ -380,14 +423,13 @@ export async function prepareChainPlanWithFlow(chainPlan, fromAddress, opts = {}
 }
 
 // ----------------------------------
-// Internal: send an approval tx (handles USDT-style zero-first if needed)
+// Internal: send an approval tx (handles USDT-style zero-first)
 // ----------------------------------
 async function sendApprovalTx({
   from,
   token,
   spender,
   amountWei,
-  provider,
   flowId,
   waitConfirms = 1,
   waitTimeoutMs = 240000,
@@ -494,6 +536,7 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
       safeCall(onProgress, { flowId, stage: 'approval', status: 'checking', index: i, total: approvals.length, token: tokenIn, spender: dustClaimV3, amount: String(amountWei) })
 
       try {
+<<<<<<< HEAD
         const okAllowance = await (async () => {
           try {
             const allowanceData = encodeFunctionData({
@@ -511,6 +554,22 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
 
         if (okAllowance) {
           receipts.push({ flowId, type: 'approval', ok: true, skipped: true, reason: 'allowance already sufficient', chainId: planChainId, tokenIn, spender: dustClaimV3, amount: String(amountWei) })
+=======
+        const okAllowance = await hasSufficientAllowanceToDustClaim(provider, tokenIn, from, dustClaimV3, amountWei)
+
+        if (okAllowance) {
+          receipts.push({
+            flowId,
+            type: 'approval',
+            ok: true,
+            skipped: true,
+            reason: 'allowance already sufficient',
+            chainId: planChainId,
+            tokenIn,
+            spender: dustClaimV3,
+            amount: String(amountWei)
+          })
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
           safeCall(onProgress, { flowId, stage: 'approval', status: 'skipped', index: i, total: approvals.length, token: tokenIn })
           continue
         }
@@ -522,7 +581,6 @@ export async function executeApprovalsWithFlow(preparedCtx, opts = {}) {
           token: tokenIn,
           spender: dustClaimV3,
           amountWei: approveAmount,
-          provider,
           flowId,
           waitConfirms,
           waitTimeoutMs,
@@ -641,9 +699,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
             const bumped = (BigInt(est) * 140n) / 100n
             if (bumped > gasLimit) gasLimit = bumped
           }
-        } catch {
-          // keep fallback
-        }
+        } catch {}
 
         safeCall(onProgress, { flowId, stage: 'swap', status: 'prompt', index: i, total: prepared.length, tokenIn, dustClaimV3 })
 
@@ -745,7 +801,15 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}
       const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
       if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
 
+<<<<<<< HEAD
       const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
+=======
+      const swaps = await executeSwapsWithFlow(preparedCtx, {
+        onProgress,
+        waitConfirms: opts?.waitConfirms,
+        waitTimeoutMs: opts?.waitTimeoutMs
+      })
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
       return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
     }
 
@@ -772,7 +836,16 @@ export async function executeChainPlanWithFlow(chainPlan, fromAddress, opts = {}
     const approvalsOk = (approvals?.receipts || []).every((r) => r.ok !== false)
     if (!approvalsOk) return { flowId: preparedCtx.flowId, receipts: approvals?.receipts || [], preparedCtx, nextAction: 'swap' }
 
+<<<<<<< HEAD
     const swaps = await executeSwapsWithFlow(preparedCtx, { onProgress, waitConfirms: opts?.waitConfirms, waitTimeoutMs: opts?.waitTimeoutMs })
+=======
+    const swaps = await executeSwapsWithFlow(preparedCtx, {
+      onProgress,
+      waitConfirms: opts?.waitConfirms,
+      waitTimeoutMs: opts?.waitTimeoutMs
+    })
+
+>>>>>>> a3da296ab (Refactor 0x-quote, claimExecutor, ClaimScreen)
     return { flowId: preparedCtx.flowId, receipts: [...(approvals?.receipts || []), ...(swaps?.receipts || [])], preparedCtx, nextAction: null }
   })
 }
