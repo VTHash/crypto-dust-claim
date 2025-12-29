@@ -1,3 +1,4 @@
+// src/services/txSend.js
 import { txStore } from './txStore'
 
 const uid = (prefix = 'tx') => `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
@@ -12,19 +13,23 @@ function cleanErr(e) {
   return { code, msg }
 }
 
+function toHexQty(v) {
+  const bi = typeof v === 'bigint' ? v : BigInt(v ?? 0)
+  if (bi === 0n) return '0x0'
+  return '0x' + bi.toString(16)
+}
+
 function toRpcTx(req) {
-  // ethers v6 TransactionRequest -> JSON-RPC tx object
   const out = {}
   if (req.from) out.from = req.from
   if (req.to) out.to = req.to
   if (req.data) out.data = req.data
-  if (req.value != null) out.value = '0x' + BigInt(req.value).toString(16)
-  if (req.gasLimit != null) out.gas = '0x' + BigInt(req.gasLimit).toString(16)
-  if (req.maxFeePerGas != null) out.maxFeePerGas = '0x' + BigInt(req.maxFeePerGas).toString(16)
-  if (req.maxPriorityFeePerGas != null)
-    out.maxPriorityFeePerGas = '0x' + BigInt(req.maxPriorityFeePerGas).toString(16)
-  if (req.gasPrice != null) out.gasPrice = '0x' + BigInt(req.gasPrice).toString(16)
-  if (req.nonce != null) out.nonce = '0x' + BigInt(req.nonce).toString(16)
+  if (req.value != null) out.value = toHexQty(req.value)
+  if (req.gasLimit != null) out.gas = toHexQty(req.gasLimit)
+  if (req.maxFeePerGas != null) out.maxFeePerGas = toHexQty(req.maxFeePerGas)
+  if (req.maxPriorityFeePerGas != null) out.maxPriorityFeePerGas = toHexQty(req.maxPriorityFeePerGas)
+  if (req.gasPrice != null) out.gasPrice = toHexQty(req.gasPrice)
+  if (req.nonce != null) out.nonce = toHexQty(req.nonce)
   return out
 }
 
@@ -32,12 +37,11 @@ export async function sendTransactionReliable({
   provider, // ethers.BrowserProvider
   chainId,
   from,
-  kind = 'unknown', // 'approval' | 'swap' | 'unknown'
+  kind = 'unknown',
   request, // ethers TransactionRequest
   tokenAddress,
   spender,
   amount,
-  // NEW: optional UI metadata
   flowId = null,
   title = null,
   step = null,
@@ -62,19 +66,21 @@ export async function sendTransactionReliable({
     value: request?.value?.toString?.() ?? request?.value,
     tokenAddress,
     spender,
-    amount
+    amount,
+    txHash: null,
+    hash: null
   })
 
-  // Make sure wallet is permissioned (MetaMask Mobile sometimes needs this right before send)
+  // Ensure wallet permission (MetaMask Mobile sometimes needs this right before send)
   try {
     await provider.send('eth_requestAccounts', [])
   } catch {
-    // ignore: some WalletConnect providers do not support it here
+    // ignore
   }
 
   const signer = await provider.getSigner()
 
-  // Capture nonce early (useful for reconciliation / replacement detection)
+  // Capture nonce early (optional)
   try {
     const nonce = await signer.getNonce()
     txStore.patch(id, { nonce })
@@ -82,7 +88,7 @@ export async function sendTransactionReliable({
     // ignore
   }
 
-  // Robust gas handling (MetaMask mobile sometimes fails estimation)
+  // Robust gas handling
   let req = { ...request }
   try {
     if (!req.gasLimit) {
@@ -99,6 +105,7 @@ export async function sendTransactionReliable({
 
     txStore.patch(id, {
       status: 'submitted',
+      txHash: resp.hash,
       hash: resp.hash,
       nonce: resp.nonce,
       to: resp.to?.toString?.() ?? resp.to,
@@ -115,10 +122,10 @@ export async function sendTransactionReliable({
 
     txStore.patch(id, {
       status: receipt.status === 1 ? 'confirmed' : 'failed',
-      blockNumber: receipt.blockNumber,
-      transactionIndex: receipt.index,
-      gasUsed: receipt.gasUsed?.toString?.(),
-      effectiveGasPrice: receipt.effectiveGasPrice?.toString?.(),
+      blockNumber: receipt.blockNumber ?? null,
+      transactionIndex: receipt.transactionIndex ?? null,
+      gasUsed: receipt.gasUsed?.toString?.() ?? null,
+      effectiveGasPrice: receipt.effectiveGasPrice?.toString?.() ?? null,
       confirmations: waitConfirms
     })
 
@@ -130,19 +137,16 @@ export async function sendTransactionReliable({
       status: receipt.status === 1 ? 'confirmed' : 'failed'
     }
   } catch (e1) {
-    // ---- fallback path: direct eth_sendTransaction (MetaMask Mobile edge-cases) ----
+    // ---- fallback path: direct eth_sendTransaction ----
     const { code, msg } = cleanErr(e1)
     txStore.patch(id, { lastError: `sendTransaction failed: ${msg}${code ? ` (code ${code})` : ''}` })
 
-    // Only attempt fallback when it looks like "pre-broadcast" failure
-    // (i.e., no tx hash was ever returned)
     try {
       const rpcTx = toRpcTx({ ...req, from })
       const hash = await provider.send('eth_sendTransaction', [rpcTx])
-
       if (!hash) throw new Error('eth_sendTransaction returned no hash')
 
-      txStore.patch(id, { status: 'submitted', hash })
+      txStore.patch(id, { status: 'submitted', txHash: hash, hash })
 
       const receipt =
         (await provider.waitForTransaction(hash, waitConfirms, waitTimeoutMs).catch(() => null)) ||
@@ -154,10 +158,10 @@ export async function sendTransactionReliable({
 
       txStore.patch(id, {
         status: receipt.status === 1 ? 'confirmed' : 'failed',
-        blockNumber: receipt.blockNumber,
-        transactionIndex: receipt.index,
-        gasUsed: receipt.gasUsed?.toString?.(),
-        effectiveGasPrice: receipt.effectiveGasPrice?.toString?.(),
+        blockNumber: receipt.blockNumber ?? null,
+        transactionIndex: receipt.transactionIndex ?? null,
+        gasUsed: receipt.gasUsed?.toString?.() ?? null,
+        effectiveGasPrice: receipt.effectiveGasPrice?.toString?.() ?? null,
         confirmations: waitConfirms
       })
 

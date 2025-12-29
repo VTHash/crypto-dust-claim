@@ -13,6 +13,10 @@ const hasStorage = () => {
 
 const now = () => Date.now()
 
+// ---------- id helpers ----------
+const genId = (prefix = 'tx') =>
+  `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
+
 // ---------- BigInt-safe JSON ----------
 function safeStringify(value) {
   return JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
@@ -28,7 +32,7 @@ function safeParse(raw) {
 }
 
 // ---------- in-memory fallback (if localStorage unavailable) ----------
-let memory = [] // used only when localStorage can't be used
+let memory = []
 function readFromMemory() {
   return Array.isArray(memory) ? memory : []
 }
@@ -45,7 +49,6 @@ function readAll() {
     if (!raw) return []
     return safeParse(raw)
   } catch {
-    // fallback to memory if localStorage breaks
     return readFromMemory()
   }
 }
@@ -57,7 +60,6 @@ function writeAll(txs) {
   try {
     window.localStorage.setItem(STORAGE_KEY, safeStringify(arr))
   } catch {
-    // If storage quota / blocked, fall back to memory
     return writeToMemory(arr)
   }
 
@@ -73,7 +75,7 @@ function notify(txs = null) {
     try {
       fn(all)
     } catch {
-      // listener errors must never break app
+      // never break app
     }
   }
 }
@@ -83,14 +85,12 @@ function subscribe(cb) {
 
   listeners.push(cb)
 
-  // immediate emit (so UI paints)
   try {
     cb(readAll())
   } catch {
     // ignore
   }
 
-  // cross-tab updates
   const onStorage = (e) => {
     try {
       if (!e) return
@@ -121,22 +121,40 @@ function subscribe(cb) {
   }
 }
 
-// ---------- CRUD ----------
-function upsert(tx) {
-  if (!tx || !tx.id) return
+// ---------- normalization ----------
+function normalizeTx(tx) {
+  const t = { ...(tx || {}) }
 
-  const all = readAll()
-  const idx = all.findIndex((t) => t?.id === tx.id)
+  // normalize hash naming (support both)
+  if (t.txHash && !t.hash) t.hash = t.txHash
+  if (t.hash && !t.txHash) t.txHash = t.hash
 
-  const nextTx = {
-    ...tx,
-    updatedAt: tx.updatedAt ?? now()
+  // ensure ids exist
+  if (!t.id) {
+    const prefix = t.kind || 'tx'
+    t.id = genId(prefix)
   }
 
-  if (idx >= 0) all[idx] = nextTx
-  else all.unshift(nextTx)
+  if (t.createdAt == null) t.createdAt = now()
+  if (t.updatedAt == null) t.updatedAt = now()
+
+  return t
+}
+
+// ---------- CRUD ----------
+function upsert(tx) {
+  const nextTx = normalizeTx(tx)
+  const all = readAll()
+
+  const idx = all.findIndex((t) => t?.id === nextTx.id)
+  if (idx >= 0) {
+    all[idx] = { ...all[idx], ...nextTx, updatedAt: now() }
+  } else {
+    all.unshift({ ...nextTx, updatedAt: now() })
+  }
 
   writeAll(all)
+  return nextTx.id
 }
 
 function patch(id, partial) {
@@ -146,13 +164,13 @@ function patch(id, partial) {
   const idx = all.findIndex((t) => t?.id === id)
   if (idx < 0) return
 
-  const updated = {
-    ...all[idx],
-    ...partial,
-    updatedAt: now()
-  }
+  const merged = { ...all[idx], ...(partial || {}) }
 
-  all[idx] = updated
+  // normalize hash fields on patch too
+  if (merged.txHash && !merged.hash) merged.hash = merged.txHash
+  if (merged.hash && !merged.txHash) merged.txHash = merged.hash
+
+  all[idx] = { ...merged, updatedAt: now() }
   writeAll(all)
 }
 
@@ -181,8 +199,6 @@ function getById(id) {
 
 function list(filters = {}) {
   let all = readAll()
-
-  // defensive: if somehow corrupted into non-array, recover
   if (!Array.isArray(all)) all = []
 
   if (filters.chainId != null) {
@@ -225,11 +241,7 @@ export const txStore = {
   clear,
   getById,
   list,
-
-  // ✅ required by your useTxStore hook
   subscribe,
-
-  // optional (handy for manual UI refresh)
   notify
 }
 

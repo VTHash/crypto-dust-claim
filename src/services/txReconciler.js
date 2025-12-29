@@ -1,34 +1,46 @@
 // src/services/txReconciler.js
 import { txStore } from './txStore'
 
-const isPendingStatus = (s) => s === 'created' || s === 'submitted'
+const isPendingStatus = (s) => s === 'created' || s === 'submitted' || s === 'prompting'
 
 const getHash = (t) => t?.txHash || t?.hash || null
 
 function normalizeReceipt(receipt) {
   return {
-    blockNumber: receipt.blockNumber ?? null,
-    transactionIndex: receipt.transactionIndex ?? null,
-    gasUsed: receipt.gasUsed?.toString?.() ?? null,
-    effectiveGasPrice: receipt.effectiveGasPrice?.toString?.() ?? null,
-    status: receipt.status === 1 ? 'confirmed' : 'failed'
+    blockNumber: receipt?.blockNumber ?? null,
+    transactionIndex: receipt?.transactionIndex ?? null,
+    gasUsed: receipt?.gasUsed?.toString?.() ?? null,
+    effectiveGasPrice: receipt?.effectiveGasPrice?.toString?.() ?? null,
+    status: receipt?.status === 1 ? 'confirmed' : 'failed'
   }
 }
 
 /**
- * Replacement/drop detection is *best-effort*.
- * We do NOT assume nonce exists in store.
+ * Best-effort replacement/drop detection.
+ * - Never declare dropped immediately (RPC indexing delays on mobile are common)
+ * - Prefer "replaced" only when we have a nonce and the account nonce has advanced
  */
-async function detectDrop(provider, txHash) {
+async function detectReplacementOrDrop(provider, tx) {
+  const txHash = getHash(tx)
+  if (!txHash) return null
+
   const [onChainTx, receipt] = await Promise.all([
     provider.getTransaction(txHash).catch(() => null),
     provider.getTransactionReceipt(txHash).catch(() => null)
   ])
 
   if (receipt) return null
-  if (onChainTx) return null // still visible (mempool or provider knows it)
+  if (onChainTx) return null // still visible somewhere (mempool or provider cache)
 
-  // If provider cannot see tx + no receipt, treat as dropped (do not guess "replaced")
+  // If we have a nonce, we can infer replacement when latest nonce moved past it.
+  const nonce = typeof tx?.nonce === 'number' ? tx.nonce : null
+  const from = tx?.from
+
+  if (nonce != null && from) {
+    const latestCount = await provider.getTransactionCount(from, 'latest').catch(() => null)
+    if (latestCount != null && latestCount > nonce) return 'replaced'
+  }
+
   return 'dropped'
 }
 
@@ -81,10 +93,14 @@ export class TxReconciler {
     const maxAgeMs = this.opts.maxAgeMs ?? 24 * 60 * 60 * 1000
     const cutoff = Date.now() - maxAgeMs
 
+    // ✅ Grace period before declaring "dropped"
+    // MetaMask Mobile + some RPCs won't show a tx immediately.
+    const graceMs = this.opts.graceMs ?? 90_000
+
     const pending = txStore
       .readAll()
-      .filter((t) => isPendingStatus(t.status))
-      .filter((t) => (t.createdAt ?? 0) >= cutoff)
+      .filter((t) => isPendingStatus(t?.status))
+      .filter((t) => (t?.createdAt ?? 0) >= cutoff)
       .filter((t) => !!getHash(t))
 
     if (!pending.length) return
@@ -93,21 +109,38 @@ export class TxReconciler {
       const txHash = getHash(tx)
       if (!txHash) continue
 
+      // 1) Receipt check
       const receipt = await provider.getTransactionReceipt(txHash).catch(() => null)
-
       if (receipt) {
         const normalized = normalizeReceipt(receipt)
         txStore.patch(tx.id, {
           ...normalized,
           confirmations: 1,
-          txHash // ensure it’s persisted in case old record used "hash"
+          txHash,
+          hash: txHash // keep both for compatibility
         })
         continue
       }
 
-      const drop = await detectDrop(provider, txHash)
-      if (drop === 'dropped') {
-        txStore.patch(tx.id, { status: 'dropped', txHash })
+      // 2) Do not mark dropped/replaced too early
+      const age = Date.now() - (tx?.createdAt ?? Date.now())
+      if (age < graceMs) continue
+
+      // 3) Attempt replacement/drop inference
+      const result = await detectReplacementOrDrop(provider, tx)
+
+      if (result === 'replaced') {
+        txStore.patch(tx.id, {
+          status: 'replaced',
+          txHash,
+          hash: txHash
+        })
+      } else if (result === 'dropped') {
+        txStore.patch(tx.id, {
+          status: 'dropped',
+          txHash,
+          hash: txHash
+        })
       }
     }
   }
