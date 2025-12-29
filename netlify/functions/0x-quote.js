@@ -1,11 +1,18 @@
 // netlify/functions/0x-quote.js
 // Browser -> Netlify: POST only (CORS + hide API key)
-// Netlify -> 0x: GET only (0x /swap/v1/quote is GET with query params)
+// Netlify -> 0x: GET with query params
 //
-// IMPORTANT FOR DUSTCLAIM V3 FLOW:
-// - DustClaimV3 pulls tokens from the user, then approves spender, then does spender.call(calldata)
-// - Therefore we MUST use standard /swap/v1/quote (NOT allowance-holder)
-// - We also REQUIRE allowanceTarget === to, because we will call the spender directly.
+// 0x v2 requirement:
+// - Must send header: 0x-version: v2
+// - For Swap API v2 endpoints, chainId is required as a query param
+// Netlify -> 0x: GET only
+//
+// UPDATED FOR 0x API v2 (Swap API v2)
+// Uses: /swap/allowance-holder/quote
+//
+// IMPORTANT FOR DUSTCLAIM V3 FLOW (allowance-holder route):
+// - DustClaimV3 pulls tokens from the user, then approves routerSpender, then does routerSpender.call(calldata)
+// - Therefore we REQUIRE spender === tx.to because DustClaimV3 will call spender directly.
 
 const ZEROX_HOST_BY_CHAIN = {
   1: "https://api.0x.org",
