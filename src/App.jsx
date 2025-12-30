@@ -14,15 +14,15 @@ import ClaimScreen from './pages/ClaimScreen'
 import GlobalStatsWidget from './components/GlobalStatsWidget'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import TipPill from './components/TipPill'
+
 // Legal pages
 import PrivacyPolicy from "./legal/PrivacyPolicy";
 import TermsOfService from "./legal/TermsOfService";
 import CookiePolicy from "./legal/CookiePolicy";
-import LegalDisclaimer from "./legal/LegalDisclaimers";
+import LegalDisclaimers from './legal/LegalDisclaimers'
 
 // Styles
 import './App.css'
-import LegalDisclaimers from './legal/LegalDisclaimers'
 
 // Wrapper to read :address and pass it to the DustClaimAddressPage
 const DustClaimAddressRoute = () => {
@@ -36,19 +36,37 @@ const DustClaimAddressRoute = () => {
   return <DustClaimAddressPage address={targetAddress} />
 }
 
+// ===== NEW: MetaMask deep link CTA (top-of-app button) =====
+const METAMASK_DEEPLINK = 'https://metamask.app.link/dapp/dustclaim.eth.limo'
+
+const DailyDustCta = () => (
+  <div className="daily-dust-cta">
+    <a className="daily-dust-btn" href={METAMASK_DEEPLINK}>
+      Claim your daily DUST
+    </a>
+    <div className="daily-dust-sub">
+      Open app in MetaMask for smooth transfer
+    </div>
+  </div>
+)
+
 const App = () => {
   const { isConnected } = useWallet()
 
   // Count a "view" whenever the app loads
-  useEffect(() => { fetch('/.netlify/functions/stats-view-supabase').catch(() => { 
-    // ignore failures so the app never breaks
-  })
+  useEffect(() => {
+    fetch('/.netlify/functions/stats-view-supabase').catch(() => {
+      // ignore failures so the app never breaks
+    })
   }, [])
-  
+
   return (
     <div className="app">
       {/* Always show navbar so ThemeToggle & wallet connect are available */}
       <Navbar />
+
+      {/* NEW: top CTA button (perfect mobile fit) */}
+      <DailyDustCta />
 
       <main className="main-content">
         <GlobalStatsWidget /> {/* <-- stats bar always visible */}
@@ -59,8 +77,10 @@ const App = () => {
             element={isConnected ? <Dashboard /> : <WalletScreen />}
           />
 
-<Route path="/AnalyticsDashboard"
-element={<AnalyticsDashboard />} />
+          <Route
+            path="/AnalyticsDashboard"
+            element={<AnalyticsDashboard />}
+          />
 
           {/* Protected pages (require wallet connection) */}
           <Route
@@ -81,14 +101,17 @@ element={<AnalyticsDashboard />} />
           {/* NEW: DustClaim address view – ALWAYS accessible for Etherscan card */}
           <Route path="/address/:address" element={<DustClaimAddressRoute />} />
 
+          {/* Legal pages */}
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/cookies" element={<CookiePolicy />} />
+          <Route path="/legal" element={<LegalDisclaimers />} />
+
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
-           <Route path="/privacy" element={<PrivacyPolicy />} />
-        <Route path="/terms" element={<TermsOfService />} />
-        <Route path="/cookies" element={<CookiePolicy />} />
-        <Route path="/legal" element={<LegalDisclaimers />} />        
         </Routes>
       </main>
+
       <TipPill />
     </div>
   )
