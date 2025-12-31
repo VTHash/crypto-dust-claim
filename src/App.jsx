@@ -7,6 +7,7 @@ import Navbar from './components/Navbar'
 import DustClaimAddressPage from './components/DustClaimAddressPage'
 
 // Pages
+import EmissionsLiquidity from './pages/EmissionsLiquidity'
 import WalletScreen from './pages/WalletScreen'
 import Dashboard from './pages/Dashboard'
 import DustScanner from './pages/DustScanner'
@@ -98,6 +99,8 @@ const App = () => {
             element={isConnected ? <ClaimScreen /> : <Navigate to="/" replace />}
           />
 
+          <Route path="/emissions" element={<EmissionsLiquidity />} />
+
           {/* NEW: DustClaim address view – ALWAYS accessible for Etherscan card */}
           <Route path="/address/:address" element={<DustClaimAddressRoute />} />
 
@@ -106,7 +109,7 @@ const App = () => {
           <Route path="/terms" element={<TermsOfService />} />
           <Route path="/cookies" element={<CookiePolicy />} />
           <Route path="/legal" element={<LegalDisclaimers />} />
-
+          <Route path="/emissions" element={<EmissionsLiquidity />} />
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
