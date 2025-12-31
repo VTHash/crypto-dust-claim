@@ -191,6 +191,35 @@ async function ensureHydratedForSend() {
   return true
 }
 
+// ---- WalletConnect: robust account hydration (TrustWallet, Coinbase, etc.) ----
+async function requestAccountsBestEffort(provider) {
+  if (!provider?.request) return []
+  // Many WC providers do NOT populate eth_accounts until eth_requestAccounts is called
+  try {
+    const a = await provider.request({ method: 'eth_requestAccounts' })
+    if (Array.isArray(a) && a.length) return a
+  } catch {
+    // ignore, fall back to eth_accounts
+  }
+  try {
+    const a2 = await provider.request({ method: 'eth_accounts' })
+    if (Array.isArray(a2) && a2.length) return a2
+  } catch {
+    // ignore
+  }
+  return []
+}
+
+async function waitFor(fn, predicate, timeoutMs = 30000, intervalMs = 250) {
+  const start = Date.now()
+  while (true) {
+    const val = await fn().catch(() => null)
+    if (predicate(val)) return val
+    if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
+    await sleep(intervalMs)
+  }
+}
+
 // ---- reconciler wiring ----
 async function providerFactory() {
   if (!eip1193) await ensureProvider()
@@ -266,11 +295,12 @@ const walletService = {
     return !!(accs && accs.length)
   },
 
+  // IMPORTANT: avoid "undefined.catch" in UI code
   openModal() {
-    return appKit.open?.()
+    return Promise.resolve(appKit.open?.())
   },
   closeModal() {
-    return appKit.close?.()
+    return Promise.resolve(appKit.close?.())
   },
 
   async init() {
@@ -295,7 +325,15 @@ const walletService = {
       await ensureProvider()
       if (!eip1193) return null
 
-      const accs = await ensureAccounts()
+      // If session exists but accounts are empty, try to hydrate once (WC wallets)
+      let accs = await ensureAccounts()
+      if (!accs?.length) {
+        const hydrated = await requestAccountsBestEffort(eip1193)
+        if (hydrated?.length) {
+          accounts = hydrated
+          accs = hydrated
+        }
+      }
       if (!accs?.length) return null
 
       chainId = await eip1193.request?.({ method: 'eth_chainId' }).catch(() => null)
@@ -319,6 +357,7 @@ const walletService = {
     try {
       const injected = pickInjectedProvider()
 
+      // ---- Injected MetaMask path (unchanged behavior) ----
       if (isInjectedMetaMask(injected)) {
         eip1193 = injected
         attachListeners()
@@ -339,28 +378,20 @@ const walletService = {
         }
       }
 
+      // ---- WalletConnect / Reown modal path (FIXED) ----
       await appKit.open?.()
-
-      const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
-        const start = Date.now()
-        while (true) {
-          const val = await fn().catch(() => null)
-          if (predicate(val)) return val
-          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
-          await sleep(intervalMs)
-        }
-      }
 
       eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
       attachListeners()
 
+      // Key fix: request accounts (not just eth_accounts) so TrustWallet etc. populates
       const reqAccs = await waitFor(
-        () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),
+        async () => requestAccountsBestEffort(eip1193),
         (arr) => Array.isArray(arr) && arr.length > 0
       )
 
       accounts = reqAccs
-      chainId = await eip1193.request({ method: 'eth_chainId' })
+      chainId = await eip1193.request({ method: 'eth_chainId' }).catch(() => null)
 
       await ensureEthers()
       startTxReconciler()
