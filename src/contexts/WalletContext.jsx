@@ -132,8 +132,14 @@ export const WalletProvider = ({ children }) => {
 
   // ---------------- Actions ----------------
 
-  // Single-flight connect prevents duplicate prompts/modals
-  const connect = async () => {
+  /**
+   * Single-flight connect prevents duplicate prompts/modals
+   *
+   * NEW (safe): connect(options?)
+   * - options is forwarded to walletService.connect(options)
+   * - keeps backwards compatibility: connect() behaves exactly the same
+   */
+  const connect = async (options) => {
     if (connectInFlightRef.current) return connectInFlightRef.current
 
     const p = (async () => {
@@ -144,7 +150,9 @@ export const WalletProvider = ({ children }) => {
 
       try {
         setPending('connect', 'Approve the connection request in your wallet.')
-        const res = await walletService.connect()
+
+        // ✅ forward connect preferences (modal/injected/auto) without breaking existing calls
+        const res = await walletService.connect(options)
 
         if (res?.success) {
           // Refresh from provider to be authoritative (addresses/chain may differ)
