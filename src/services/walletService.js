@@ -356,7 +356,7 @@ const walletService = {
       await asPromise(appKit.open?.()).catch(() => undefined)
 
       // SAFE waitFor: never calls .catch on undefined
-      const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
+      const waitFor = async (fn, predicate, timeoutMs = 90000, intervalMs = 250) => {
         const start = Date.now()
         while (true) {
           const val = await asPromise(fn()).catch(() => null)
