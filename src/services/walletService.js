@@ -68,6 +68,9 @@ const toBigIntSafe = (v) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+// IMPORTANT: converts "maybe promise / maybe undefined" into a real promise
+const asPromise = (v) => Promise.resolve(v)
+
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
@@ -130,7 +133,7 @@ async function ensureProvider() {
   }
 
   // Otherwise AppKit provider (WalletConnect)
-  const maybeProvider = await appKit.getProvider?.()
+  const maybeProvider = await asPromise(appKit.getProvider?.()).catch(() => null)
   if (maybeProvider) {
     eip1193 = maybeProvider
     attachListeners()
@@ -175,7 +178,7 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
-// MetaMask Mobile hydration
+// MetaMask Mobile hydration (kept as-is; safe)
 async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
@@ -281,17 +284,16 @@ const walletService = {
       // ignore
     }
 
-    // ✅ FIX: never call `.catch` on an undefined value
-    const safeReconcile = () => {
-      try {
-        const p = reconciler?.reconcileOnce?.()
-        if (p && typeof p.catch === 'function') p.catch(() => {})
-      } catch {
-        // swallow
-      }
-    }
-
     if (typeof window !== 'undefined') {
+      const safeReconcile = () => {
+        try {
+          const p = reconciler?.reconcileOnce?.()
+          if (p && typeof p.catch === 'function') p.catch(() => {})
+        } catch {
+          // ignore
+        }
+      }
+
       window.addEventListener('focus', safeReconcile)
       window.addEventListener('pageshow', safeReconcile)
     }
@@ -308,7 +310,7 @@ const walletService = {
       const accs = await ensureAccounts()
       if (!accs?.length) return null
 
-      chainId = await eip1193.request?.({ method: 'eth_chainId' }).catch(() => null)
+      chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
       await ensureEthers()
       startTxReconciler()
 
@@ -329,6 +331,7 @@ const walletService = {
     try {
       const injected = pickInjectedProvider()
 
+      // Prefer MetaMask injection if present (unchanged)
       if (isInjectedMetaMask(injected)) {
         eip1193 = injected
         attachListeners()
@@ -349,12 +352,14 @@ const walletService = {
         }
       }
 
-      await appKit.open?.()
+      // Otherwise open AppKit modal (WalletConnect)
+      await asPromise(appKit.open?.()).catch(() => undefined)
 
+      // SAFE waitFor: never calls .catch on undefined
       const waitFor = async (fn, predicate, timeoutMs = 30000, intervalMs = 250) => {
         const start = Date.now()
         while (true) {
-          const val = await fn().catch(() => null)
+          const val = await asPromise(fn()).catch(() => null)
           if (predicate(val)) return val
           if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
           await sleep(intervalMs)
@@ -365,12 +370,12 @@ const walletService = {
       attachListeners()
 
       const reqAccs = await waitFor(
-        () => eip1193.request({ method: 'eth_accounts' }).catch(() => []),
+        () => asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => []),
         (arr) => Array.isArray(arr) && arr.length > 0
       )
 
       accounts = reqAccs
-      chainId = await eip1193.request({ method: 'eth_chainId' })
+      chainId = await eip1193.request?.({ method: 'eth_chainId' })
 
       await ensureEthers()
       startTxReconciler()
@@ -384,7 +389,7 @@ const walletService = {
 
   async disconnect() {
     try {
-      await appKit.disconnect?.()
+      await asPromise(appKit.disconnect?.()).catch(() => undefined)
     } finally {
       stopTxReconciler()
       handleDisconnect()
