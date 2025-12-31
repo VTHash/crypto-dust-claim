@@ -14,14 +14,8 @@ export const useWallet = () => {
  * WalletProvider goals:
  * 1) Never double-open MetaMask/AppKit prompts (single-flight connect).
  * 2) Never send concurrent EIP-1193 requests that trigger -32002 on mobile (tx queue).
- * 3) Provide "pendingRequest" state to drive an overlay: user must return to wallet/dApp.
+ * 3) Provide "pendingRequest" state to drive an overlay: user must return to MetaMask.
  * 4) Keep React state authoritative (refresh from provider after actions).
- *
- * WalletConnect mobile reality:
- * - User approves in the wallet app
- * - Wallet often does NOT auto-redirect back to the dApp tab
- * - Provider/accounts can appear only AFTER user returns to the browser tab
- * => We must "post-connect poll" + refresh on focus/pageshow/visibilitychange.
  */
 export const WalletProvider = ({ children }) => {
   const [address, setAddress] = useState(null)
@@ -56,14 +50,12 @@ export const WalletProvider = ({ children }) => {
       const addr = await walletService.getAddress?.()
       const cid = await walletService.getChainId?.()
       const accs = (await walletService.getAccounts?.()) || (addr ? [addr] : [])
-
       safeSet(() => {
         setAccounts(accs || [])
         setAddress(addr || accs?.[0] || null)
         setChainId(cid || null)
         setIsConnected(!!(addr || accs?.[0]))
       })
-
       return { address: addr || accs?.[0] || null, chainId: cid || null, accounts: accs || [] }
     } catch {
       return null
@@ -74,11 +66,59 @@ export const WalletProvider = ({ children }) => {
   const setPending = (type, message) =>
     safeSet(() => setPendingRequest({ type, message, startedAt: Date.now() }))
 
-  // 1) INIT wallet service once (important for AppKit/WC session behavior + reconciler)
+  // ===== NEW: initialize wallet service once (AppKit/WC session + reconciler) =====
   useEffect(() => {
     walletService.init?.().catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ===== NEW: refresh when user returns to the tab (critical for WC mobile wallets) =====
+  useEffect(() => {
+    const onReturn = () => {
+      refreshFromProvider().catch(() => {})
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onReturn)
+      window.addEventListener('pageshow', onReturn)
+    }
+
+    const onVis = () => {
+      if (document.visibilityState === 'visible') onReturn()
+    }
+    document.addEventListener('visibilitychange', onVis)
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', onReturn)
+        window.removeEventListener('pageshow', onReturn)
+      }
+      document.removeEventListener('visibilitychange', onVis)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ===== NEW: post-connect settle for WalletConnect =====
+  // Some wallets show "connected" but the dApp only sees accounts AFTER you return to this tab.
+  const waitForConnectionHydration = async (timeoutMs = 180000, intervalMs = 750) => {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const ok = await walletService.isConnected?.().catch(() => false)
+        if (ok) {
+          const snap = await refreshFromProvider()
+          if (snap?.address || snap?.accounts?.length) return { success: true, ...snap }
+        }
+      } catch {
+        // ignore
+      }
+      await new Promise((r) => setTimeout(r, intervalMs))
+    }
+    return {
+      success: false,
+      error: 'Wallet connected in wallet app. Return to this browser tab to finish connecting.'
+    }
+  }
 
   // Subscribe to wallet events from walletService (authoritative)
   useEffect(() => {
@@ -107,34 +147,15 @@ export const WalletProvider = ({ children }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 2) Refresh aggressively when the user returns to the tab (WalletConnect mobile)
-  useEffect(() => {
-    const onReturn = () => {
-      // This is the moment WC wallets finally hydrate the provider/accounts in the browser tab.
-      refreshFromProvider().catch(() => {})
-    }
-
-    window.addEventListener('focus', onReturn)
-    window.addEventListener('pageshow', onReturn)
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') onReturn()
-    })
-
-    return () => {
-      window.removeEventListener('focus', onReturn)
-      window.removeEventListener('pageshow', onReturn)
-      // visibilitychange listener is anonymous; ok to leave (or refactor to named if you prefer)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Restore a previous session (mobile often needs a short delay to hydrate)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
+        // Attempt restore
         const s = await walletService.restoreSession?.()
         if (cancelled || !s) {
+          // Even if restoreSession returns null, try a passive refresh (eth_accounts can work)
           await refreshFromProvider()
           return
         }
@@ -146,39 +167,22 @@ export const WalletProvider = ({ children }) => {
           setIsConnected(!!(s.accounts?.length))
         })
 
+        // Post-hydration refresh (MetaMask mobile can lag)
         setTimeout(() => {
           if (!cancelled) refreshFromProvider()
-        }, 800)
-      } catch {
+        }, 600)
+      } catch (e) {
+        // non-fatal
         setTimeout(() => {
           if (!cancelled) refreshFromProvider()
-        }, 800)
+        }, 600)
       }
     })()
-
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // 3) WalletConnect “post-connect poll”
-  // Why: some wallets show “connected” but the dApp only sees accounts after the user returns to the browser tab.
-  const waitUntilConnected = async ({
-    timeoutMs = 180000, // 3 minutes
-    intervalMs = 750
-  } = {}) => {
-    const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      const ok = await walletService.isConnected?.().catch(() => false)
-      if (ok) {
-        const snap = await refreshFromProvider()
-        if (snap?.address) return { success: true, ...snap }
-      }
-      await new Promise((r) => setTimeout(r, intervalMs))
-    }
-    return { success: false, error: 'Wallet connection pending — return to this tab to finish.' }
-  }
 
   // ---------------- Actions ----------------
 
@@ -195,34 +199,34 @@ export const WalletProvider = ({ children }) => {
       try {
         setPending(
           'connect',
-          'Approve the connection in your wallet. If you used WalletConnect, return to this browser tab after approving.'
+          'Approve the connection request in your wallet. If using WalletConnect, return to this tab after approving.'
         )
 
-        // Open modal / connect flow
         const res = await walletService.connect()
 
-        // MetaMask injected usually resolves immediately; WC wallets often need “return to tab”.
-        // So we ALWAYS do a post-connect poll.
-        const settled = await waitUntilConnected({ timeoutMs: 180000, intervalMs: 750 })
-
-        if (settled?.success) {
+        // If connect succeeded, still wait for WC hydration (accounts can appear late)
+        if (res?.success) {
+          const settled = await waitForConnectionHydration(180000, 750)
           clearPending()
-          safeSet(() => setLoading(false))
-          return { success: true, ...settled }
+
+          if (settled?.success) {
+            safeSet(() => setLoading(false))
+            return { success: true, ...settled }
+          }
+
+          safeSet(() => {
+            setError(settled?.error || 'Connect pending — return to this tab to complete.')
+            setLoading(false)
+          })
+          return { success: false, error: settled?.error || 'Connect pending' }
         }
 
-        // If walletService.connect returned success but accounts didn't hydrate yet,
-        // we should NOT hard-fail immediately; keep a helpful message.
         clearPending()
         safeSet(() => {
+          setError(res?.error || 'Connect failed')
           setLoading(false)
-          setError(
-            res?.error ||
-              settled?.error ||
-              'Wallet connected in your wallet app, but not yet detected here. Return to this tab and wait a moment.'
-          )
         })
-        return { success: false, error: res?.error || settled?.error || 'Connect pending' }
+        return res
       } catch (err) {
         clearPending()
         safeSet(() => {
@@ -269,6 +273,7 @@ export const WalletProvider = ({ children }) => {
         return res
       }
 
+      // MetaMask mobile can report chainChanged late; force refresh
       await refreshFromProvider()
       clearPending()
       return res
@@ -308,13 +313,17 @@ export const WalletProvider = ({ children }) => {
       safeSet(() => setError(null))
 
       try {
+        // Ensure connected (but do not double prompt)
         if (!(await walletService.isConnected?.())) {
           const c = await connect()
           if (!c?.success) return c
         }
 
         setPending('transaction', 'Confirm the transaction in your wallet.')
+
         const res = await walletService.sendTransaction(tx)
+
+        // IMPORTANT: clear pending even if failed, so UI unblocks
         clearPending()
 
         if (!res?.success) {
@@ -322,7 +331,9 @@ export const WalletProvider = ({ children }) => {
           return res
         }
 
+        // After broadcast, force refresh (addresses/chain remain consistent)
         await refreshFromProvider()
+
         return res
       } catch (err) {
         clearPending()
@@ -332,7 +343,9 @@ export const WalletProvider = ({ children }) => {
       }
     }
 
+    // Serialize jobs
     const queued = txQueueRef.current.then(job, job)
+    // Keep queue alive even if one fails
     txQueueRef.current = queued.catch(() => undefined)
     return queued
   }
@@ -343,7 +356,7 @@ export const WalletProvider = ({ children }) => {
       isConnected,
       loading,
       error,
-      pendingRequest,
+      pendingRequest, // { type, message, startedAt }
       chainId,
       account: address,
       address,
