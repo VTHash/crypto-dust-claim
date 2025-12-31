@@ -99,8 +99,6 @@ const App = () => {
             element={isConnected ? <ClaimScreen /> : <Navigate to="/" replace />}
           />
 
-          <Route path="/emissions" element={<EmissionsLiquidity />} />
-
           {/* NEW: DustClaim address view – ALWAYS accessible for Etherscan card */}
           <Route path="/address/:address" element={<DustClaimAddressRoute />} />
 

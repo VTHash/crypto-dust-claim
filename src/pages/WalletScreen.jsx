@@ -280,6 +280,7 @@ const WalletScreen = () => {
   <a href="/terms" className="privacy-link">Terms of Service</a> |
   <a href="/cookies" className="privacy-link">Cookie Policy</a> |
   <a href="/legal" className="privacy-link">Legal</a>
+  <a href="/emissions">Emissions & Liquidity</a>
 </div>
           
         </div>

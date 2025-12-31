@@ -547,4 +547,4 @@ function EmissionsLiquidity() {
   );
 }
 
-export default EmissionsLiquidity;
+export default EmissionsLiquidity
