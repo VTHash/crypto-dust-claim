@@ -293,6 +293,33 @@ function EmissionsLiquidity() {
         .grid{grid-template-columns: 1fr 1fr}
         .card{padding: 22px}
       }
+
+      .addressBox {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 10px;
+  word-break: break-all;
+  font-size: 13px;
+}
+
+.explorerLink {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: #38bdf8;
+  text-decoration: none;
+}
+
+.explorerLink:hover {
+  text-decoration: underline;
+}
+
+.mutedText {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.75;
+}
       `}</style>
 
       <div className="wrap">
@@ -349,6 +376,28 @@ function EmissionsLiquidity() {
               There are no private allocations, no presales, and no discretionary mint authority. Supply grows only when users claim.
             </p>
           </section>
+
+          <div className="card">
+  <h3>Token Contract</h3>
+
+  <div className="addressBox">
+    <code>0xF312Ec9f8087C87fbF3439B0369eA233a1EE4A7D</code>
+  </div>
+
+  <a
+    href="https://lineascan.build/address/0xF312Ec9f8087C87fbF3439B0369eA233a1EE4A7D"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="explorerLink"
+  >
+    View on Lineascan
+  </a>
+
+  <p className="mutedText">
+    This is the canonical DUST ERC-20 contract on Linea. All emissions,
+    claims, and liquidity reference this address.
+  </p>
+</div>
 
           {/* Emissions */}
           <section className="section" id="emissions">
