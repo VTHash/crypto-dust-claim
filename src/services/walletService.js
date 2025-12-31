@@ -356,7 +356,7 @@ const walletService = {
       await asPromise(appKit.open?.()).catch(() => undefined)
 
       // SAFE waitFor: never calls .catch on undefined
-      const waitFor = async (fn, predicate, timeoutMs = 90000, intervalMs = 250) => {
+      const waitFor = async (fn, predicate, timeoutMs = 180000, intervalMs = 250) => {
         const start = Date.now()
         while (true) {
           const val = await asPromise(fn()).catch(() => null)
@@ -366,21 +366,58 @@ const walletService = {
         }
       }
 
-      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
+      // 1) Wait for WC provider to exist
+      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p, 180000, 250)
       attachListeners()
 
-      const reqAccs = await waitFor(
-        () => asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => []),
-        (arr) => Array.isArray(arr) && arr.length > 0
-      )
+      // 2) Best-effort: many WC wallets won't populate eth_accounts until this is called
+      try {
+        const maybeReq = await asPromise(eip1193.request?.({ method: 'eth_requestAccounts' })).catch(() => null)
+        if (Array.isArray(maybeReq) && maybeReq.length) {
+          accounts = maybeReq
+        }
+      } catch {
+        // ignore
+      }
 
-      accounts = reqAccs
-      chainId = await eip1193.request?.({ method: 'eth_chainId' })
+      // 3) Now wait for accounts to show up, but DO NOT block forever.
+      // If accounts never arrive, return pending so WalletContext can keep polling refresh().
+      const start = Date.now()
+      const HARD_WAIT_MS = 20000 // short wait inside connect; UI should not hang here
+      const POLL_MS = 300
 
-      await ensureEthers()
+      while (Date.now() - start < HARD_WAIT_MS) {
+        const accs = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
+        if (Array.isArray(accs) && accs.length) {
+          accounts = accs
+          break
+        }
+        await sleep(POLL_MS)
+      }
+
+      // Chain id can be returned even if accounts aren't hydrated yet
+      chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
+
+      // If we got accounts, finish fully
+      if (accounts?.length) {
+        await ensureEthers()
+        startTxReconciler()
+
+        return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
+      }
+
+      // If accounts still empty, do NOT return failure.
+      // This is the critical part for Uniswap/Trust wallets:
+      // the wallet says connected, but the browser dapp needs time to hydrate.
       startTxReconciler()
-
-      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
+      return {
+        success: true,
+        pending: true,
+        accounts: [],
+        chainId,
+        address: null,
+        signer: null
+      }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
       return { success: false, error: err?.message || 'Connect failed' }
