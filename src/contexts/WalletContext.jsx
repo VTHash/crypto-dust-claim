@@ -13,10 +13,10 @@ export const useWallet = () => {
 export const WalletProvider = ({ children }) => {
   const [address, setAddress] = useState(null)
   const [accounts, setAccounts] = useState([])
-  const [chainId, setChainId] = useState(null) // hex like "0x1"
+  const [chainId, setChainId] = useState(null)
   const [isConnected, setIsConnected] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [pendingRequest, setPendingRequest] = useState(null) // { type, message, startedAt }
+  const [pendingRequest, setPendingRequest] = useState(null)
   const [error, setError] = useState(null)
 
   const mountedRef = useRef(true)
@@ -34,6 +34,8 @@ export const WalletProvider = ({ children }) => {
 
   const connectInFlightRef = useRef(null)
   const txQueueRef = useRef(Promise.resolve())
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
   const refreshFromProvider = async () => {
     try {
@@ -56,19 +58,7 @@ export const WalletProvider = ({ children }) => {
   const setPending = (type, message) =>
     safeSet(() => setPendingRequest({ type, message, startedAt: Date.now() }))
 
-  // Strong post-connect sync (fixes “modal says connected but app doesn’t”)
-  const waitUntilConnectedInApp = async (timeoutMs = 120000, intervalMs = 250) => {
-    const start = Date.now()
-    while (true) {
-      const ok = await walletService.isConnected?.()
-      const addr = await walletService.getAddress?.()
-      if (ok && addr) return true
-      if (Date.now() - start > timeoutMs) return false
-      await new Promise((r) => setTimeout(r, intervalMs))
-    }
-  }
-
-  // Subscribe to wallet events (walletService bridges AppKit subscribeProvider for WC)
+  // Subscribe to wallet events from walletService
   useEffect(() => {
     walletService.onAccountsChanged((accs) => {
       safeSet(() => {
@@ -95,17 +85,13 @@ export const WalletProvider = ({ children }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Init + restore session
+  // Restore session
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        await walletService.init?.()
-
         const s = await walletService.restoreSession?.()
-        if (cancelled) return
-
-        if (!s) {
+        if (cancelled || !s) {
           await refreshFromProvider()
           return
         }
@@ -114,7 +100,7 @@ export const WalletProvider = ({ children }) => {
           setAccounts(s.accounts || [])
           setAddress(s.address || s.account || s.accounts?.[0] || null)
           setChainId(s.chainId || null)
-          setIsConnected(!!(s.address || s.account || s.accounts?.length))
+          setIsConnected(!!(s.address || s.account || s.accounts?.[0]))
         })
 
         setTimeout(() => {
@@ -126,13 +112,13 @@ export const WalletProvider = ({ children }) => {
         }, 600)
       }
     })()
-
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Single-flight connect
   const connect = async () => {
     if (connectInFlightRef.current) return connectInFlightRef.current
 
@@ -143,35 +129,32 @@ export const WalletProvider = ({ children }) => {
       })
 
       try {
-        setPending('connect', 'Approve the connection request in your wallet.')
+        setPending('connect', 'Approve the connection request in your wallet, then return to the browser.')
 
-        // IMPORTANT: open AppKit Connect view (walletService does this internally too)
         const res = await walletService.connect()
 
-        if (res?.success) {
-          // Wait until the provider/address is actually visible to the app
-          const ok = await waitUntilConnectedInApp(120000, 250)
-          if (!ok) {
-            clearPending()
-            safeSet(() => {
-              setError('Wallet connect timed out')
-              setLoading(false)
-            })
-            return { success: false, error: 'Wallet connect timed out' }
-          }
+        // Even if WalletConnect provider hydration is slow, keep trying to refresh state
+        // This prevents "connected in wallet, timed out in app"
+        const start = Date.now()
+        const maxMs = 90_000 // UI wait (provider may already be connected in AppKit)
+        let last = null
 
-          await refreshFromProvider()
-          clearPending()
-          safeSet(() => setLoading(false))
-          return res
+        while (Date.now() - start < maxMs) {
+          last = await refreshFromProvider()
+          if (last?.address) break
+          await sleep(500)
         }
 
         clearPending()
-        safeSet(() => {
-          setError(res?.error || 'Connect failed')
-          setLoading(false)
-        })
-        return res
+        safeSet(() => setLoading(false))
+
+        // If we still do not have an address, surface a meaningful error
+        if (!last?.address) {
+          safeSet(() => setError(res?.error || 'Wallet connected in modal, but provider did not return to the app. Please return to the browser tab and try again.'))
+          return { success: false, error: res?.error || 'Wallet connect timed out' }
+        }
+
+        return { success: true, ...res }
       } catch (err) {
         clearPending()
         safeSet(() => {
@@ -289,13 +272,11 @@ export const WalletProvider = ({ children }) => {
       account: address,
       address,
       accounts,
-
       connect,
       disconnect,
       switchChain,
       signMessage,
       sendTransaction,
-
       clearError: () => setError(null),
       clearPending: () => setPendingRequest(null),
       refresh: refreshFromProvider

@@ -14,17 +14,13 @@ import { TxReconciler } from './txReconciler'
 import { txStore } from './txStore'
 
 // ---- utils ----
-const toHexChainId = (id) => {
-  if (id == null) return null
-  const n = Number(id)
-  if (!Number.isFinite(n)) return null
-  return '0x' + n.toString(16)
-}
+const toHexChainId = (id) => '0x' + Number(id).toString(16)
 
 function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
+// pick the correct injected provider (prevents multi-provider collisions)
 function pickInjectedProvider() {
   if (typeof window === 'undefined') return null
   const eth = window.ethereum
@@ -73,8 +69,8 @@ const toBigIntSafe = (v) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const asPromise = (v) => Promise.resolve(v)
 
-// ---- single AppKit instance ----
-const modal = createAppKit({
+// ---- single AppKit instance (do not create anywhere else) ----
+const appKit = createAppKit({
   adapters: [new EthersAdapter()],
   networks: reownNetworks,
   metadata: getReownMetadata(),
@@ -87,7 +83,7 @@ let eip1193 = null
 let browserProvider = null
 let signer = null
 let accounts = []
-let chainIdHex = null // keep as hex string like 0x1
+let chainId = null
 
 let reconciler = null
 
@@ -95,7 +91,7 @@ let onAccChanged = null
 let onChainChanged = null
 let onDisconnected = null
 
-let unsubscribeProvider = null
+let unsubscribeProviders = null
 
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
@@ -104,7 +100,7 @@ function handleAccounts(accs = []) {
 }
 
 function handleChain(hexId) {
-  chainIdHex = hexId
+  chainId = hexId
   signer = null
   browserProvider = null
   onChainChanged?.(hexId)
@@ -112,14 +108,14 @@ function handleChain(hexId) {
 
 function handleDisconnect(err) {
   accounts = []
-  chainIdHex = null
+  chainId = null
   signer = null
   browserProvider = null
   eip1193 = null
   onDisconnected?.(err)
 }
 
-function attachEip1193Listeners() {
+function attachListeners() {
   if (!eip1193) return
   eip1193.removeListener?.('accountsChanged', handleAccounts)
   eip1193.removeListener?.('chainChanged', handleChain)
@@ -129,66 +125,33 @@ function attachEip1193Listeners() {
   eip1193.on?.('disconnect', handleDisconnect)
 }
 
-// Bridge AppKit -> our internal state (this is what you were missing)
-function ensureAppKitSubscription() {
-  if (unsubscribeProvider) return
-
-  unsubscribeProvider = modal.subscribeProvider?.(
-    ({ provider, address, chainId, isConnected }) => {
-      // provider is EIP-1193 when connected for eip155
-      if (provider) {
-        eip1193 = provider
-        attachEip1193Listeners()
-      }
-
-      // address / chainId from AppKit are authoritative
-      const addr = address || null
-      const hex = toHexChainId(chainId) || null
-
-      if (addr && isNonZeroAddress(addr)) {
-        accounts = [addr]
-      } else if (!isConnected) {
-        accounts = []
-      }
-
-      if (hex) chainIdHex = hex
-
-      // notify context
-      onAccChanged?.(accounts)
-      if (hex) onChainChanged?.(hex)
-
-      // if disconnected
-      if (isConnected === false) {
-        // do not hard-reset eip1193 here; wallets may reconnect quickly
-        // but clear state for the app
-        onDisconnected?.()
-      }
-    }
-  )
-}
-
+// Prefer MetaMask injection if present; otherwise use AppKit EVM provider
 async function ensureProvider() {
-  // Prefer MetaMask injected if present
   const injected = pickInjectedProvider()
+
   if (isInjectedMetaMask(injected)) {
     eip1193 = injected
-    attachEip1193Listeners()
+    attachListeners()
     return eip1193
   }
 
-  // Otherwise use AppKit's wallet provider (WalletConnect)
-  ensureAppKitSubscription()
-  const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
-  if (wp) {
-    eip1193 = wp
-    attachEip1193Listeners()
-    return eip1193
+  // IMPORTANT: use AppKit providers map (EVM namespace)
+  try {
+    const providers = appKit.getProviders?.()
+    const p = providers?.['eip155']
+    if (p) {
+      eip1193 = p
+      attachListeners()
+      return eip1193
+    }
+  } catch {
+    // ignore
   }
 
-  // Fallback to any injected provider
+  // Fallback: any injection if exists
   if (injected) {
     eip1193 = injected
-    attachEip1193Listeners()
+    attachListeners()
     return eip1193
   }
 
@@ -196,17 +159,6 @@ async function ensureProvider() {
 }
 
 async function ensureAccounts() {
-  // For AppKit, prefer modal.getAddress() (some WC wallets delay eth_accounts)
-  try {
-    const addr = modal.getAddress?.()
-    if (addr && isNonZeroAddress(addr)) {
-      accounts = [addr]
-      return accounts
-    }
-  } catch {
-    // ignore
-  }
-
   if (!eip1193) return []
   try {
     const accs = await eip1193.request?.({ method: 'eth_accounts' })
@@ -234,7 +186,7 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
-// MetaMask Mobile hydration (kept)
+// MetaMask Mobile hydration (safe)
 async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
@@ -273,34 +225,59 @@ function stopTxReconciler() {
   reconciler = null
 }
 
-// ---- internal wait helper (AppKit-native) ----
-async function waitForConnected({ timeoutMs = 120000, intervalMs = 250 } = {}) {
-  const start = Date.now()
-  while (true) {
-    const isConn = !!modal.getIsConnected?.()
-    const addr = modal.getAddress?.() || null
-    const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
-
-    if (isConn && isNonZeroAddress(addr) && wp) {
-      return { address: addr, walletProvider: wp }
-    }
-
-    if (Date.now() - start > timeoutMs) {
-      throw new Error('Wallet connect timed out')
-    }
-    await sleep(intervalMs)
+// ---- NEW: subscribe to AppKit providers so mobile “return to dapp” hydrates instantly ----
+function ensureProviderSubscription() {
+  if (unsubscribeProviders) return
+  try {
+    unsubscribeProviders = appKit.subscribeProviders?.((state) => {
+      const p = state?.['eip155']
+      if (p && p !== eip1193) {
+        eip1193 = p
+        attachListeners()
+        // proactive refresh of cached data
+        ;(async () => {
+          try {
+            chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => chainId)
+            const accs = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
+            if (Array.isArray(accs) && accs.length) handleAccounts(accs)
+          } catch {
+            // ignore
+          }
+        })()
+      }
+    })
+  } catch {
+    // ignore
   }
 }
 
 // ---- API ----
 const walletService = {
-  getAppKit: () => modal,
+  getAppKit: () => appKit,
+
+  // AppKit authoritative state helpers (for WalletContext hydration)
+  getIsConnected() {
+    try {
+      return !!appKit.getIsConnected?.()
+    } catch {
+      return false
+    }
+  },
+  getModalAddress() {
+    try {
+      return appKit.getAddress?.() || null
+    } catch {
+      return null
+    }
+  },
 
   async getProvider() {
+    ensureProviderSubscription()
     return eip1193 || (await ensureProvider())
   },
 
   async getBrowserProvider() {
+    ensureProviderSubscription()
     if (!eip1193) await ensureProvider()
     if (!eip1193) return null
     if (!browserProvider) browserProvider = new ethers.BrowserProvider(eip1193)
@@ -308,41 +285,33 @@ const walletService = {
   },
 
   async getSigner() {
+    ensureProviderSubscription()
     if (!eip1193) await ensureProvider()
     await ensureEthers()
     return signer
   },
 
   async getAddress() {
+    // Prefer real EIP-1193 accounts, but fall back to AppKit modal address if needed
     if (!accounts?.length) {
-      await ensureProvider()
+      ensureProviderSubscription()
+      if (!eip1193) await ensureProvider()
       await ensureAccounts()
     }
-    return accounts?.[0] ?? null
+    return accounts?.[0] ?? this.getModalAddress() ?? null
   },
 
   async getChainId() {
-    // Prefer AppKit chainId when available
-    try {
-      const c = modal.getChainId?.()
-      const hex = toHexChainId(c)
-      if (hex) {
-        chainIdHex = hex
-        return chainIdHex
-      }
-    } catch {
-      // ignore
-    }
-
-    if (!chainIdHex) {
+    ensureProviderSubscription()
+    if (!chainId) {
       if (!eip1193) await ensureProvider()
       try {
-        chainIdHex = await eip1193.request?.({ method: 'eth_chainId' })
+        chainId = await eip1193.request?.({ method: 'eth_chainId' })
       } catch {
         // ignore
       }
     }
-    return chainIdHex
+    return chainId
   },
 
   async getChainIdDec() {
@@ -351,35 +320,25 @@ const walletService = {
   },
 
   async isConnected() {
-    // AppKit authoritative flag first
-    try {
-      if (modal.getIsConnected?.()) {
-        const addr = modal.getAddress?.()
-        if (addr && isNonZeroAddress(addr)) {
-          accounts = [addr]
-          return true
-        }
-      }
-    } catch {
-      // ignore
-    }
-
+    ensureProviderSubscription()
+    // If AppKit says connected, trust it (mobile can lag on eth_accounts)
+    if (this.getIsConnected()) return true
     if (!eip1193) await ensureProvider()
     const accs = await ensureAccounts()
     return !!(accs && accs.length)
   },
 
   openModal() {
-    // force connect view for better UX
-    return modal.open?.({ view: 'Connect', namespace: 'eip155' })
+    // Force EVM-only connect view on mobile wallets
+    return appKit.open?.({ view: 'Connect', namespace: 'eip155' })
   },
   closeModal() {
-    return modal.close?.()
+    return appKit.close?.()
   },
 
   async init() {
     try {
-      ensureAppKitSubscription()
+      ensureProviderSubscription()
       await ensureProvider()
       startTxReconciler()
     } catch {
@@ -395,6 +354,7 @@ const walletService = {
           // ignore
         }
       }
+
       window.addEventListener('focus', safeReconcile)
       window.addEventListener('pageshow', safeReconcile)
     }
@@ -405,39 +365,26 @@ const walletService = {
 
   async restoreSession() {
     try {
-      ensureAppKitSubscription()
-
-      const isConn = !!modal.getIsConnected?.()
-      const addr = modal.getAddress?.() || null
-      const ch = modal.getChainId?.()
-
-      if (!isConn || !isNonZeroAddress(addr)) {
-        // fallback to passive eth_accounts
-        await ensureProvider()
-        const accs = await ensureAccounts()
-        if (!accs?.length) return null
-      } else {
-        accounts = [addr]
-      }
-
-      chainIdHex = toHexChainId(ch) || (await this.getChainId())
+      ensureProviderSubscription()
       await ensureProvider()
 
-      // take provider from AppKit if possible
-      const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
-      if (wp) {
-        eip1193 = wp
-        attachEip1193Listeners()
-      }
+      // If AppKit says connected, we can hydrate without waiting for eth_accounts immediately
+      const connected = this.getIsConnected()
+      const modalAddr = this.getModalAddress()
 
+      const accs = await ensureAccounts()
+      const addr = accs?.[0] || modalAddr || null
+      if (!connected && !addr) return null
+
+      chainId = await asPromise(eip1193?.request?.({ method: 'eth_chainId' })).catch(() => chainId)
       await ensureEthers()
       startTxReconciler()
 
       return {
-        accounts,
-        account: accounts[0],
-        chainId: chainIdHex,
-        address: accounts[0],
+        accounts: accs?.length ? accs : (addr ? [addr] : []),
+        account: addr,
+        chainId,
+        address: addr,
         connected: true
       }
     } catch (err) {
@@ -448,16 +395,17 @@ const walletService = {
 
   async connect() {
     try {
+      ensureProviderSubscription()
       const injected = pickInjectedProvider()
 
       // Prefer MetaMask injection if present
       if (isInjectedMetaMask(injected)) {
         eip1193 = injected
-        attachEip1193Listeners()
+        attachListeners()
 
         const reqAccs = await eip1193.request?.({ method: 'eth_requestAccounts' })
         accounts = Array.isArray(reqAccs) ? reqAccs : []
-        chainIdHex = await eip1193.request?.({ method: 'eth_chainId' })
+        chainId = await eip1193.request?.({ method: 'eth_chainId' })
 
         await ensureEthers()
         startTxReconciler()
@@ -465,45 +413,95 @@ const walletService = {
         return {
           success: true,
           accounts,
-          chainId: chainIdHex,
+          chainId,
           address: accounts[0] ?? null,
           signer
         }
       }
 
-      // WalletConnect / AppKit flow
-      ensureAppKitSubscription()
+      // WalletConnect/AppKit modal connect (EVM namespace) 
+      await asPromise(this.openModal()).catch(() => undefined)
 
-      // IMPORTANT: force Connect view + eip155 namespace
-      await asPromise(modal.open?.({ view: 'Connect', namespace: 'eip155' })).catch(() => undefined)
+      const waitFor = async (fn, predicate, timeoutMs = 180000, intervalMs = 250) => {
+        const start = Date.now()
+        while (true) {
+          const val = await asPromise(fn()).catch(() => null)
+          if (predicate(val)) return val
+          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
+          await sleep(intervalMs)
+        }
+      }
 
-      // Wait for AppKit to actually have provider + address
-      const { address, walletProvider } = await waitForConnected({
-        timeoutMs: 120000,
-        intervalMs: 250
-      })
+      // 1) Wait until AppKit declares connection OR address exists (modal state)
+      await waitFor(
+        () => ({ c: this.getIsConnected(), a: this.getModalAddress() }),
+        (s) => !!(s && (s.c || isNonZeroAddress(s.a)))
+      )
 
-      eip1193 = walletProvider
-      attachEip1193Listeners()
+      // 2) Now fetch the provider from providers map (EVM)
+      const p = await waitFor(
+        () => {
+          const providers = appKit.getProviders?.()
+          return providers?.['eip155'] || null
+        },
+        (x) => !!x
+      )
 
-      accounts = [address]
-      chainIdHex = toHexChainId(modal.getChainId?.()) || (await this.getChainId())
+      eip1193 = p
+      attachListeners()
+
+      // 3) Accounts can lag on mobile; poll eth_accounts, but if it stays empty, still return success with modal address
+      const accs = await waitFor(
+        async () => {
+          const a = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
+          return Array.isArray(a) ? a : []
+        },
+        (arr) => Array.isArray(arr),
+        60000,
+        300
+      )
+
+      accounts = Array.isArray(accs) ? accs : []
+      chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
 
       await ensureEthers()
       startTxReconciler()
 
-      return { success: true, accounts, chainId: chainIdHex, address, signer }
+      const addr = accounts[0] ?? this.getModalAddress() ?? null
+
+      return { success: true, accounts: addr ? (accounts.length ? accounts : [addr]) : accounts, chainId, address: addr, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
+
+      // IMPORTANT: if AppKit says connected, do NOT fail just because polling timed out
+      const stillConnected = this.getIsConnected()
+      const modalAddr = this.getModalAddress()
+      if (stillConnected || isNonZeroAddress(modalAddr)) {
+        // Try to hydrate provider in background-ish manner (still in this call)
+        try {
+          await ensureProvider()
+          await ensureAccounts()
+          chainId = await asPromise(eip1193?.request?.({ method: 'eth_chainId' })).catch(() => chainId)
+        } catch {
+          // ignore
+        }
+        return {
+          success: true,
+          accounts: accounts?.length ? accounts : (modalAddr ? [modalAddr] : []),
+          chainId: chainId || null,
+          address: accounts?.[0] || modalAddr || null,
+          signer: signer || null,
+          warning: 'Connected, waiting for wallet to return provider'
+        }
+      }
+
       return { success: false, error: err?.message || 'Connect failed' }
     }
   },
 
   async disconnect() {
     try {
-      // AppKit disconnect action path (docs)
-      await asPromise(modal.adapter?.connectionControllerClient?.disconnect?.()).catch(() => undefined)
-      await asPromise(modal.disconnect?.()).catch(() => undefined)
+      await asPromise(appKit.disconnect?.()).catch(() => undefined)
     } finally {
       stopTxReconciler()
       handleDisconnect()
@@ -512,10 +510,12 @@ const walletService = {
   },
 
   async getAccounts() {
+    ensureProviderSubscription()
     if (!eip1193) await ensureProvider()
     return await ensureAccounts()
   },
 
+  // SIMPLE SEND (hash only)
   async sendTransaction(tx) {
     const r = await this.sendTransactionWithReceipt(tx, { kind: 'tx', title: 'Transaction', step: 'tx' })
     return r?.success
@@ -523,6 +523,7 @@ const walletService = {
       : { success: false, error: r?.error || 'Transaction failed' }
   },
 
+  // BULLETPROOF SEND (hash + receipt)
   async sendTransactionWithReceipt(tx, meta = {}) {
     const waitConfirms = Number(meta.waitConfirms ?? 1)
     const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
@@ -537,6 +538,7 @@ const walletService = {
     }
 
     try {
+      ensureProviderSubscription()
       if (!eip1193) await ensureProvider()
 
       const ok = await this.isConnected()
@@ -617,6 +619,7 @@ const walletService = {
 
   async signMessage(message) {
     try {
+      ensureProviderSubscription()
       if (!eip1193) await ensureProvider()
       const ok = await this.isConnected()
       if (!ok) {
@@ -645,6 +648,7 @@ const walletService = {
   },
 
   async switchChain(targetId) {
+    ensureProviderSubscription()
     if (!eip1193) await ensureProvider()
     if (!eip1193) return { success: false, error: 'Wallet not connected' }
 
@@ -700,11 +704,11 @@ const walletService = {
 
   destroy() {
     try {
-      unsubscribeProvider?.()
+      unsubscribeProviders?.()
     } catch {
       // ignore
     }
-    unsubscribeProvider = null
+    unsubscribeProviders = null
 
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)
@@ -716,7 +720,7 @@ const walletService = {
     browserProvider = null
     signer = null
     accounts = []
-    chainIdHex = null
+    chainId = null
   }
 }
 
