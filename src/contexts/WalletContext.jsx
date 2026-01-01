@@ -1,5 +1,12 @@
 // src/contexts/WalletContext.jsx
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import walletService from '../services/walletService'
 
 const WalletContext = createContext(null)
@@ -10,19 +17,15 @@ export const useWallet = () => {
   return ctx
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
 /**
  * WalletProvider goals:
- * 1) Never double-open MetaMask/AppKit prompts (single-flight connect).
+ * 1) Never double-open prompts/modals (single-flight connect).
  * 2) Never send concurrent EIP-1193 requests that trigger -32002 on mobile (tx queue).
- * 3) Provide "pendingRequest" state to drive an overlay.
+ * 3) Provide pendingRequest state for overlays (user must return to wallet).
  * 4) Keep React state authoritative (refresh from provider after actions).
- *
- * WC/mobile reality:
- * - Some wallets approve in-app, but the dApp only receives accounts after:
- *   - returning to the browser tab, OR
- *   - a short delay, OR
- *   - a few eth_accounts polls.
- * So we add a post-connect hydration loop (non-invasive).
+ * 5) WalletConnect mobile: reconcile AFTER user approves in wallet and returns to dapp tab.
  */
 export const WalletProvider = ({ children }) => {
   const [address, setAddress] = useState(null)
@@ -51,6 +54,23 @@ export const WalletProvider = ({ children }) => {
   const connectInFlightRef = useRef(null) // Promise
   const txQueueRef = useRef(Promise.resolve()) // serialized queue
 
+  // ---- WalletConnect reconcile window ----
+  const reconcileRef = useRef({
+    active: false,
+    startedAt: 0,
+    // how long we keep trying after user approves in wallet
+    maxMs: 120000, // 2 min
+    pollMs: 700
+  })
+
+  const clearPending = () => safeSet(() => setPendingRequest(null))
+  const setPending = (type, message) =>
+    safeSet(() => setPendingRequest({ type, message, startedAt: Date.now() }))
+
+  const stopReconcile = () => {
+    reconcileRef.current.active = false
+  }
+
   // ---- helpers ----
   const refreshFromProvider = async () => {
     try {
@@ -75,54 +95,56 @@ export const WalletProvider = ({ children }) => {
     }
   }
 
-  const clearPending = () => safeSet(() => setPendingRequest(null))
-  const setPending = (type, message) =>
-    safeSet(() => setPendingRequest({ type, message, startedAt: Date.now() }))
+  const isActuallyConnected = async () => {
+    try {
+      const ok = await walletService.isConnected?.()
+      if (ok) return true
+      // fallback: some providers return false but still have accounts later
+      const accs = await walletService.getAccounts?.()
+      return Array.isArray(accs) && accs.length > 0
+    } catch {
+      return false
+    }
+  }
 
-  // --- NEW: post-connect hydration loop (critical for WalletConnect mobile) ---
-  const waitForConnected = async ({
-    timeoutMs = 90000,
-    intervalMs = 500
-  } = {}) => {
-    const start = Date.now()
+  /**
+   * Critical piece:
+   * after user approves in Trust/Uniswap/etc, the provider/accounts may appear later.
+   * This loop keeps checking restoreSession + eth_accounts for a window.
+   */
+  const reconcileUntilConnected = async () => {
+    const st = reconcileRef.current
+    if (!st.active) return false
 
-    // quick immediate refresh first
-    await refreshFromProvider()
-
-    while (Date.now() - start < timeoutMs) {
-      // If already connected in state, stop
-      if (mountedRef.current && (address || accounts?.length)) return true
-
-      // Ask walletService directly (some WC providers hydrate there first)
+    const deadline = st.startedAt + st.maxMs
+    while (st.active && Date.now() < deadline) {
       try {
-        const ok = await walletService.isConnected?.()
-        if (ok) {
-          await refreshFromProvider()
-          const nowAddr = await walletService.getAddress?.()
-          if (nowAddr) return true
-        } else {
-          // Even if isConnected is false, accounts can still arrive late:
-          // do a passive refresh anyway.
-          await refreshFromProvider()
-        }
+        // restoreSession is safe and can hydrate WC providers
+        await walletService.restoreSession?.()
       } catch {
-        // ignore transient provider errors during WC handshake
+        // ignore
       }
 
-      await new Promise((r) => setTimeout(r, intervalMs))
+      const ok = await isActuallyConnected()
+      if (ok) {
+        await refreshFromProvider()
+        return true
+      }
+
+      await sleep(st.pollMs)
     }
 
     return false
   }
 
-  // Subscribe to wallet events from walletService (authoritative)
+  // ---- subscribe to walletService events (authoritative) ----
   useEffect(() => {
     walletService.onAccountsChanged((accs) => {
       safeSet(() => {
-        setAccounts(accs || [])
-        const addr = accs?.[0] || null
-        setAddress(addr)
-        setIsConnected(!!addr)
+        const a = Array.isArray(accs) ? accs : []
+        setAccounts(a)
+        setAddress(a?.[0] || null)
+        setIsConnected(!!a?.[0])
       })
     })
 
@@ -131,24 +153,28 @@ export const WalletProvider = ({ children }) => {
     })
 
     walletService.onDisconnect(() => {
+      stopReconcile()
       safeSet(() => {
         setAccounts([])
         setAddress(null)
         setChainId(null)
         setIsConnected(false)
         setPendingRequest(null)
+        setLoading(false)
       })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Restore a previous session (mobile often needs a short delay to hydrate)
+  // ---- restore session on load ----
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         const s = await walletService.restoreSession?.()
-        if (cancelled || !s) {
+        if (cancelled) return
+
+        if (!s) {
           await refreshFromProvider()
           return
         }
@@ -160,7 +186,7 @@ export const WalletProvider = ({ children }) => {
           setIsConnected(!!(s.accounts?.length))
         })
 
-        // Post-hydration refresh
+        // post-hydration refresh
         setTimeout(() => {
           if (!cancelled) refreshFromProvider()
         }, 600)
@@ -170,33 +196,42 @@ export const WalletProvider = ({ children }) => {
         }, 600)
       }
     })()
+
     return () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // --- NEW: mobile return-to-tab hydration triggers ---
+  // ---- key: when user returns from wallet app, try to finalize connection ----
   useEffect(() => {
-    const onFocus = () => {
-      // WalletConnect often completes while you're in the wallet app
-      // and only becomes visible when focus returns.
-      refreshFromProvider()
-    }
+    const onReturn = async () => {
+      // If we are in a connect flow, try to reconcile to completion.
+      if (reconcileRef.current.active) {
+        const ok = await reconcileUntilConnected()
+        if (ok) {
+          stopReconcile()
+          clearPending()
+          safeSet(() => setLoading(false))
+          return
+        }
+      }
 
-    const onPageShow = () => refreshFromProvider()
+      // Always do a passive refresh on return; this alone fixes many WC cases.
+      await refreshFromProvider()
+    }
 
     const onVis = () => {
-      if (document.visibilityState === 'visible') refreshFromProvider()
+      if (document.visibilityState === 'visible') onReturn()
     }
 
-    window.addEventListener('focus', onFocus)
-    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('focus', onReturn)
+    window.addEventListener('pageshow', onReturn)
     document.addEventListener('visibilitychange', onVis)
 
     return () => {
-      window.removeEventListener('focus', onFocus)
-      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('focus', onReturn)
+      window.removeEventListener('pageshow', onReturn)
       document.removeEventListener('visibilitychange', onVis)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,8 +239,17 @@ export const WalletProvider = ({ children }) => {
 
   // ---------------- Actions ----------------
 
-  // Single-flight connect prevents duplicate prompts/modals
-  const connect = async () => {
+  /**
+   * connect(prefer)
+   * Optional prefer (only if you later want it):
+   * - 'auto' (default)
+   * - 'modal'
+   * - 'injected'
+   *
+   * Your WalletScreen calls connect() with no args — this keeps behavior identical,
+   * but fixes WC "approved in wallet, app still loading" by reconciling after return.
+   */
+  const connect = async (prefer) => {
     if (connectInFlightRef.current) return connectInFlightRef.current
 
     const p = (async () => {
@@ -214,40 +258,66 @@ export const WalletProvider = ({ children }) => {
         setError(null)
       })
 
+      // Start WC reconcile window immediately.
+      reconcileRef.current.active = true
+      reconcileRef.current.startedAt = Date.now()
+
       try {
-        setPending('connect', 'Approve the connection request in your wallet.')
-        const res = await walletService.connect()
+        setPending(
+          'connect',
+          'Approve the connection request in your wallet, then return to this tab.'
+        )
 
-        // Even if walletService returns success, some WC wallets do not
-        // immediately expose accounts to the dApp. We must hydrate.
+        // call walletService.connect; if you added options support there, pass it through
+        const res =
+          typeof prefer === 'string'
+            ? await walletService.connect({ prefer })
+            : await walletService.connect()
+
+        // If immediate success: refresh + finish.
         if (res?.success) {
-          const ok = await waitForConnected({ timeoutMs: 90000, intervalMs: 500 })
-
+          await refreshFromProvider()
+          stopReconcile()
           clearPending()
           safeSet(() => setLoading(false))
-
-          if (!ok) {
-            // Do not “crash”; just inform user and keep UI usable.
-            safeSet(() => setError('Wallet connected in app, but did not sync to browser. Please return to the browser tab and try again.'))
-            return { success: false, error: 'Wallet connected but not synced' }
-          }
-
           return res
         }
 
+        // If connect returned failure/timeout: DO NOT stop here.
+        // WalletConnect wallets often complete after the user returns.
+        const ok = await reconcileUntilConnected()
+        if (ok) {
+          stopReconcile()
+          clearPending()
+          safeSet(() => setLoading(false))
+          return { success: true, recovered: true }
+        }
+
+        // reconcile window ended: now we truly fail.
+        stopReconcile()
         clearPending()
         safeSet(() => {
-          setError(res?.error || 'Connect failed')
+          setError(res?.error || 'Wallet connect timed out')
           setLoading(false)
         })
         return res
       } catch (err) {
+        // still try reconcile before failing
+        const ok = await reconcileUntilConnected()
+        if (ok) {
+          stopReconcile()
+          clearPending()
+          safeSet(() => setLoading(false))
+          return { success: true, recovered: true }
+        }
+
+        stopReconcile()
         clearPending()
         safeSet(() => {
-          setError(err?.message || 'Connect failed')
+          setError(err?.message || 'Wallet connect timed out')
           setLoading(false)
         })
-        return { success: false, error: err?.message || 'Connect failed' }
+        return { success: false, error: err?.message || 'Wallet connect timed out' }
       } finally {
         connectInFlightRef.current = null
       }
@@ -258,6 +328,7 @@ export const WalletProvider = ({ children }) => {
   }
 
   const disconnect = async () => {
+    stopReconcile()
     safeSet(() => {
       setLoading(true)
       setError(null)
@@ -300,10 +371,11 @@ export const WalletProvider = ({ children }) => {
   const signMessage = async (msg) => {
     safeSet(() => setError(null))
     try {
-      if (!(await walletService.isConnected?.())) {
+      if (!(await isActuallyConnected())) {
         const c = await connect()
         if (!c?.success) return c
       }
+
       setPending('sign', 'Approve the signature request in your wallet.')
       const res = await walletService.signMessage(msg)
       clearPending()
@@ -318,22 +390,20 @@ export const WalletProvider = ({ children }) => {
 
   /**
    * sendTransaction is serialized to avoid:
-   * - MetaMask mobile concurrent prompt bugs
+   * - mobile concurrent prompt bugs
    * - -32002 "request already pending"
    */
   const sendTransaction = async (tx) => {
     const job = async () => {
       safeSet(() => setError(null))
-
       try {
-        if (!(await walletService.isConnected?.())) {
+        if (!(await isActuallyConnected())) {
           const c = await connect()
           if (!c?.success) return c
         }
 
         setPending('transaction', 'Confirm the transaction in your wallet.')
         const res = await walletService.sendTransaction(tx)
-
         clearPending()
 
         if (!res?.success) {
@@ -385,4 +455,4 @@ export const WalletProvider = ({ children }) => {
   )
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
-      }
+}
