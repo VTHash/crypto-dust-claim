@@ -3,6 +3,8 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
+import { useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 const metamaskLogo = '/logo/metamask.png'
 
@@ -32,7 +34,24 @@ const WalletScreen = () => {
     error
   } = useWallet()
 
-  const handleConnect = async () => { await connect() }
+  const navigate = useNavigate()
+  const connectingRef = useRef(false)
+  useEffect(() => {
+    if (isConnected) {
+      navigate('/scanner')
+    }
+  }, [isConnected, navigate])
+
+  const handleConnect = async () => { 
+    if (connectingRef.current || loading) return
+    connectingRef.current = true
+    try {
+      await connect()
+    } finally {
+      connectingRef.current = false
+    }
+  }
+
   const handleDisconnect = async () => { await disconnect() }
 
   const isCurrentChain = (id) => {
