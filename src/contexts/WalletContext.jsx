@@ -1,5 +1,12 @@
 // src/contexts/WalletContext.jsx
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import walletService from '../services/walletService'
 
 const WalletContext = createContext(null)
@@ -13,12 +20,13 @@ export const useWallet = () => {
 export const WalletProvider = ({ children }) => {
   const [address, setAddress] = useState(null)
   const [accounts, setAccounts] = useState([])
-  const [chainId, setChainId] = useState(null)
+  const [chainId, setChainId] = useState(null) // hex
   const [isConnected, setIsConnected] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [pendingRequest, setPendingRequest] = useState(null)
+  const [pendingRequest, setPendingRequest] = useState(null) // { type, message, startedAt }
   const [error, setError] = useState(null)
 
+  // Prevent setState on unmounted component
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -31,44 +39,77 @@ export const WalletProvider = ({ children }) => {
     if (!mountedRef.current) return
     fn()
   }
-  
+
+  // Manual disconnect cooldown (prevents immediate auto-restore)
   const manualDisconnectAtRef = useRef(0)
   const MANUAL_DISCONNECT_COOLDOWN_MS = 8000
 
-  const connectInFlightRef = useRef(null)
-  const txQueueRef = useRef(Promise.resolve())
+  // ---- single-flight guards ----
+  const connectInFlightRef = useRef(null) // Promise
+  const txQueueRef = useRef(Promise.resolve()) // serialized queue
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
-  const refreshFromProvider = async () => {
-    try {
-      const addr = await walletService.getAddress?.()
-      const cid = await walletService.getChainId?.()
-      const accs = (await walletService.getAccounts?.()) || (addr ? [addr] : [])
-      safeSet(() => {
-        setAccounts(accs || [])
-        setAddress(addr || accs?.[0] || null)
-        setChainId(cid || null)
-        setIsConnected(!!(addr || accs?.[0]))
-      })
-      return { address: addr || accs?.[0] || null, chainId: cid || null, accounts: accs || [] }
-    } catch {
-      return null
-    }
-  }
 
   const clearPending = () => safeSet(() => setPendingRequest(null))
   const setPending = (type, message) =>
     safeSet(() => setPendingRequest({ type, message, startedAt: Date.now() }))
 
-  // Subscribe to wallet events from walletService
+  // Fast “connected?” signal from AppKit (mobile WC wallets lag on eth_accounts)
+  const fastSession = () => {
+    const connected = !!walletService.getIsConnected?.()
+    const modalAddr = walletService.getModalAddress?.() || null
+    return { connected, modalAddr }
+  }
+
+  // Authoritative refresh (EIP-1193 first, then AppKit modal fallback)
+  const refreshFromProvider = async () => {
+    try {
+      const addr = await walletService.getAddress?.()
+      const cid = await walletService.getChainId?.()
+      const accs = (await walletService.getAccounts?.()) || (addr ? [addr] : [])
+
+      const { connected: appKitConnected, modalAddr } = fastSession()
+      const effectiveAddr = addr || accs?.[0] || modalAddr || null
+      const effectiveConnected = !!effectiveAddr || !!appKitConnected
+
+      safeSet(() => {
+        setAccounts(accs || (effectiveAddr ? [effectiveAddr] : []))
+        setAddress(effectiveAddr)
+        setChainId(cid || null)
+        setIsConnected(effectiveConnected)
+      })
+
+      return {
+        address: effectiveAddr,
+        chainId: cid || null,
+        accounts: accs || (effectiveAddr ? [effectiveAddr] : []),
+        connected: effectiveConnected
+      }
+    } catch {
+      // Even if provider calls fail, we can still unlock based on AppKit session
+      const { connected: appKitConnected, modalAddr } = fastSession()
+      safeSet(() => {
+        setIsConnected(!!appKitConnected || !!modalAddr)
+        if (modalAddr) setAddress(modalAddr)
+      })
+      return {
+        address: modalAddr || null,
+        chainId: null,
+        accounts: modalAddr ? [modalAddr] : [],
+        connected: !!appKitConnected || !!modalAddr
+      }
+    }
+  }
+
+  // Subscribe to wallet events from walletService (authoritative)
   useEffect(() => {
     walletService.onAccountsChanged((accs) => {
       safeSet(() => {
-        setAccounts(accs || [])
-        const addr = accs?.[0] || null
+        const list = Array.isArray(accs) ? accs : []
+        setAccounts(list)
+        const addr = list?.[0] || walletService.getModalAddress?.() || null
         setAddress(addr)
-        setIsConnected(!!addr)
+        setIsConnected(!!addr || !!walletService.getIsConnected?.())
       })
     })
 
@@ -88,50 +129,59 @@ export const WalletProvider = ({ children }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Restore session
-    useEffect(() => {
-      let cancelled = false
-      ;(async () => {
-        try {
-          const s = await walletService.restoreSession?.()
-          const since = Date.now() - (manualDisconnectAtRef.current || 0)
-  
-          // If cancelled, no session, or user recently disconnected, do not auto-restore
-          if (cancelled) return 
-          if (since < MANUAL_DISCONNECT_COOLDOWN_MS) return
-          if (!s) {
-            await refreshFromProvider()
-            return
-          }
-  
+  // Restore session on mount (but respect manual disconnect cooldown)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const since = Date.now() - (manualDisconnectAtRef.current || 0)
+        const s = await walletService.restoreSession?.()
+
+        if (cancelled) return
+
+        // If user recently disconnected, don't restore
+        if (since < MANUAL_DISCONNECT_COOLDOWN_MS) {
+          await refreshFromProvider()
+          return
+        }
+
+        // If restore returns something OR AppKit already says connected, hydrate immediately
+        const { connected: appKitConnected, modalAddr } = fastSession()
+        if (s || appKitConnected || modalAddr) {
           safeSet(() => {
-            setAccounts(s.accounts || [])
-            setAddress(s.address || s.account || s.accounts?.[0] || null)
-            setChainId(s.chainId || null)
-            setIsConnected(!!(s.address || s.account || s.accounts?.[0]))
+            const addr = s?.address || s?.account || s?.accounts?.[0] || modalAddr || null
+            const accs = s?.accounts?.length ? s.accounts : (addr ? [addr] : [])
+            setAccounts(accs)
+            setAddress(addr)
+            setChainId(s?.chainId || null)
+            setIsConnected(!!addr || !!appKitConnected)
           })
-  
+
+          // follow-up refresh to pick up real eth_accounts/chainId when it becomes available
           setTimeout(() => {
             if (cancelled) return
             const since2 = Date.now() - (manualDisconnectAtRef.current || 0)
-            if (since2 < MANUAL_DISCONNECT_COOLDOWN_MS) {
-              // User recently disconnected, do not auto-restore
-              return
-            }
-            refreshFromProvider()
-          }, 600)
-        } catch (err) {
-          // On error, attempt a provider refresh and ignore
-          try { await refreshFromProvider() } catch { }
-        }
-      })()
-      return () => {
-        cancelled = true
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+            if (since2 < MANUAL_DISCONNECT_COOLDOWN_MS) return
+            refreshFromProvider().catch(() => {})
+          }, 500)
 
-  // Single-flight connect
+          return
+        }
+
+        // Nothing to restore
+        await refreshFromProvider()
+      } catch {
+        await refreshFromProvider().catch(() => {})
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ---------------- Actions ----------------
+
   const connect = async () => {
     if (connectInFlightRef.current) return connectInFlightRef.current
 
@@ -146,39 +196,60 @@ export const WalletProvider = ({ children }) => {
 
         const res = await walletService.connect()
 
-        // Even if WalletConnect provider hydration is slow, keep trying to refresh state
-        // This prevents "connected in wallet, timed out in app"
-        const start = Date.now()
-        const maxMs = 90_000 // UI wait (provider may already be connected in AppKit)
-        let last = null
+        // 1) IMMEDIATE UNLOCK if AppKit says connected / has address (mobile WC wallets)
+        const { connected: appKitConnected, modalAddr } = fastSession()
+        if (appKitConnected || modalAddr) {
+          safeSet(() => {
+            const addr = modalAddr || null
+            if (addr) {
+              setAddress(addr)
+              setAccounts((prev) => (prev?.length ? prev : [addr]))
+            }
+            setIsConnected(true)
+          })
+        }
 
+        // 2) Background hydration loop (does not block UI)
+        // Goal: get real eth_accounts/provider as soon as wallet returns to dapp.
+        const start = Date.now()
+        const maxMs = 180000 // allow slow wallets; UI is already unlocked
         while (Date.now() - start < maxMs) {
-          last = await refreshFromProvider()
-          if (last?.address) break
-          await sleep(500)
+          const st = await refreshFromProvider()
+          if (st?.address) break
+          await sleep(600)
         }
 
         clearPending()
         safeSet(() => setLoading(false))
 
-        // If we still do not have an address, surface a meaningful error
-        if (!last?.address) {
-          safeSet(() => setError(res?.error || 'Wallet connected in modal, but provider did not return to the app. Please return to the browser tab and try again.'))
-          return { success: false, error: res?.error || 'Wallet connect timed out' }
+        // If connect call itself failed and we don't even have AppKit connection, surface error
+        const { connected: finalConnected, modalAddr: finalAddr } = fastSession()
+        if (!finalConnected && !finalAddr && !res?.success) {
+          safeSet(() => setError(res?.error || 'Connect failed'))
+          return res
         }
 
-  return { success: true, ...res }
-} catch (err) {
-  clearPending()
-  safeSet(() => {
-    setError(err?.message || 'Connect failed')
-    setLoading(false)
-  })
-  return { success: false, error: err?.message || 'Connect failed' }
-} finally {
-  connectInFlightRef.current = null
-}
-})()
+        // If walletService returned failure but AppKit is connected, treat as connected with warning
+        if (!res?.success && (finalConnected || finalAddr)) {
+          return {
+            success: true,
+            warning: res?.error || 'Connected, waiting for wallet provider to hydrate.',
+            address: finalAddr || null
+          }
+        }
+
+        return res?.success ? res : { success: true }
+      } catch (err) {
+        clearPending()
+        safeSet(() => {
+          setError(err?.message || 'Connect failed')
+          setLoading(false)
+        })
+        return { success: false, error: err?.message || 'Connect failed' }
+      } finally {
+        connectInFlightRef.current = null
+      }
+    })()
 
     connectInFlightRef.current = p
     return p
@@ -187,29 +258,37 @@ export const WalletProvider = ({ children }) => {
   const disconnect = async () => {
     manualDisconnectAtRef.current = Date.now()
 
-  safeSet(() => {
-    setLoading(true)
-    setError(null)
-    setPendingRequest(null)
-  })
-
-  try {
-    await walletService.disconnect()
-  } finally {
-    // hard reset UI state
     safeSet(() => {
-      setAccounts([])
-      setAddress(null)
-      setChainId(null)
-      setIsConnected(false)
-      setLoading(false)
+      setLoading(true)
+      setError(null)
+      setPendingRequest(null)
     })
 
-    // Do not refresh right away, as some wallets take a moment to process the disconnect
-    // WalletConnect/AppKit can report still connected immediately after disconnect
-    await sleep(800)
-    try { await refreshFromProvider() } catch { /* ignore */ }
-  }
+    try {
+      await walletService.disconnect()
+    } finally {
+      // hard reset UI state immediately
+      safeSet(() => {
+        setAccounts([])
+        setAddress(null)
+        setChainId(null)
+        setIsConnected(false)
+        setLoading(false)
+      })
+
+      // Do not auto-restore right after manual disconnect
+      // But do a passive refresh so injected wallets don't appear "sticky"
+      try {
+        const since = Date.now() - (manualDisconnectAtRef.current || 0)
+        if (since >= MANUAL_DISCONNECT_COOLDOWN_MS) {
+          await refreshFromProvider()
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return { success: true }
   }
 
   const switchChain = async (targetId) => {
@@ -251,6 +330,7 @@ export const WalletProvider = ({ children }) => {
     }
   }
 
+  // Serialized tx sending to avoid mobile -32002
   const sendTransaction = async (tx) => {
     const job = async () => {
       safeSet(() => setError(null))
@@ -286,6 +366,7 @@ export const WalletProvider = ({ children }) => {
 
   const value = useMemo(
     () => ({
+      // state
       isConnected,
       loading,
       error,
@@ -294,11 +375,15 @@ export const WalletProvider = ({ children }) => {
       account: address,
       address,
       accounts,
+
+      // actions
       connect,
       disconnect,
       switchChain,
       signMessage,
       sendTransaction,
+
+      // helpers
       clearError: () => setError(null),
       clearPending: () => setPendingRequest(null),
       refresh: refreshFromProvider
