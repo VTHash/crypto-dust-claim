@@ -14,7 +14,12 @@ import { TxReconciler } from './txReconciler'
 import { txStore } from './txStore'
 
 // ---- utils ----
-const toHexChainId = (id) => '0x' + Number(id).toString(16)
+const toHexChainId = (id) => {
+  if (id == null) return null
+  const n = Number(id)
+  if (!Number.isFinite(n)) return null
+  return '0x' + n.toString(16)
+}
 
 function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
@@ -30,6 +35,7 @@ function pickInjectedProvider() {
     const mm = providers.find((p) => isInjectedMetaMask(p))
     return mm || providers[0] || eth
   }
+
   return eth
 }
 
@@ -68,7 +74,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const asPromise = (v) => Promise.resolve(v)
 
 // ---- single AppKit instance ----
-const appKit = createAppKit({
+const modal = createAppKit({
   adapters: [new EthersAdapter()],
   networks: reownNetworks,
   metadata: getReownMetadata(),
@@ -81,7 +87,7 @@ let eip1193 = null
 let browserProvider = null
 let signer = null
 let accounts = []
-let chainId = null
+let chainIdHex = null // keep as hex string like 0x1
 
 let reconciler = null
 
@@ -89,26 +95,31 @@ let onAccChanged = null
 let onChainChanged = null
 let onDisconnected = null
 
+let unsubscribeProvider = null
+
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
   signer = null
   onAccChanged?.(accounts)
 }
+
 function handleChain(hexId) {
-  chainId = hexId
+  chainIdHex = hexId
   signer = null
   browserProvider = null
   onChainChanged?.(hexId)
 }
+
 function handleDisconnect(err) {
   accounts = []
-  chainId = null
+  chainIdHex = null
   signer = null
   browserProvider = null
   eip1193 = null
   onDisconnected?.(err)
 }
-function attachListeners() {
+
+function attachEip1193Listeners() {
   if (!eip1193) return
   eip1193.removeListener?.('accountsChanged', handleAccounts)
   eip1193.removeListener?.('chainChanged', handleChain)
@@ -118,51 +129,85 @@ function attachListeners() {
   eip1193.on?.('disconnect', handleDisconnect)
 }
 
-async function ensureProvider() {
-  const injected = pickInjectedProvider()
+// Bridge AppKit -> our internal state (this is what you were missing)
+function ensureAppKitSubscription() {
+  if (unsubscribeProvider) return
 
-  // Prefer MetaMask if present
+  unsubscribeProvider = modal.subscribeProvider?.(
+    ({ provider, address, chainId, isConnected }) => {
+      // provider is EIP-1193 when connected for eip155
+      if (provider) {
+        eip1193 = provider
+        attachEip1193Listeners()
+      }
+
+      // address / chainId from AppKit are authoritative
+      const addr = address || null
+      const hex = toHexChainId(chainId) || null
+
+      if (addr && isNonZeroAddress(addr)) {
+        accounts = [addr]
+      } else if (!isConnected) {
+        accounts = []
+      }
+
+      if (hex) chainIdHex = hex
+
+      // notify context
+      onAccChanged?.(accounts)
+      if (hex) onChainChanged?.(hex)
+
+      // if disconnected
+      if (isConnected === false) {
+        // do not hard-reset eip1193 here; wallets may reconnect quickly
+        // but clear state for the app
+        onDisconnected?.()
+      }
+    }
+  )
+}
+
+async function ensureProvider() {
+  // Prefer MetaMask injected if present
+  const injected = pickInjectedProvider()
   if (isInjectedMetaMask(injected)) {
     eip1193 = injected
-    attachListeners()
+    attachEip1193Listeners()
     return eip1193
   }
 
-  // Otherwise AppKit provider (WalletConnect)
-  const maybeProvider = await asPromise(appKit.getProvider?.()).catch(() => null)
-  if (maybeProvider) {
-    eip1193 = maybeProvider
-    attachListeners()
+  // Otherwise use AppKit's wallet provider (WalletConnect)
+  ensureAppKitSubscription()
+  const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
+  if (wp) {
+    eip1193 = wp
+    attachEip1193Listeners()
     return eip1193
   }
 
-  // Fallback
+  // Fallback to any injected provider
   if (injected) {
     eip1193 = injected
-    attachListeners()
+    attachEip1193Listeners()
     return eip1193
   }
 
   return null
 }
 
-// IMPORTANT: WalletConnect wallets often require eth_requestAccounts at least once
-async function requestAccountsOnce() {
-  if (!eip1193?.request) return []
+async function ensureAccounts() {
+  // For AppKit, prefer modal.getAddress() (some WC wallets delay eth_accounts)
   try {
-    const accs = await eip1193.request({ method: 'eth_requestAccounts' })
-    if (Array.isArray(accs) && accs.length) return accs
+    const addr = modal.getAddress?.()
+    if (addr && isNonZeroAddress(addr)) {
+      accounts = [addr]
+      return accounts
+    }
   } catch {
     // ignore
   }
-  return []
-}
 
-async function ensureAccounts(opts = {}) {
   if (!eip1193) return []
-  const forceRequest = !!opts.forceRequest
-
-  // 1) try eth_accounts (passive)
   try {
     const accs = await eip1193.request?.({ method: 'eth_accounts' })
     if (Array.isArray(accs) && accs.length) {
@@ -172,27 +217,6 @@ async function ensureAccounts(opts = {}) {
   } catch {
     // ignore
   }
-
-  // 2) if asked, try eth_requestAccounts (active)
-  if (forceRequest) {
-    const req = await requestAccountsOnce()
-    if (Array.isArray(req) && req.length) {
-      accounts = req
-      return req
-    }
-
-    // 3) retry eth_accounts after request
-    try {
-      const accs2 = await eip1193.request?.({ method: 'eth_accounts' })
-      if (Array.isArray(accs2) && accs2.length) {
-        accounts = accs2
-        return accs2
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   return accounts || []
 }
 
@@ -210,12 +234,17 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
+// MetaMask Mobile hydration (kept)
 async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
 
-  // For send/sign we can request accounts (MetaMask works; WC may ignore)
-  await requestAccountsOnce().catch(() => [])
+  try {
+    await eip1193.request?.({ method: 'eth_requestAccounts' })
+  } catch {
+    // ignore (WalletConnect providers may reject)
+  }
+
   await ensureAccounts()
   await ensureEthers()
   return true
@@ -244,9 +273,28 @@ function stopTxReconciler() {
   reconciler = null
 }
 
+// ---- internal wait helper (AppKit-native) ----
+async function waitForConnected({ timeoutMs = 120000, intervalMs = 250 } = {}) {
+  const start = Date.now()
+  while (true) {
+    const isConn = !!modal.getIsConnected?.()
+    const addr = modal.getAddress?.() || null
+    const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
+
+    if (isConn && isNonZeroAddress(addr) && wp) {
+      return { address: addr, walletProvider: wp }
+    }
+
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Wallet connect timed out')
+    }
+    await sleep(intervalMs)
+  }
+}
+
 // ---- API ----
 const walletService = {
-  getAppKit: () => appKit,
+  getAppKit: () => modal,
 
   async getProvider() {
     return eip1193 || (await ensureProvider())
@@ -267,22 +315,34 @@ const walletService = {
 
   async getAddress() {
     if (!accounts?.length) {
-      if (!eip1193) await ensureProvider()
+      await ensureProvider()
       await ensureAccounts()
     }
     return accounts?.[0] ?? null
   },
 
   async getChainId() {
-    if (!chainId) {
+    // Prefer AppKit chainId when available
+    try {
+      const c = modal.getChainId?.()
+      const hex = toHexChainId(c)
+      if (hex) {
+        chainIdHex = hex
+        return chainIdHex
+      }
+    } catch {
+      // ignore
+    }
+
+    if (!chainIdHex) {
       if (!eip1193) await ensureProvider()
       try {
-        chainId = await eip1193.request?.({ method: 'eth_chainId' })
+        chainIdHex = await eip1193.request?.({ method: 'eth_chainId' })
       } catch {
         // ignore
       }
     }
-    return chainId
+    return chainIdHex
   },
 
   async getChainIdDec() {
@@ -291,20 +351,35 @@ const walletService = {
   },
 
   async isConnected() {
+    // AppKit authoritative flag first
+    try {
+      if (modal.getIsConnected?.()) {
+        const addr = modal.getAddress?.()
+        if (addr && isNonZeroAddress(addr)) {
+          accounts = [addr]
+          return true
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     if (!eip1193) await ensureProvider()
     const accs = await ensureAccounts()
     return !!(accs && accs.length)
   },
 
   openModal() {
-    return appKit.open?.()
+    // force connect view for better UX
+    return modal.open?.({ view: 'Connect', namespace: 'eip155' })
   },
   closeModal() {
-    return appKit.close?.()
+    return modal.close?.()
   },
 
   async init() {
     try {
+      ensureAppKitSubscription()
       await ensureProvider()
       startTxReconciler()
     } catch {
@@ -330,21 +405,38 @@ const walletService = {
 
   async restoreSession() {
     try {
+      ensureAppKitSubscription()
+
+      const isConn = !!modal.getIsConnected?.()
+      const addr = modal.getAddress?.() || null
+      const ch = modal.getChainId?.()
+
+      if (!isConn || !isNonZeroAddress(addr)) {
+        // fallback to passive eth_accounts
+        await ensureProvider()
+        const accs = await ensureAccounts()
+        if (!accs?.length) return null
+      } else {
+        accounts = [addr]
+      }
+
+      chainIdHex = toHexChainId(ch) || (await this.getChainId())
       await ensureProvider()
-      if (!eip1193) return null
 
-      // Key change: if session exists but accounts are empty, force request ONCE
-      const accs = await ensureAccounts({ forceRequest: true })
-      if (!accs?.length) return null
+      // take provider from AppKit if possible
+      const wp = await asPromise(modal.getWalletProvider?.()).catch(() => null)
+      if (wp) {
+        eip1193 = wp
+        attachEip1193Listeners()
+      }
 
-      chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
       await ensureEthers()
       startTxReconciler()
 
       return {
         accounts,
         account: accounts[0],
-        chainId,
+        chainId: chainIdHex,
         address: accounts[0],
         connected: true
       }
@@ -354,108 +446,53 @@ const walletService = {
     }
   },
 
-  async connect(options = {}) {
-    const prefer = options?.prefer || 'auto'
-
+  async connect() {
     try {
       const injected = pickInjectedProvider()
 
-      // injected MetaMask path
-      if (prefer !== 'modal' && isInjectedMetaMask(injected)) {
+      // Prefer MetaMask injection if present
+      if (isInjectedMetaMask(injected)) {
         eip1193 = injected
-        attachListeners()
+        attachEip1193Listeners()
 
         const reqAccs = await eip1193.request?.({ method: 'eth_requestAccounts' })
         accounts = Array.isArray(reqAccs) ? reqAccs : []
-        chainId = await eip1193.request?.({ method: 'eth_chainId' })
+        chainIdHex = await eip1193.request?.({ method: 'eth_chainId' })
 
         await ensureEthers()
         startTxReconciler()
 
-        return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
-      }
-
-      // WalletConnect/AppKit path
-      await asPromise(appKit.open?.()).catch(() => undefined)
-
-      const waitFor = async (fn, predicate, timeoutMs = 180000, intervalMs = 300) => {
-        const start = Date.now()
-        while (true) {
-          const val = await asPromise(fn()).catch(() => null)
-          if (predicate(val)) return val
-          if (Date.now() - start > timeoutMs) throw new Error('Wallet connect timed out')
-          await sleep(intervalMs)
+        return {
+          success: true,
+          accounts,
+          chainId: chainIdHex,
+          address: accounts[0] ?? null,
+          signer
         }
       }
 
-      // 1) wait for provider
-      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
-      attachListeners()
+      // WalletConnect / AppKit flow
+      ensureAppKitSubscription()
 
-      // 2) now explicitly request accounts (CRITICAL FIX)
-      let reqAccs = []
-      try {
-        reqAccs = await asPromise(eip1193.request?.({ method: 'eth_requestAccounts' })).catch(() => [])
-      } catch {
-        reqAccs = []
-      }
+      // IMPORTANT: force Connect view + eip155 namespace
+      await asPromise(modal.open?.({ view: 'Connect', namespace: 'eip155' })).catch(() => undefined)
 
-      // 3) If still empty, wait for accountsChanged OR poll eth_accounts
-      if (!Array.isArray(reqAccs) || reqAccs.length === 0) {
-        reqAccs = await new Promise((resolve, reject) => {
-          const start = Date.now()
-          const timeoutMs = 180000
+      // Wait for AppKit to actually have provider + address
+      const { address, walletProvider } = await waitForConnected({
+        timeoutMs: 120000,
+        intervalMs: 250
+      })
 
-          const onAcc = (accs) => {
-            cleanup()
-            resolve(Array.isArray(accs) ? accs : [])
-          }
+      eip1193 = walletProvider
+      attachEip1193Listeners()
 
-          const poll = async () => {
-            try {
-              const a = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
-              if (Array.isArray(a) && a.length) {
-                cleanup()
-                resolve(a)
-                return
-              }
-              if (Date.now() - start > timeoutMs) {
-                cleanup()
-                reject(new Error('Wallet connect timed out'))
-                return
-              }
-              setTimeout(poll, 500)
-            } catch {
-              if (Date.now() - start > timeoutMs) {
-                cleanup()
-                reject(new Error('Wallet connect timed out'))
-                return
-              }
-              setTimeout(poll, 500)
-            }
-          }
-
-          const cleanup = () => {
-            try {
-              eip1193?.removeListener?.('accountsChanged', onAcc)
-            } catch {}
-          }
-
-          try {
-            eip1193?.on?.('accountsChanged', onAcc)
-          } catch {}
-
-          poll()
-        })
-      }
-
-      accounts = Array.isArray(reqAccs) ? reqAccs : []
-      chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
+      accounts = [address]
+      chainIdHex = toHexChainId(modal.getChainId?.()) || (await this.getChainId())
 
       await ensureEthers()
       startTxReconciler()
 
-      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
+      return { success: true, accounts, chainId: chainIdHex, address, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
       return { success: false, error: err?.message || 'Connect failed' }
@@ -464,7 +501,9 @@ const walletService = {
 
   async disconnect() {
     try {
-      await asPromise(appKit.disconnect?.()).catch(() => undefined)
+      // AppKit disconnect action path (docs)
+      await asPromise(modal.adapter?.connectionControllerClient?.disconnect?.()).catch(() => undefined)
+      await asPromise(modal.disconnect?.()).catch(() => undefined)
     } finally {
       stopTxReconciler()
       handleDisconnect()
@@ -533,7 +572,8 @@ const walletService = {
 
       if (gasLimit && gasLimit > 0n) request.gasLimit = gasLimit
       if (maxFeePerGas && maxFeePerGas > 0n) request.maxFeePerGas = maxFeePerGas
-      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n) request.maxPriorityFeePerGas = maxPriorityFeePerGas
+      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n)
+        request.maxPriorityFeePerGas = maxPriorityFeePerGas
       if (gasPrice && gasPrice > 0n) request.gasPrice = gasPrice
       if (Number.isFinite(nonce) && nonce >= 0) request.nonce = nonce
 
@@ -659,6 +699,13 @@ const walletService = {
   },
 
   destroy() {
+    try {
+      unsubscribeProvider?.()
+    } catch {
+      // ignore
+    }
+    unsubscribeProvider = null
+
     if (eip1193) {
       eip1193.removeListener?.('accountsChanged', handleAccounts)
       eip1193.removeListener?.('chainChanged', handleChain)
@@ -669,7 +716,7 @@ const walletService = {
     browserProvider = null
     signer = null
     accounts = []
-    chainId = null
+    chainIdHex = null
   }
 }
 
