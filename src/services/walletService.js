@@ -20,7 +20,6 @@ function isInjectedMetaMask(p) {
   return !!(p && (p.isMetaMask || p._metamask))
 }
 
-// pick the correct injected provider (prevents multi-provider collisions)
 function pickInjectedProvider() {
   if (typeof window === 'undefined') return null
   const eth = window.ethereum
@@ -31,7 +30,6 @@ function pickInjectedProvider() {
     const mm = providers.find((p) => isInjectedMetaMask(p))
     return mm || providers[0] || eth
   }
-
   return eth
 }
 
@@ -67,11 +65,9 @@ const toBigIntSafe = (v) => {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-
-// IMPORTANT: converts "maybe promise / maybe undefined" into a real promise
 const asPromise = (v) => Promise.resolve(v)
 
-// ---- single AppKit instance (do not create anywhere else) ----
+// ---- single AppKit instance ----
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
   networks: reownNetworks,
@@ -150,8 +146,23 @@ async function ensureProvider() {
   return null
 }
 
-async function ensureAccounts() {
+// IMPORTANT: WalletConnect wallets often require eth_requestAccounts at least once
+async function requestAccountsOnce() {
+  if (!eip1193?.request) return []
+  try {
+    const accs = await eip1193.request({ method: 'eth_requestAccounts' })
+    if (Array.isArray(accs) && accs.length) return accs
+  } catch {
+    // ignore
+  }
+  return []
+}
+
+async function ensureAccounts(opts = {}) {
   if (!eip1193) return []
+  const forceRequest = !!opts.forceRequest
+
+  // 1) try eth_accounts (passive)
   try {
     const accs = await eip1193.request?.({ method: 'eth_accounts' })
     if (Array.isArray(accs) && accs.length) {
@@ -161,6 +172,27 @@ async function ensureAccounts() {
   } catch {
     // ignore
   }
+
+  // 2) if asked, try eth_requestAccounts (active)
+  if (forceRequest) {
+    const req = await requestAccountsOnce()
+    if (Array.isArray(req) && req.length) {
+      accounts = req
+      return req
+    }
+
+    // 3) retry eth_accounts after request
+    try {
+      const accs2 = await eip1193.request?.({ method: 'eth_accounts' })
+      if (Array.isArray(accs2) && accs2.length) {
+        accounts = accs2
+        return accs2
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return accounts || []
 }
 
@@ -178,17 +210,12 @@ async function ensureEthers() {
   return { browserProvider, signer }
 }
 
-// MetaMask Mobile hydration (kept as-is; safe)
 async function ensureHydratedForSend() {
   if (!eip1193) await ensureProvider()
   if (!eip1193) return false
 
-  try {
-    await eip1193.request?.({ method: 'eth_requestAccounts' })
-  } catch {
-    // ignore (WalletConnect providers may reject)
-  }
-
+  // For send/sign we can request accounts (MetaMask works; WC may ignore)
+  await requestAccountsOnce().catch(() => [])
   await ensureAccounts()
   await ensureEthers()
   return true
@@ -293,7 +320,6 @@ const walletService = {
           // ignore
         }
       }
-
       window.addEventListener('focus', safeReconcile)
       window.addEventListener('pageshow', safeReconcile)
     }
@@ -307,7 +333,8 @@ const walletService = {
       await ensureProvider()
       if (!eip1193) return null
 
-      const accs = await ensureAccounts()
+      // Key change: if session exists but accounts are empty, force request ONCE
+      const accs = await ensureAccounts({ forceRequest: true })
       if (!accs?.length) return null
 
       chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
@@ -327,12 +354,14 @@ const walletService = {
     }
   },
 
-  async connect() {
+  async connect(options = {}) {
+    const prefer = options?.prefer || 'auto'
+
     try {
       const injected = pickInjectedProvider()
 
-      // Prefer MetaMask injection if present (unchanged)
-      if (isInjectedMetaMask(injected)) {
+      // injected MetaMask path
+      if (prefer !== 'modal' && isInjectedMetaMask(injected)) {
         eip1193 = injected
         attachListeners()
 
@@ -343,20 +372,13 @@ const walletService = {
         await ensureEthers()
         startTxReconciler()
 
-        return {
-          success: true,
-          accounts,
-          chainId,
-          address: accounts[0] ?? null,
-          signer
-        }
+        return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
       }
 
-      // Otherwise open AppKit modal (WalletConnect)
+      // WalletConnect/AppKit path
       await asPromise(appKit.open?.()).catch(() => undefined)
 
-      // SAFE waitFor: never calls .catch on undefined
-      const waitFor = async (fn, predicate, timeoutMs = 180000, intervalMs = 250) => {
+      const waitFor = async (fn, predicate, timeoutMs = 180000, intervalMs = 300) => {
         const start = Date.now()
         while (true) {
           const val = await asPromise(fn()).catch(() => null)
@@ -366,58 +388,26 @@ const walletService = {
         }
       }
 
-      // 1) Wait for WC provider to exist
-      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p, 180000, 250)
+      // 1) wait for provider
+      eip1193 = await waitFor(() => appKit.getProvider?.(), (p) => !!p)
       attachListeners()
 
-      // 2) Best-effort: many WC wallets won't populate eth_accounts until this is called
-      try {
-        const maybeReq = await asPromise(eip1193.request?.({ method: 'eth_requestAccounts' })).catch(() => null)
-        if (Array.isArray(maybeReq) && maybeReq.length) {
-          accounts = maybeReq
-        }
-      } catch {
-        // ignore
-      }
+      // 2) now explicitly request accounts (CRITICAL FIX)
+      const reqAccs = await waitFor(
+        async () => {
+          const a = await requestAccountsOnce()
+          return a
+        },
+        (arr) => Array.isArray(arr) && arr.length > 0
+      )
 
-      // 3) Now wait for accounts to show up, but DO NOT block forever.
-      // If accounts never arrive, return pending so WalletContext can keep polling refresh().
-      const start = Date.now()
-      const HARD_WAIT_MS = 20000 // short wait inside connect; UI should not hang here
-      const POLL_MS = 300
-
-      while (Date.now() - start < HARD_WAIT_MS) {
-        const accs = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
-        if (Array.isArray(accs) && accs.length) {
-          accounts = accs
-          break
-        }
-        await sleep(POLL_MS)
-      }
-
-      // Chain id can be returned even if accounts aren't hydrated yet
+      accounts = reqAccs
       chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
 
-      // If we got accounts, finish fully
-      if (accounts?.length) {
-        await ensureEthers()
-        startTxReconciler()
-
-        return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
-      }
-
-      // If accounts still empty, do NOT return failure.
-      // This is the critical part for Uniswap/Trust wallets:
-      // the wallet says connected, but the browser dapp needs time to hydrate.
+      await ensureEthers()
       startTxReconciler()
-      return {
-        success: true,
-        pending: true,
-        accounts: [],
-        chainId,
-        address: null,
-        signer: null
-      }
+
+      return { success: true, accounts, chainId, address: accounts[0] ?? null, signer }
     } catch (err) {
       console.warn('[walletService] connect error:', err?.message || err)
       return { success: false, error: err?.message || 'Connect failed' }
@@ -439,7 +429,6 @@ const walletService = {
     return await ensureAccounts()
   },
 
-  // SIMPLE SEND (hash only) — single path via sendTransactionWithReceipt
   async sendTransaction(tx) {
     const r = await this.sendTransactionWithReceipt(tx, { kind: 'tx', title: 'Transaction', step: 'tx' })
     return r?.success
@@ -447,7 +436,6 @@ const walletService = {
       : { success: false, error: r?.error || 'Transaction failed' }
   },
 
-  // BULLETPROOF SEND (hash + receipt) — unified through txSend.js
   async sendTransactionWithReceipt(tx, meta = {}) {
     const waitConfirms = Number(meta.waitConfirms ?? 1)
     const waitTimeoutMs = Number(meta.waitTimeoutMs ?? 180000)
@@ -487,10 +475,8 @@ const walletService = {
       const data = typeof tx?.data === 'string' ? tx.data : '0x'
       const value = toBigIntSafe(tx?.value) ?? 0n
 
-      // ethers TransactionRequest
       const request = { from, to, data, value }
 
-      // pass-through optional gas/fees if present
       const gasLimit = toBigIntSafe(tx?.gasLimit ?? tx?.gas)
       const maxFeePerGas = toBigIntSafe(tx?.maxFeePerGas)
       const maxPriorityFeePerGas = toBigIntSafe(tx?.maxPriorityFeePerGas)
@@ -499,8 +485,7 @@ const walletService = {
 
       if (gasLimit && gasLimit > 0n) request.gasLimit = gasLimit
       if (maxFeePerGas && maxFeePerGas > 0n) request.maxFeePerGas = maxFeePerGas
-      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n)
-        request.maxPriorityFeePerGas = maxPriorityFeePerGas
+      if (maxPriorityFeePerGas && maxPriorityFeePerGas > 0n) request.maxPriorityFeePerGas = maxPriorityFeePerGas
       if (gasPrice && gasPrice > 0n) request.gasPrice = gasPrice
       if (Number.isFinite(nonce) && nonce >= 0) request.nonce = nonce
 
@@ -553,7 +538,6 @@ const walletService = {
 
       await ensureHydratedForSend()
 
-      // MetaMask path (most reliable)
       if (isInjectedMetaMask(eip1193)) {
         const from = await this.getAddress()
         const sig = await eip1193.request({
@@ -563,7 +547,6 @@ const walletService = {
         return { success: true, signature: sig }
       }
 
-      // WalletConnect / AppKit path
       await ensureEthers()
       if (!signer) return { success: false, error: 'Signer unavailable (provider not hydrated)' }
       const signature = await signer.signMessage(message)
