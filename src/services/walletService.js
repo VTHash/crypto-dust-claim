@@ -393,15 +393,63 @@ const walletService = {
       attachListeners()
 
       // 2) now explicitly request accounts (CRITICAL FIX)
-      const reqAccs = await waitFor(
-        async () => {
-          const a = await requestAccountsOnce()
-          return a
-        },
-        (arr) => Array.isArray(arr) && arr.length > 0
-      )
+      let reqAccs = []
+      try {
+        reqAccs = await asPromise(eip1193.request?.({ method: 'eth_requestAccounts' })).catch(() => [])
+      } catch {
+        reqAccs = []
+      }
 
-      accounts = reqAccs
+      // 3) If still empty, wait for accountsChanged OR poll eth_accounts
+      if (!Array.isArray(reqAccs) || reqAccs.length === 0) {
+        reqAccs = await new Promise((resolve, reject) => {
+          const start = Date.now()
+          const timeoutMs = 180000
+
+          const onAcc = (accs) => {
+            cleanup()
+            resolve(Array.isArray(accs) ? accs : [])
+          }
+
+          const poll = async () => {
+            try {
+              const a = await asPromise(eip1193.request?.({ method: 'eth_accounts' })).catch(() => [])
+              if (Array.isArray(a) && a.length) {
+                cleanup()
+                resolve(a)
+                return
+              }
+              if (Date.now() - start > timeoutMs) {
+                cleanup()
+                reject(new Error('Wallet connect timed out'))
+                return
+              }
+              setTimeout(poll, 500)
+            } catch {
+              if (Date.now() - start > timeoutMs) {
+                cleanup()
+                reject(new Error('Wallet connect timed out'))
+                return
+              }
+              setTimeout(poll, 500)
+            }
+          }
+
+          const cleanup = () => {
+            try {
+              eip1193?.removeListener?.('accountsChanged', onAcc)
+            } catch {}
+          }
+
+          try {
+            eip1193?.on?.('accountsChanged', onAcc)
+          } catch {}
+
+          poll()
+        })
+      }
+
+      accounts = Array.isArray(reqAccs) ? reqAccs : []
       chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => null)
 
       await ensureEthers()
