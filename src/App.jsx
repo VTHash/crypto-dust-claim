@@ -43,10 +43,10 @@ const METAMASK_DEEPLINK = 'https://metamask.app.link/dapp/dustclaim.eth.limo'
 const DailyDustCta = () => (
   <div className="daily-dust-cta">
     <a className="daily-dust-btn" href={METAMASK_DEEPLINK}>
-      Claim your daily DUST
+      Claim your daily DUST on Linea
     </a>
     <div className="daily-dust-sub">
-      Open app in MetaMask for smooth transfer
+      To claim Token use MetaMask only
     </div>
   </div>
 )
