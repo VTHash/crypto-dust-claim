@@ -69,6 +69,49 @@ const toBigIntSafe = (v) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const asPromise = (v) => Promise.resolve(v)
 
+function safeRemoveListeners(p) {
+  try {
+    p?.removeListener?.('accountsChanged', handleAccounts)
+    p?.removeListener?.('chainChanged', handleChain)
+    p?.removeListener?.('disconnect', handleDisconnect)
+  } catch {
+    // ignore
+  }
+}
+
+function hardClearWcStorage() {
+  try {
+    const ls = typeof window !== 'undefined' ? window.localStorage : null
+    const ss = typeof window !== 'undefined' ? window.sessionStorage : null
+
+    const clearMatching = (store) => {
+      if (!store) return
+      const keys = []
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i)
+        if (!k) continue
+        if (
+          k.startsWith('wc@') ||
+          k.startsWith('walletconnect') ||
+          k.startsWith('WALLETCONNECT') ||
+          k.includes('walletconnect') ||
+          k.includes('WalletConnect') ||
+          k.includes('reown') ||
+          k.includes('appkit')
+        ) {
+          keys.push(k)
+        }
+      }
+      keys.forEach((k) => store.removeItem(k))
+    }
+
+    clearMatching(ls)
+    clearMatching(ss)
+  } catch {
+    // ignore
+  }
+}
+
 // ---- single AppKit instance (do not create anywhere else) ----
 const appKit = createAppKit({
   adapters: [new EthersAdapter()],
@@ -92,6 +135,9 @@ let onChainChanged = null
 let onDisconnected = null
 
 let unsubscribeProviders = null
+let isDisconneting = false
+let hardDisconnetedAt = 0
+const HARD_DISCONNECT_COOLDOWN_MS = 8000
 
 function handleAccounts(accs = []) {
   accounts = Array.isArray(accs) ? accs : []
@@ -230,11 +276,19 @@ function ensureProviderSubscription() {
   if (unsubscribeProviders) return
   try {
     unsubscribeProviders = appKit.subscribeProviders?.((state) => {
+      // If we just hard-disconnected, ignore provider updates for a few seconds.
+      if (
+        isDisconnecting ||
+        (hardDisconnectedAt && Date.now() - hardDisconnectedAt < HARD_DISCONNECT_COOLDOWN_MS)
+      ) {
+        return
+      }
+
       const p = state?.['eip155']
       if (p && p !== eip1193) {
         eip1193 = p
         attachListeners()
-        // proactive refresh of cached data
+
         ;(async () => {
           try {
             chainId = await asPromise(eip1193.request?.({ method: 'eth_chainId' })).catch(() => chainId)
@@ -364,6 +418,10 @@ const walletService = {
   stopTxReconciler,
 
   async restoreSession() {
+    // If user intentionally disconnected, do not auto-restore
+    if (hardDisconnetedAt && Date.now() - hardDisconnetedAt < HARD_DISCONNECT_COOLDOWN_MS) {
+      return null
+    }
     try {
       ensureProviderSubscription()
       await ensureProvider()
@@ -500,31 +558,41 @@ const walletService = {
   },
 
   async disconnect() {
+  isDisconnecting = true
+  hardDisconnectedAt = Date.now()
+
   try {
-    // 1) Attempt AppKit disconnect (WalletConnect session kill)
+    // Kill WalletConnect/AppKit session
     await asPromise(appKit.disconnect?.()).catch(() => undefined)
   } finally {
-    // 2) Remove listeners from current provider
+    // Stop receiving provider updates (prevents immediate re-hydration)
+    try { unsubscribeProviders?.() } catch {}
+    unsubscribeProviders = null
+
+    // Remove listeners from current provider
     safeRemoveListeners(eip1193)
 
-    // 3) Stop background polling/reconciler
+    // Stop background polling/reconciler
     stopTxReconciler()
 
-    // 4) Close modal if any
+    // Close modal if any
     await asPromise(appKit.close?.()).catch(() => undefined)
 
-    // 5) Clear all in-memory caches
+    // Clear in-memory caches
     eip1193 = null
     browserProvider = null
     signer = null
     accounts = []
     chainId = null
 
-    // 6) Optional: wipe WC/AppKit persisted session so next connect can pick a different wallet cleanly
+    // Clear persisted WalletConnect/AppKit session
     if (typeof window !== 'undefined') hardClearWcStorage()
 
-    // 7) Notify UI
+    // Notify UI
     onDisconnected?.()
+
+    // Re-enable future connections after latch window starts
+    isDisconnecting = false
   }
 
   return { success: true }

@@ -31,6 +31,9 @@ export const WalletProvider = ({ children }) => {
     if (!mountedRef.current) return
     fn()
   }
+  
+  const manualDisconnectAtRef = useRef(0)
+  const MANUAL_DISCONNECT_COOLDOWN_MS = 8000
 
   const connectInFlightRef = useRef(null)
   const txQueueRef = useRef(Promise.resolve())
@@ -86,37 +89,47 @@ export const WalletProvider = ({ children }) => {
   }, [])
 
   // Restore session
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const s = await walletService.restoreSession?.()
-        if (cancelled || !s) {
-          await refreshFromProvider()
-          return
+    useEffect(() => {
+      let cancelled = false
+      ;(async () => {
+        try {
+          const s = await walletService.restoreSession?.()
+          const since = Date.now() - (manualDisconnectAtRef.current || 0)
+  
+          // If cancelled, no session, or user recently disconnected, do not auto-restore
+          if (cancelled) return 
+          if (since < MANUAL_DISCONNECT_COOLDOWN_MS) return
+          if (!s) {
+            await refreshFromProvider()
+            return
+          }
+  
+          safeSet(() => {
+            setAccounts(s.accounts || [])
+            setAddress(s.address || s.account || s.accounts?.[0] || null)
+            setChainId(s.chainId || null)
+            setIsConnected(!!(s.address || s.account || s.accounts?.[0]))
+          })
+  
+          setTimeout(() => {
+            if (cancelled) return
+            const since2 = Date.now() - (manualDisconnectAtRef.current || 0)
+            if (since2 < MANUAL_DISCONNECT_COOLDOWN_MS) {
+              // User recently disconnected, do not auto-restore
+              return
+            }
+            refreshFromProvider()
+          }, 600)
+        } catch (err) {
+          // On error, attempt a provider refresh and ignore
+          try { await refreshFromProvider() } catch { }
         }
-
-        safeSet(() => {
-          setAccounts(s.accounts || [])
-          setAddress(s.address || s.account || s.accounts?.[0] || null)
-          setChainId(s.chainId || null)
-          setIsConnected(!!(s.address || s.account || s.accounts?.[0]))
-        })
-
-        setTimeout(() => {
-          if (!cancelled) refreshFromProvider()
-        }, 600)
-      } catch {
-        setTimeout(() => {
-          if (!cancelled) refreshFromProvider()
-        }, 600)
+      })()
+      return () => {
+        cancelled = true
       }
-    })()
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
   // Single-flight connect
   const connect = async () => {
@@ -154,24 +167,26 @@ export const WalletProvider = ({ children }) => {
           return { success: false, error: res?.error || 'Wallet connect timed out' }
         }
 
-        return { success: true, ...res }
-      } catch (err) {
-        clearPending()
-        safeSet(() => {
-          setError(err?.message || 'Connect failed')
-          setLoading(false)
-        })
-        return { success: false, error: err?.message || 'Connect failed' }
-      } finally {
-        connectInFlightRef.current = null
-      }
-    })()
+  return { success: true, ...res }
+} catch (err) {
+  clearPending()
+  safeSet(() => {
+    setError(err?.message || 'Connect failed')
+    setLoading(false)
+  })
+  return { success: false, error: err?.message || 'Connect failed' }
+} finally {
+  connectInFlightRef.current = null
+}
+})()
 
     connectInFlightRef.current = p
     return p
   }
 
   const disconnect = async () => {
+    manualDisconnectAtRef.current = Date.now()
+
   safeSet(() => {
     setLoading(true)
     setError(null)
@@ -190,10 +205,12 @@ export const WalletProvider = ({ children }) => {
       setLoading(false)
     })
 
-    // optional: confirm provider is empty (prevents “sticky” UI)
+    // Do not refresh right away, as some wallets take a moment to process the disconnect
+    // WalletConnect/AppKit can report still connected immediately after disconnect
+    await sleep(800)
     try { await refreshFromProvider() } catch { /* ignore */ }
   }
-}
+  }
 
   const switchChain = async (targetId) => {
     safeSet(() => setError(null))
