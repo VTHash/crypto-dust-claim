@@ -172,23 +172,28 @@ export const WalletProvider = ({ children }) => {
   }
 
   const disconnect = async () => {
+  safeSet(() => {
+    setLoading(true)
+    setError(null)
+    setPendingRequest(null)
+  })
+
+  try {
+    await walletService.disconnect()
+  } finally {
+    // hard reset UI state
     safeSet(() => {
-      setLoading(true)
-      setError(null)
-      setPendingRequest(null)
+      setAccounts([])
+      setAddress(null)
+      setChainId(null)
+      setIsConnected(false)
+      setLoading(false)
     })
-    try {
-      await walletService.disconnect()
-    } finally {
-      safeSet(() => {
-        setAccounts([])
-        setAddress(null)
-        setChainId(null)
-        setIsConnected(false)
-        setLoading(false)
-      })
-    }
+
+    // optional: confirm provider is empty (prevents “sticky” UI)
+    try { await refreshFromProvider() } catch { /* ignore */ }
   }
+}
 
   const switchChain = async (targetId) => {
     safeSet(() => setError(null))

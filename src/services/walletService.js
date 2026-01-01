@@ -500,14 +500,35 @@ const walletService = {
   },
 
   async disconnect() {
-    try {
-      await asPromise(appKit.disconnect?.()).catch(() => undefined)
-    } finally {
-      stopTxReconciler()
-      handleDisconnect()
-    }
-    return { success: true }
-  },
+  try {
+    // 1) Attempt AppKit disconnect (WalletConnect session kill)
+    await asPromise(appKit.disconnect?.()).catch(() => undefined)
+  } finally {
+    // 2) Remove listeners from current provider
+    safeRemoveListeners(eip1193)
+
+    // 3) Stop background polling/reconciler
+    stopTxReconciler()
+
+    // 4) Close modal if any
+    await asPromise(appKit.close?.()).catch(() => undefined)
+
+    // 5) Clear all in-memory caches
+    eip1193 = null
+    browserProvider = null
+    signer = null
+    accounts = []
+    chainId = null
+
+    // 6) Optional: wipe WC/AppKit persisted session so next connect can pick a different wallet cleanly
+    if (typeof window !== 'undefined') hardClearWcStorage()
+
+    // 7) Notify UI
+    onDisconnected?.()
+  }
+
+  return { success: true }
+},
 
   async getAccounts() {
     ensureProviderSubscription()
