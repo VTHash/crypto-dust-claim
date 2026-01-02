@@ -119,7 +119,8 @@ const TOKENLIST_SOURCES = {
 // Linea
 59144: [
 'https://tokens.uniswap.org',
-'https://raw.githubusercontent.com/Consensys/linea-token-list/main/build/linea-mainnet.json',
+'linea-mainnet-token-shortlist.json',
+'https://raw.githubusercontent.com/Consensys/linea-token-list/main/json/linea-mainnet-token-shortlist.json',
 ],
 
 // Zora
