@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { useNavigate } from "react-router-dom";
 import "./TransparencyDashboard.css";
+
 /**
  * Public Transparency Dashboard (read-only, no wallet)
  *
@@ -20,6 +21,7 @@ const WETH_ADDRESS = "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f";
 
 // iZUMi Analytics-confirmed pool address
 const IZUMI_POOL = {
+  key: "izumi",
   name: "WETH / DUST",
   address: "0x64DfC88EBD972ED35365aAA0fDACBEB4086Ee941",
   dex: "iZUMi",
@@ -27,6 +29,19 @@ const IZUMI_POOL = {
   analyticsUrl:
     "https://analytics.izumi.finance/pool?chainId=59144&poolAddress=0x64dfc88ebd972ed35365aaa0fdacbeb4086ee941",
 };
+
+// Lynex pool (your confirmed analytics/pairs address)
+const LYNEX_POOL = {
+  key: "lynex",
+  name: "WETH / DUST",
+  address: "0x45c19a6095aa8be674b51cca5d60bd28efa242c7",
+  dex: "Lynex",
+  feeTier: "0.01%",
+  analyticsUrl:
+    "https://app.lynex.fi/analytics/pairs/0x45c19a6095aa8be674b51cca5d60bd28efa242c7",
+};
+
+const POOLS = [IZUMI_POOL, LYNEX_POOL];
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 
@@ -124,10 +139,13 @@ export default function TransparencyDashboard() {
   const [asOf, setAsOf] = useState(nowSec());
   const [tokenMeta, setTokenMeta] = useState(null);
   const [emissions, setEmissions] = useState(null);
-  const [poolBalances, setPoolBalances] = useState(null);
+
+  // poolBalancesByKey: { izumi: { poolDustBalance, poolWethBalance }, lynex: {...} }
+  const [poolBalancesByKey, setPoolBalancesByKey] = useState(null);
+
   const [refreshNonce, setRefreshNonce] = useState(0);
 
-  // Button styles (matches your theme without relying on extra CSS)
+  // Button styles 
   const headerBtnStyle = {
     display: "inline-flex",
     alignItems: "center",
@@ -184,15 +202,21 @@ export default function TransparencyDashboard() {
       setErr("");
 
       try {
-        // Sanity checks
+        // Sanity checks (addresses + minimal contract existence)
         if (!ethers.isAddress(DUST_ADDRESS)) throw new Error("Invalid DUST_ADDRESS.");
         if (!ethers.isAddress(WETH_ADDRESS)) throw new Error("Invalid WETH_ADDRESS.");
-        if (!ethers.isAddress(IZUMI_POOL.address)) throw new Error("Invalid IZUMI_POOL.address.");
 
-        // Optional: ensure the pool address is actually a contract (prevents weird UX)
-        const code = await provider.getCode(IZUMI_POOL.address);
-        if (!code || code === "0x") {
-          throw new Error("Pool address has no contract code on Linea.");
+        for (const p of POOLS) {
+          if (!ethers.isAddress(p.address)) throw new Error(`Invalid pool address for ${p.dex}.`);
+        }
+
+        // Verify pool addresses have code (prevents confusing empty results)
+        // (2 calls total for 2 pools)
+        const codes = await Promise.all(POOLS.map((p) => provider.getCode(p.address)));
+        for (let i = 0; i < POOLS.length; i++) {
+          if (!codes[i] || codes[i] === "0x") {
+            throw new Error(`${POOLS[i].dex} pool address has no contract code on Linea.`);
+          }
         }
 
         const dust = new ethers.Contract(DUST_ADDRESS, ERC20_ABI, provider);
@@ -207,14 +231,26 @@ export default function TransparencyDashboard() {
         const from24h = fromBlocks[24 * 3600];
         const from7d = fromBlocks[7 * 24 * 3600];
 
-        // Parallelized reads
-        const [name, symbol, decimals, totalSupply, poolDustBal, poolWethBal] = await Promise.all([
+        // Parallelized token meta + supply + pool balances
+        // (adds only 2 extra balanceOf calls for Lynex)
+        const [
+          name,
+          symbol,
+          decimals,
+          totalSupply,
+          izumiDustBal,
+          izumiWethBal,
+          lynexDustBal,
+          lynexWethBal,
+        ] = await Promise.all([
           dust.name(),
           dust.symbol(),
           dust.decimals(),
           dust.totalSupply(),
           dust.balanceOf(IZUMI_POOL.address),
           weth.balanceOf(IZUMI_POOL.address),
+          dust.balanceOf(LYNEX_POOL.address),
+          weth.balanceOf(LYNEX_POOL.address),
         ]);
 
         if (!mounted) return;
@@ -222,7 +258,18 @@ export default function TransparencyDashboard() {
         setTokenMeta({ name, symbol, decimals: Number(decimals) });
         setAsOf(nowSec());
 
-        // Mint logs (2 calls) — required for your emissions metrics
+        setPoolBalancesByKey({
+          [IZUMI_POOL.key]: {
+            poolDustBalance: BigInt(izumiDustBal.toString()),
+            poolWethBalance: BigInt(izumiWethBal.toString()),
+          },
+          [LYNEX_POOL.key]: {
+            poolDustBalance: BigInt(lynexDustBal.toString()),
+            poolWethBalance: BigInt(lynexWethBal.toString()),
+          },
+        });
+
+        // Mint logs (2 calls) — required for emissions metrics
         const transferTopic = dust.interface.getEvent("Transfer").topicHash;
 
         const mintFilter24h = {
@@ -268,11 +315,6 @@ export default function TransparencyDashboard() {
           minted7d,
           dailyActiveClaimers: uniqueClaimers24h.size,
         });
-
-        setPoolBalances({
-          poolDustBalance: BigInt(poolDustBal.toString()),
-          poolWethBalance: BigInt(poolWethBal.toString()),
-        });
       } catch (e) {
         if (!mounted) return;
         setErr(e?.message || "Failed to load transparency dashboard.");
@@ -290,13 +332,146 @@ export default function TransparencyDashboard() {
 
   const decimals = tokenMeta?.decimals ?? 18;
 
-  const health = useMemo(() => {
-    if (!emissions || !poolBalances) return null;
-    return {
-      poolDustPctOfSupply: percentFromRatio(poolBalances.poolDustBalance, emissions.totalSupply, 6),
-      dailyEmissionsVsPoolDust: percentFromRatio(emissions.minted24h, poolBalances.poolDustBalance, 6),
-    };
-  }, [emissions, poolBalances]);
+  const healthByPool = useMemo(() => {
+    if (!emissions || !poolBalancesByKey) return null;
+
+    const out = {};
+    for (const p of POOLS) {
+      const b = poolBalancesByKey[p.key];
+      if (!b) continue;
+
+      out[p.key] = {
+        poolDustPctOfSupply: percentFromRatio(b.poolDustBalance, emissions.totalSupply, 6),
+        dailyEmissionsVsPoolDust: percentFromRatio(emissions.minted24h, b.poolDustBalance, 6),
+      };
+    }
+    return out;
+  }, [emissions, poolBalancesByKey]);
+
+  function PoolBlock({ pool }) {
+    const b = poolBalancesByKey?.[pool.key];
+    const h = healthByPool?.[pool.key];
+
+    return (
+      <>
+        {/* Pair header with logos (same design for both pools) */}
+        <div style={pairHeaderStyle}>
+          <div style={iconsWrapStyle}>
+            <img
+              src="/logo/weth.png"
+              alt="WETH"
+              style={{
+                ...iconBaseStyle,
+                position: "absolute",
+                left: 0,
+                top: 2,
+                zIndex: 1,
+                boxShadow: "0 0 8px rgba(56,189,248,.35)",
+              }}
+            />
+            <img
+              src="/logo/dustclaim.png"
+              alt="DUST"
+              style={{
+                ...iconBaseStyle,
+                position: "absolute",
+                right: 0,
+                top: 0,
+                zIndex: 2,
+                boxShadow: "0 0 10px rgba(34,197,94,.45), inset 0 0 6px rgba(34,197,94,.35)",
+              }}
+            />
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 950,
+                letterSpacing: ".3px",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexWrap: "wrap",
+              }}
+            >
+              WETH <span style={{ opacity: 0.5 }}>/</span> DUST
+              <span
+                style={{
+                  marginLeft: 6,
+                  padding: "2px 7px",
+                  fontSize: 11,
+                  fontWeight: 900,
+                  borderRadius: 999,
+                  color: "#cfefff",
+                  background: "rgba(56,189,248,.14)",
+                  border: "1px solid rgba(56,189,248,.45)",
+                }}
+              >
+                {pool.feeTier}
+              </span>
+              <span
+                style={{
+                  padding: "2px 7px",
+                  fontSize: 11,
+                  fontWeight: 900,
+                  borderRadius: 999,
+                  color: "#baffd8",
+                  background: "rgba(34,197,94,.14)",
+                  border: "1px solid rgba(34,197,94,.40)",
+                }}
+              >
+                {pool.dex}
+              </span>
+            </div>
+
+            <div style={{ marginTop: 2, fontSize: 12, color: "var(--muted)" }}>
+              {pool.dex} • Linea • Pool balances view
+            </div>
+          </div>
+        </div>
+
+        <div className="divider" />
+
+        {b ? (
+          <>
+            <div className="td-grid">
+              <Metric
+                label="Pool DUST balance (on-chain)"
+                value={`${formatUnitsSafe(b.poolDustBalance, 18)} DUST`}
+              />
+              <Metric
+                label="Pool WETH balance (on-chain)"
+                value={`${formatUnitsSafe(b.poolWethBalance, 18)} WETH`}
+              />
+              <Metric label="Pool contract" value={shortAddr(pool.address)} />
+              <Metric
+                label="Analytics"
+                value={
+                  <a className="explorerLink" href={pool.analyticsUrl} target="_blank" rel="noreferrer">
+                    View on {pool.dex} Analytics
+                  </a>
+                }
+              />
+            </div>
+
+            <div className="divider" />
+
+            <h2 className="td-h2" style={{ marginTop: 2 }}>
+              Health indicators (proxy)
+            </h2>
+
+            <div className="td-grid">
+              <Metric label="Pool DUST vs total supply" value={h?.poolDustPctOfSupply ?? "-"} />
+              <Metric label="Daily emissions as % of pool DUST" value={h?.dailyEmissionsVsPoolDust ?? "-"} />
+            </div>
+          </>
+        ) : (
+          <div className="td-muted">Pool balances unavailable.</div>
+        )}
+      </>
+    );
+  }
 
   return (
     <div className="td-wrap">
@@ -309,7 +484,15 @@ export default function TransparencyDashboard() {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
+          }}
+        >
           <button style={headerBtnStyle} onClick={() => navigate("/dashboard")}>
             Back to Dashboard
           </button>
@@ -355,108 +538,16 @@ export default function TransparencyDashboard() {
             </div>
           </section>
 
-          {/* Liquidity */}
+          {/* Liquidity both pools */}
           <section className="td-card">
             <h2 className="td-h2">Liquidity</h2>
 
-            {/* Pair header with logos */}
-            <div style={pairHeaderStyle}>
-              <div style={iconsWrapStyle}>
-                <img
-                  src="/logo/weth.png"
-                  alt="WETH"
-                  style={{
-                    ...iconBaseStyle,
-                    position: "absolute",
-                    left: 0,
-                    top: 2,
-                    zIndex: 1,
-                    boxShadow: "0 0 8px rgba(56,189,248,.35)",
-                  }}
-                />
-                <img
-                  src="/logo/dustclaim.png"
-                  alt="DUST"
-                  style={{
-                    ...iconBaseStyle,
-                    position: "absolute",
-                    right: 0,
-                    top: 0,
-                    zIndex: 2,
-                    boxShadow: "0 0 10px rgba(34,197,94,.45), inset 0 0 6px rgba(34,197,94,.35)",
-                  }}
-                />
-              </div>
+            <PoolBlock pool={IZUMI_POOL} />
 
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 950, letterSpacing: ".3px", display: "flex", alignItems: "center", gap: 6 }}>
-                  WETH <span style={{ opacity: 0.5 }}>/</span> DUST
-                  <span
-                    style={{
-                      marginLeft: 6,
-                      padding: "2px 7px",
-                      fontSize: 11,
-                      fontWeight: 900,
-                      borderRadius: 999,
-                      color: "#cfefff",
-                      background: "rgba(56,189,248,.14)",
-                      border: "1px solid rgba(56,189,248,.45)",
-                    }}
-                  >
-                    {IZUMI_POOL.feeTier}
-                  </span>
-                </div>
-                <div style={{ marginTop: 2, fontSize: 12, color: "var(--muted)" }}>
-                  {IZUMI_POOL.dex} • Linea • Pool balances view
-                </div>
-              </div>
-            </div>
+            <div className="divider" style={{ margin: "16px 0" }} />
 
-            <div className="divider" />
-
-            {poolBalances ? (
-              <>
-                <div className="td-grid">
-                  <Metric
-                    label="Pool DUST balance (on-chain)"
-                    value={`${formatUnitsSafe(poolBalances.poolDustBalance, 18)} DUST`}
-                  />
-                  <Metric
-                    label="Pool WETH balance (on-chain)"
-                    value={`${formatUnitsSafe(poolBalances.poolWethBalance, 18)} WETH`}
-                  />
-                  <Metric label="Pool contract" value={shortAddr(IZUMI_POOL.address)} />
-                  <Metric
-                    label="Analytics"
-                    value={
-                      <a className="explorerLink" href={IZUMI_POOL.analyticsUrl} target="_blank" rel="noreferrer">
-                        View on iZUMi Analytics
-                      </a>
-                    }
-                  />
-                </div>
-
-              </>
-            ) : (
-              <div className="td-muted">Pool balances unavailable.</div>
-            )}
+            <PoolBlock pool={LYNEX_POOL} />
           </section>
-
-          {/* Health */}
-          <section className="td-card">
-  <h2 className="td-h2">Health indicators</h2>
-
-  <div className="td-grid">
-    <Metric
-      label="Pool DUST vs total supply (proxy)"
-      value={health?.poolDustPctOfSupply ?? "-"}
-    />
-    <Metric
-      label="Daily emissions as % of pool DUST (proxy)"
-      value={health?.dailyEmissionsVsPoolDust ?? "-"}
-    />
-  </div>
-</section>
         </>
       )}
     </div>
