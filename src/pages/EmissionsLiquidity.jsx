@@ -505,7 +505,7 @@ function EmissionsLiquidity() {
 
           {/* Dashboard Spec */}
           <section className="section" id="dashboard">
-            <h2 className="h2">Public Transparency Dashboard (Planned)</h2>
+            <h2 className="h2">Public Transparency Dashboard</h2>
             <p className="p">
               A read-only dashboard (no wallet connection) will visualize emissions and liquidity using on-chain data.
             </p>
@@ -537,7 +537,6 @@ function EmissionsLiquidity() {
               <ul>
                 <li>Daily emissions as % of pool liquidity</li>
                 <li>Emission vs liquidity trend charts</li>
-                <li>Slippage observations during peak volume</li>
               </ul>
             </div>
           </section>
