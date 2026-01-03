@@ -448,15 +448,19 @@ export default function TransparencyDashboard() {
 
           {/* Health */}
           <section className="td-card">
-            <h2 className="td-h2">Health indicators</h2>
+  <h2 className="td-h2">Health indicators</h2>
 
-            <div className="td-grid">
-              <Metric label="Pool DUST vs total supply (proxy)" value={health?.poolDustPctOfSupply ?? "-"} />
-              <Metric label="Daily emissions as % of pool DUST (proxy)" value={health?.dailyEmissionsVsPoolDust ?? "-"} />
-              <Metric label="Emission vs liquidity trend charts" value="Planned: add daily snapshots/indexer for charts." />
-              <Metric label="Slippage observations during peak volume" value="Planned: requires pool-specific swap decoding." />
-            </div>
-          </section>
+  <div className="td-grid">
+    <Metric
+      label="Pool DUST vs total supply (proxy)"
+      value={health?.poolDustPctOfSupply ?? "-"}
+    />
+    <Metric
+      label="Daily emissions as % of pool DUST (proxy)"
+      value={health?.dailyEmissionsVsPoolDust ?? "-"}
+    />
+  </div>
+</section>
         </>
       )}
     </div>
