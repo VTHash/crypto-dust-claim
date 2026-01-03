@@ -436,10 +436,6 @@ export default function TransparencyDashboard() {
                   />
                 </div>
 
-                <div className="td-note">
-                  We intentionally use ERC20 <code>balanceOf(pool)</code> for liquidity so the dashboard is compatible with
-                  any pool implementation and avoids ABI-specific reverts.
-                </div>
               </>
             ) : (
               <div className="td-muted">Pool balances unavailable.</div>
