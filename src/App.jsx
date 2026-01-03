@@ -12,8 +12,10 @@ import WalletScreen from './pages/WalletScreen'
 import Dashboard from './pages/Dashboard'
 import DustScanner from './pages/DustScanner'
 import ClaimScreen from './pages/ClaimScreen'
-import GlobalStatsWidget from './components/GlobalStatsWidget'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
+import TransparencyDashboard from './pages/TransparencyDashboard' // ✅ NEW
+
+import GlobalStatsWidget from './components/GlobalStatsWidget'
 import TipPill from './components/TipPill'
 
 // Legal pages
@@ -83,6 +85,12 @@ const App = () => {
             element={<AnalyticsDashboard />}
           />
 
+          {/* ✅ NEW: Public read-only transparency dashboard */}
+          <Route
+            path="/transparency"
+            element={<TransparencyDashboard />}
+          />
+
           {/* Protected pages (require wallet connection) */}
           <Route
             path="/dashboard"
@@ -108,6 +116,7 @@ const App = () => {
           <Route path="/cookies" element={<CookiePolicy />} />
           <Route path="/legal" element={<LegalDisclaimers />} />
           <Route path="/emissions" element={<EmissionsLiquidity />} />
+          <Route path="/transparency" element={<TransparencyDashboard />} />
           {/* Fallback for unmatched paths */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

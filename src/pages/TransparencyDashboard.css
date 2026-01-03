@@ -1,0 +1,241 @@
+:root{
+  --bg0:#05080d;
+  --bg1:#070d14;
+  --text:#e6edf3;
+  --muted:rgba(230,237,243,.72);
+  --muted2:rgba(230,237,243,.58);
+  --blue:#38bdf8;
+  --green:#22c55e;
+  --card:rgba(255,255,255,.03);
+  --line:rgba(34,197,94,.22);
+  --shadowBlue: 0 0 8px rgba(56,189,248,1), 0 0 24px rgba(56,189,248,.85), 0 0 54px rgba(56,189,248,.65);
+  --shadowGreen: inset 0 0 10px rgba(34,197,94,.55), 0 0 16px rgba(34,197,94,.45);
+}
+
+.td-wrap{
+  width:100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 18px 14px 34px;
+  padding-bottom: calc(34px + env(safe-area-inset-bottom));
+}
+
+.td-header{
+  display:flex;
+  justify-content:space-between;
+  gap: 14px;
+  align-items:flex-end;
+  flex-wrap:wrap;
+  margin-bottom: 12px;
+}
+
+.td-title{
+  margin:0;
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: .35px;
+  text-shadow: 0 0 14px rgba(56,189,248,.55), 0 0 12px rgba(34,197,94,.35);
+}
+
+.td-sub{
+  opacity: .78;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.td-sub code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: rgba(230,237,243,.92);
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(34,197,94,.18);
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+
+.td-asof{
+  opacity: .72;
+  font-size: 12px;
+  color: var(--muted2);
+  text-align:right;
+}
+
+/* Card frame: match your "card" look */
+.td-card{
+  position:relative;
+  margin-top: 16px;
+  background: var(--card);
+  border-radius: 22px;
+  padding: 16px;
+  border: 2px solid rgba(56,189,248,.72);
+  box-shadow: var(--shadowBlue);
+  overflow:hidden;
+}
+
+.td-card::before{
+  content:"";
+  position:absolute;
+  inset: 8px;
+  border-radius: 16px;
+  border: 1.5px solid rgba(34,197,94,.75);
+  pointer-events:none;
+  box-shadow: inset 0 0 10px rgba(34,197,94,.55), 0 0 18px rgba(34,197,94,.35);
+}
+
+.td-h2{
+  position:relative;
+  margin: 2px 0 12px;
+  font-size: 15px;
+  font-weight: 950;
+  letter-spacing: .25px;
+  text-shadow: 0 0 10px rgba(56,189,248,.35), 0 0 10px rgba(34,197,94,.20);
+}
+
+/* Metrics grid */
+.td-grid{
+  position:relative;
+  display:grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.td-metric{
+  position:relative;
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(34,197,94,.18);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.td-metric::after{
+  content:"";
+  position:absolute;
+  inset: 0;
+  border-radius: 18px;
+  pointer-events:none;
+  box-shadow: inset 0 0 12px rgba(34,197,94,.10);
+}
+
+.td-metric-label{
+  color: var(--muted2);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+
+.td-metric-value{
+  margin-top: 6px;
+  font-weight: 950;
+  font-size: 14px;
+  line-height: 1.2;
+  color: rgba(230,237,243,.95);
+  text-shadow: 0 0 10px rgba(56,189,248,.18), 0 0 10px rgba(34,197,94,.12);
+}
+
+.td-note{
+  position:relative;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.td-note code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  color: rgba(230,237,243,.92);
+  background: rgba(255,255,255,.02);
+  border: 1px solid rgba(56,189,248,.18);
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+
+/* Loading / error panels */
+.td-loading,
+.td-error{
+  margin-top: 14px;
+  padding: 12px 12px;
+  border-radius: 16px;
+  background: rgba(255,255,255,.02);
+}
+
+.td-loading{
+  border: 1px solid rgba(56,189,248,.22);
+  box-shadow: 0 0 12px rgba(56,189,248,.18);
+  color: rgba(230,237,243,.88);
+}
+
+.td-error{
+  border: 1px solid rgba(255,107,107,.55);
+  box-shadow: 0 0 12px rgba(255,107,107,.18);
+  color: rgba(255,220,220,.92);
+}
+
+/* Table */
+.td-table-wrap{
+  position:relative;
+  overflow-x:auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 16px;
+  border: 1px solid rgba(34,197,94,.18);
+  background: rgba(255,255,255,.015);
+}
+
+.td-table{
+  width:100%;
+  border-collapse: collapse;
+  min-width: 920px;
+}
+
+.td-table thead th{
+  position:sticky;
+  top:0;
+  background: linear-gradient(180deg, rgba(7,13,20,.95), rgba(5,8,13,.85));
+  backdrop-filter: blur(6px);
+  z-index: 1;
+  font-size: 12px;
+  letter-spacing: .2px;
+  color: rgba(230,237,243,.88);
+  border-bottom: 1px solid rgba(56,189,248,.18);
+}
+
+.td-table th,
+.td-table td{
+  padding: 10px 10px;
+  text-align:left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+.td-table tbody tr:hover{
+  background: rgba(56,189,248,.04);
+}
+
+.td-strong{font-weight: 950}
+.td-muted{color: var(--muted)}
+.td-mono{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.td-small{font-size: 12px}
+
+/* Inline code inside dashboard */
+.td-card code,
+.td-wrap code{
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Responsive */
+@media (min-width: 740px){
+  .td-wrap{padding: 22px 16px 44px}
+  .td-title{font-size: 22px}
+  .td-grid{grid-template-columns: 1fr 1fr}
+  .td-card{padding: 20px}
+}
+
+/* Mobile tweaks */
+@media (max-width: 420px){
+  .td-title{font-size: 17px}
+  .td-metric-value{font-size: 13.5px}
+  .td-card{border-radius: 20px}
+}
