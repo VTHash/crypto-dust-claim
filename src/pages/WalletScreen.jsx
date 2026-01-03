@@ -3,7 +3,7 @@ import React from 'react'
 import { useWallet } from '../contexts/WalletContext'
 import { SUPPORTED_CHAINS } from '../config/walletConnectConfig'
 import './WalletScreen.css'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const metamaskLogo = '/logo/metamask.png'
@@ -77,7 +77,7 @@ const WalletScreen = () => {
     <p>Claim your crypto dust across multiple blockchains.</p>
   </div>
 </section>
-
+ 
       {/* CONNECT / INFO */}
       {!isConnected ? (
         <section>
