@@ -30,6 +30,7 @@
   font-weight: bold;
   margin-bottom: 16px;
   background: none;
+  background-clip: initial;
   -webkit-background-clip: initial;
   -webkit-text-fill-color: #000;
   display: flex;
