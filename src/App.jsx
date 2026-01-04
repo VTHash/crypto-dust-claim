@@ -40,17 +40,38 @@ const DustClaimAddressRoute = () => {
 }
 
 // ===== NEW: MetaMask deep link CTA (top-of-app button) =====
-const METAMASK_DEEPLINK = 'https://metamask.app.link/dapp/dustclaim.eth.limo'
+const METAMASK_DEEPLINK = "https://metamask.app.link/dapp/dustclaim.eth.limo";
+
+function hasMetaMask() {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.ethereum !== "undefined" &&
+    window.ethereum.isMetaMask === true
+  );
+}
+
+function openClaimMetaMaskOnly() {
+  // Desktop with MetaMask extension: stay in the same browser/tab
+  if (hasMetaMask()) {
+    // go to your claim route/page normally
+    window.location.assign("/claim");
+    return;
+  }
+
+  // Otherwise: send to MetaMask in-app browser
+  window.location.href = METAMASK_DEEPLINK;
+}
 
 const DailyDustCta = () => (
   <div className="daily-dust-cta">
-    <a className="daily-dust-btn" href={METAMASK_DEEPLINK}>
-      Claim your daily DUST on Linea
-    </a>
-    <div className="daily-dust-sub">
-      To claim Token use MetaMask only
-    </div>
+  <button className="daily-dust-btn" onClick={openClaimMetaMaskOnly}>
+    Claim your daily DUST on Linea
+  </button>
+
+  <div className="daily-dust-sub">
+    Desktop: MetaMask extension required. Mobile: opens in MetaMask.
   </div>
+</div>
 )
 
 const App = () => {
