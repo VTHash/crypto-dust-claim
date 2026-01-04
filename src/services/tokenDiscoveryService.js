@@ -138,7 +138,7 @@ const TOKENLIST_SOURCES = {
 // Unichain
 130: [
 'https://tokens.uniswap.org',
-'https://raw.githubusercontent.com/unichain/token-list/main/unichain.tokenlist.json',
+'https://raw.githubusercontent.com/Uniswap/token-lists/refs/heads/main/test/schema/bigexample.tokenlist.json',
 ],
 
 // Celo
