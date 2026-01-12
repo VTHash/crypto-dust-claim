@@ -45,19 +45,6 @@ const DAPP_URL = "https://dustclaim.eth.limo";
   // Always open in new tab
   window.open(DAPP_URL, "_blank", "noopener,noreferrer");
  }
- 
-function isMobile() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
-
-
-
-  // 🖥 Desktop → MetaMask extension REQUIRED
-  if (hasMetaMask()) {
-    window.open(DAPP_URL, "_blank", "noopener,noreferrer");
-    return;
-  }
-
 
 const DailyDustCta = () => (
   <div className="daily-dust-cta">
