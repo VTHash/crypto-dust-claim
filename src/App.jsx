@@ -39,29 +39,18 @@ const DustClaimAddressRoute = () => {
   return <DustClaimAddressPage address={targetAddress} />
 }
 
-// ===== NEW: MetaMask deep link CTA (top-of-app button) =====
-// ===== MetaMask-only CTA =====
+
 const DAPP_URL = "https://dustclaim.eth.limo";
-const METAMASK_DEEPLINK = "https://metamask.app.link/dapp/dustclaim.eth.limo";
-
-function hasMetaMask() {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.ethereum !== "undefined" &&
-    window.ethereum.isMetaMask === true
-  );
-}
-
+ function openClaim() {
+  // Always open in new tab
+  window.open(DAPP_URL, "_blank", "noopener,noreferrer");
+ }
+ 
 function isMobile() {
   return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 }
 
-function openClaimMetaMaskOnly() {
-  // 📱 Mobile → force MetaMask in-app browser
-  if (isMobile()) {
-    window.location.href = METAMASK_DEEPLINK;
-    return;
-  }
+
 
   // 🖥 Desktop → MetaMask extension REQUIRED
   if (hasMetaMask()) {
@@ -69,19 +58,16 @@ function openClaimMetaMaskOnly() {
     return;
   }
 
-  // ❌ Desktop without MetaMask
-  alert("MetaMask browser extension is required to claim DUST on desktop.");
-}
 
 const DailyDustCta = () => (
   <div className="daily-dust-cta">
-    <button className="daily-dust-btn" onClick={openClaimMetaMaskOnly}>
+    <button className="daily-dust-btn" onClick={openClaim}>
       Claim your daily DUST on Linea
     </button>
 
     <div className="daily-dust-sub">
-      Desktop: MetaMask extension required. Mobile: opens in MetaMask.
-    </div>
+      Choose any wallet to get started!
+    </div>  
   </div>
 )
 
