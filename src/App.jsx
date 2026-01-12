@@ -53,7 +53,7 @@ const DailyDustCta = () => (
     </button>
 
     <div className="daily-dust-sub">
-      
+      Choose any wallet to get started!
     </div>  
   </div>
 )
