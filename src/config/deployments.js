@@ -1,5 +1,6 @@
 // src/config/deployments.js
 import DUSTCLAIM_V3_ABI from './contracts/dustclaim.common.json'
+import DUSTCLAIM_V3_ABI from './contracts/dustclaim.linea.json'
 import { SUPPORTED_CHAINS } from './walletConnectConfig'
 
 // 0x Swap API hosts per chain (19 supported chains)
@@ -84,7 +85,7 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
     weth: '0xdeaddeaddeaddeaddeaddeaddeaddeaddead0000',
   },
   59144: {
-    dustClaimV3: '0xBB45cc85B5e6505Ad1C8403227Da68ba0F13357B',
+    dustClaimV3: '0x3Cef985383FE054Bb43152480484fA28fC942A06',
     weth: '0xE5D7C2a44FfDDf6b295A15c148167daaAf5Cf34F',
   },
   80094: {
