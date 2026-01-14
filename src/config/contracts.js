@@ -7,7 +7,7 @@ import lineaAbi from  './contracts/dustclaim.linea.json'
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
 export const DUSTCLAIM_ABI = commonAbi
-
+export const DUSTCLAIM_ABI = lineaAbi
 // ---- Addresses per chain (public – fine to keep in repo) ----
 export const DUSTCLAIM_ADDRESS = {
   1: "0xa87B722979D3c2D381A225E224427498455d535e", // Ethereum ✅
