@@ -3,7 +3,7 @@ import axios from 'axios'
 import { ethers } from 'ethers'
 import walletService from './walletService'
 import { encodeFunctionData, erc20Abi } from 'viem'
-import { DEPLOYMENTS, DUSTCLAIM_V3_ABI } from '../config/deployments'
+import { DEPLOYMENTS } from '../config/deployments'
 
 /**
  * MetaMask + 0x + Multichain Execution (UX-safe)
@@ -665,6 +665,11 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
     if (!planChainId) throw new Error('Missing chainId in prepared context')
     if (!isNonZeroAddress(dustClaimV3)) throw new Error('Missing DustClaimV3 in prepared context')
 
+    // IMPORTANT: ABI must be selected per-chain (Linea uses upgraded contract ABI)
+    const dep = DEPLOYMENTS?.[planChainId]
+    const dustClaimAbi = dep?.abi
+    if (!dustClaimAbi) throw new Error(`Missing DustClaimV3 ABI for chain ${planChainId}`)
+
     const currentChainHex = await walletService.getChainId?.()
     const currentChainId = normalizeChainId(currentChainHex)
     if (currentChainId !== planChainId) {
@@ -743,7 +748,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
 
       try {
         const claimData = encodeFunctionData({
-          abi: DUSTCLAIM_V3_ABI,
+          abi: dustClaimAbi,
           functionName: 'claimDustUsingAggregator',
           args: [tokenIn, amountWei, routerSpender, swapCalldata]
         })
@@ -753,7 +758,7 @@ export async function executeSwapsWithFlow(preparedCtx, opts = {}) {
         try {
           const signer = await walletService.getSigner?.()
           if (signer) {
-            const contract = new ethers.Contract(dustClaimV3, DUSTCLAIM_V3_ABI, signer)
+            const contract = new ethers.Contract(dustClaimV3, dustClaimAbi, signer)
             const est = await contract.claimDustUsingAggregator.estimateGas(
               tokenIn,
               amountWei,
