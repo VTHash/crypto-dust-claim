@@ -2,6 +2,7 @@
 // Keep these files in: src/config/contracts/
 import commonAbi from './contracts/dustclaim.common.json'
 import ethAbi from './contracts/dustclaim.eth.json'
+import lineaAbi from  './contracts/dustclaim.linea.json'
 
 
 // ---- Back-compat: expose the default ABI the rest of the app expects ----
