@@ -67,6 +67,6 @@ export function getContractConfig(chainId) {
   const id = Number(chainId)
   return {
     address: DUSTCLAIM_ADDRESS[id] || null,
-    abi: commonAbi
+    abi: commonAbi, lineaAbi
   }
 }
