@@ -1,7 +1,22 @@
 // src/config/deployments.js
-import DUSTCLAIM_V3_ABI from './contracts/dustclaim.common.json'
-import DUSTCLAIM_V3_ABI from './contracts/dustclaim.linea.json'
+
+import commonAbi from './contracts/dustclaim.common.json'
+import lineaAbi from './contracts/dustclaim.linea.json'
 import { SUPPORTED_CHAINS } from './walletConnectConfig'
+
+// ---- ABI selection ----
+// Default ABI for most chains
+export const DUSTCLAIM_V3_ABI = commonAbi
+
+// Linea uses the new contract (with renounceOwnership)
+const ABI_OVERRIDES = {
+  59144: lineaAbi,
+}
+
+export const getDustClaimAbi = (chainId) => {
+  const id = Number(chainId)
+  return ABI_OVERRIDES[id] || commonAbi
+}
 
 // 0x Swap API hosts per chain (19 supported chains)
 export const ZEROX_HOST_BY_CHAIN = {
@@ -29,7 +44,7 @@ export const ZEROX_HOST_BY_CHAIN = {
   57073: 'https://ink.api.0x.org'
 }
 
-//  DustClaimV3 contract + wrapped native per chain.
+// DustClaimV3 contract + wrapped native per chain.
 // For chains not supported by 0x, keep zeroXHost=null automatically (below).
 export const DUSTCLAIM_V3_BY_CHAIN = {
   1: {
@@ -122,9 +137,6 @@ export const DUSTCLAIM_V3_BY_CHAIN = {
   }
 }
 
-// 0x ABI (common for all chains)
-export { DUSTCLAIM_V3_ABI }
-
 // One unified deployments object (what the app should read)
 export const DEPLOYMENTS = Object.keys(SUPPORTED_CHAINS).reduce((acc, rawId) => {
   const chainId = Number(rawId)
@@ -144,6 +156,9 @@ export const DEPLOYMENTS = Object.keys(SUPPORTED_CHAINS).reduce((acc, rawId) => 
     // 0x-only routing for now
     zeroXHost,
     directSwap0x: !!zeroXHost,
+
+    // ABI (Linea override if needed)
+    abi: getDustClaimAbi(chainId),
 
     // keep these null so old code won't accidentally use them
     oneInchRouter: null,
