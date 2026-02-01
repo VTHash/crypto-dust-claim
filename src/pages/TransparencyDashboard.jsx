@@ -41,7 +41,18 @@ const LYNEX_POOL = {
     "https://app.lynex.fi/analytics/pairs/0x45c19a6095aa8be674b51cca5d60bd28efa242c7",
 };
 
-const POOLS = [IZUMI_POOL, LYNEX_POOL];
+// ETHEREX pool
+const ETHEREX_POOL = {
+  key: "etherex",
+  name: "WETH / DUST",
+  address: "0x738b0486527eaa4443ffd5d9ca47a870387d92d9",
+  dex: "Etherex",
+  feeTier: "2%", // approximate; update if wrong
+  analyticsUrl:
+    "https://www.etherex.finance/liquidity/0x738b0486527eaa4443ffd5d9ca47a870387d92d9",
+};
+
+const POOLS = [IZUMI_POOL, LYNEX_POOL, ETHEREX_POOL];
 
 const ZERO = "0x0000000000000000000000000000000000000000";
 
