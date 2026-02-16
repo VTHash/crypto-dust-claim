@@ -267,33 +267,63 @@ const WalletScreen = () => {
         
 
           <div className="footer-links">
-            <a
-              href="https://github.com/VTHash/crypto-dust-claim"
-              target="_blank"
-              rel="noopener noreferrer"
-              title="View Source on GitHub and Give a star"
-            >
-              
-              <img
-                src="/logo/github-mark.png"
-                alt="GitHub"
-                className="footer-icon"
-              />
-            </a><span>👈✮⋆˙Rate/Like & Follow 👉 </span>
+  <a
+    href="https://github.com/VTHash/crypto-dust-claim"
+    target="_blank"
+    rel="noopener noreferrer"
+    title="View Source on GitHub and Give a star"
+  >
+    <img
+      src="/logo/github-mark.png"
+      alt="GitHub"
+      className="footer-icon"
+    />
+  </a>
 
-                    <a
-                    href="https://x.com/DustClaimxyz"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Follow us on X (Twitter)"
-                    >
-                     <img
-                     src="/logo/X.png"
-                     alt="Twitter"
-                     className="footer-icon"
-                    />
-                    </a>
-                    </div>  
+  <span>👈✮⋆˙Rate/Like & Follow 👉 </span>
+
+  {/* X (Twitter) */}
+  <a
+    href="https://x.com/DustClaimxyz"
+    target="_blank"
+    rel="noopener noreferrer"
+    title="Follow us on X (Twitter)"
+  >
+    <img
+      src="/logo/X.png"
+      alt="X (Twitter)"
+      className="footer-icon"
+    />
+  </a>
+
+  {/* Telegram */}
+  <a
+    href="https://t.me/DustClaimOfficial"
+    target="_blank"
+    rel="noopener noreferrer"
+    title="Join our Telegram Community"
+  >
+    <img
+      src="/logo/telegram.png"
+      alt="Telegram"
+      className="footer-icon"
+    />
+  </a>
+
+  {/* Discord */}
+  <a
+    href="https://discord.gg/GS2R7kbU8M"
+    target="_blank"
+    rel="noopener noreferrer"
+    title="Join our Discord Server"
+  >
+    <img
+      src="/logo/discord.png"
+      alt="Discord"
+      className="footer-icon"
+    />
+  </a>
+</div>
 <div className="footer-legal">
   <a href="/privacy" className="privacy-link">Privacy Policy</a> |
   <a href="/terms" className="privacy-link">Terms of Service</a> |
